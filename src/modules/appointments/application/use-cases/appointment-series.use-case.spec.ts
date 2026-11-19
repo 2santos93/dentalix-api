@@ -197,6 +197,7 @@ describe('AppointmentSeriesUseCase (DX-562)', () => {
       failuresFor?: (start: Date) => { step: string; error: Error }[];
       create?: jest.Mock;
       notice?: unknown;
+      noticeOutcome?: 'QUEUED' | 'QUOTA' | null;
     } = {},
   ) {
     const createUseCase = {
@@ -211,12 +212,17 @@ describe('AppointmentSeriesUseCase (DX-562)', () => {
     const seriesRepo = {
       create:
         over.create ??
-        jest.fn().mockResolvedValue({ seriesId: 's1', appointments: [] }),
+        jest.fn().mockResolvedValue({
+          seriesId: 's1',
+          appointments: [{ id: 'a1' }],
+          notice: over.noticeOutcome ?? null,
+        }),
       noticeContext: jest.fn().mockResolvedValue(over.notice ?? null),
       findById: jest.fn(),
       applyChanges: jest.fn(),
     };
     const email = { prepareInTx: jest.fn() };
+    const outbound = { logRecorded: jest.fn() };
     const openings = {
       execute: jest.fn().mockResolvedValue({ openings: [] }),
     };
@@ -239,8 +245,9 @@ describe('AppointmentSeriesUseCase (DX-562)', () => {
       locations as never,
       email as never,
       tenantContext as never,
+      outbound as never,
     );
-    return { useCase, createUseCase, seriesRepo, email, openings };
+    return { useCase, createUseCase, seriesRepo, email, openings, outbound };
   }
 
   const occurrences = [
@@ -431,7 +438,10 @@ describe('AppointmentSeriesUseCase (DX-562)', () => {
   });
 
   it('el aviso: un email con todas las fechas a quien recibe los recordatorios', async () => {
-    const { useCase, email, seriesRepo } = build({ notice: notice() });
+    const { useCase, email, seriesRepo, outbound } = build({
+      notice: notice(),
+      noticeOutcome: 'QUEUED',
+    });
     const prepared = { insert: jest.fn(), kick: jest.fn() };
     email.prepareInTx.mockResolvedValue(prepared);
     const result = await useCase.createSeries(
@@ -450,6 +460,9 @@ describe('AppointmentSeriesUseCase (DX-562)', () => {
         to: 'ana@example.com',
         template: 'appointment-series',
         locale: 'es',
+        // El tope se mira en la transacción; el email enlaza su registro.
+        enforceQuota: true,
+        referenceId: expect.stringMatching(/^[0-9a-f-]{36}$/) as string,
         vars: expect.objectContaining({
           recipientFirstName: 'Ana',
           patientFirstName: null,
@@ -463,31 +476,45 @@ describe('AppointmentSeriesUseCase (DX-562)', () => {
         }) as object,
       }),
     );
+    const referenceId = (
+      email.prepareInTx.mock.calls[0] as [{ referenceId: string }]
+    )[0].referenceId;
     expect(seriesRepo.create).toHaveBeenCalledWith(
-      expect.objectContaining({ email: prepared }),
+      expect.objectContaining({
+        email: expect.objectContaining({
+          outbound: {
+            id: referenceId,
+            recipient: 'ana@example.com',
+            recipientKind: 'PATIENT',
+            language: 'es',
+            languageFallbackFrom: null,
+          },
+        }) as object,
+      }),
     );
     // Tras el COMMIT, no antes.
     expect(prepared.kick).toHaveBeenCalledTimes(1);
-    expect(result.patientNotified).toBe(true);
+    expect(outbound.logRecorded).toHaveBeenCalledWith(
+      referenceId,
+      't1',
+      expect.objectContaining({
+        template: 'appointment-series',
+        appointmentId: 'a1',
+      }),
+    );
+    expect(result).toMatchObject({
+      patientNotified: true,
+      notifyReason: null,
+    });
   });
 
-  it.each([
-    ['dado de baja', { reminderOptOutAt: new Date() }],
-    ['canal WhatsApp', { contactChannel: 'WHATSAPP' }],
-    ['canal ninguno', { contactChannel: 'NONE' }],
-    ['sin email', { email: null }],
-  ])('sin aviso si el paciente está %s (DX-128)', async (_label, contact) => {
-    const base = notice();
-    const { useCase, email } = build({
-      notice: {
-        ...base,
-        contact: { ...base.contact, ...contact },
-        recipient: {
-          ...base.recipient,
-          email: (contact as { email?: null }).email ?? base.recipient.email,
-        },
-      },
+  it('el tope de emails lleno (visto en la transacción): la serie se crea, sin aviso, `notifyReason: QUOTA`', async () => {
+    const { useCase, email, outbound } = build({
+      notice: notice(),
+      noticeOutcome: 'QUOTA',
     });
+    const prepared = { insert: jest.fn(), kick: jest.fn() };
+    email.prepareInTx.mockResolvedValue(prepared);
     const result = await useCase.createSeries(
       {
         patientId: 'p1',
@@ -498,9 +525,67 @@ describe('AppointmentSeriesUseCase (DX-562)', () => {
       },
       ctx,
     );
-    expect(email.prepareInTx).not.toHaveBeenCalled();
-    expect(result.patientNotified).toBe(false);
+    expect(result).toMatchObject({
+      seriesId: 's1',
+      patientNotified: false,
+      notifyReason: 'QUOTA',
+    });
+    expect(prepared.kick).not.toHaveBeenCalled();
+    expect(outbound.logRecorded).not.toHaveBeenCalled();
   });
+
+  it('`notifyPatient: false`: DISABLED, sin preparar nada', async () => {
+    const { useCase, email } = build({ notice: notice() });
+    const result = await useCase.createSeries(
+      {
+        patientId: 'p1',
+        start: context.input.start,
+        intervalWeeks: 1,
+        occurrences,
+        notifyPatient: false,
+      },
+      ctx,
+    );
+    expect(email.prepareInTx).not.toHaveBeenCalled();
+    expect(result.notifyReason).toBe('DISABLED');
+  });
+
+  it.each([
+    ['dado de baja', { reminderOptOutAt: new Date() }, 'OPTED_OUT'],
+    ['canal WhatsApp', { contactChannel: 'WHATSAPP' }, 'CHANNEL_WHATSAPP'],
+    ['canal ninguno', { contactChannel: 'NONE' }, 'CHANNEL_NONE'],
+    ['sin email', { email: null }, 'NO_EMAIL'],
+  ])(
+    'sin aviso si el paciente está %s (DX-128)',
+    async (_label, contact, reason) => {
+      const base = notice();
+      const { useCase, email } = build({
+        notice: {
+          ...base,
+          contact: { ...base.contact, ...contact },
+          recipient: {
+            ...base.recipient,
+            email: (contact as { email?: null }).email ?? base.recipient.email,
+          },
+        },
+      });
+      const result = await useCase.createSeries(
+        {
+          patientId: 'p1',
+          start: context.input.start,
+          intervalWeeks: 1,
+          occurrences,
+          notifyPatient: true,
+        },
+        ctx,
+      );
+      expect(email.prepareInTx).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        patientNotified: false,
+        notifyReason: reason,
+      });
+    },
+  );
 
   it('un fallo al preparar el aviso no impide crear la serie', async () => {
     const { useCase, email, seriesRepo } = build({ notice: notice() });
@@ -518,7 +603,10 @@ describe('AppointmentSeriesUseCase (DX-562)', () => {
     expect(seriesRepo.create).toHaveBeenCalledWith(
       expect.objectContaining({ email: null }),
     );
-    expect(result.patientNotified).toBe(false);
+    expect(result).toMatchObject({
+      patientNotified: false,
+      notifyReason: 'UNAVAILABLE',
+    });
   });
 
   it('vista previa: fechas generadas con sus razones; recurrencia inválida = 400 en español', async () => {

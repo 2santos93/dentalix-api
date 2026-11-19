@@ -15,6 +15,8 @@ import {
   loadTenantMajorityAge,
 } from '../../../patients/infrastructure/notices/notice-context';
 import { requireLocationTimeZone } from '../../../../shared/locations/location-time-zone';
+import { EmailQuotaExceededError } from '../../../notifications/email/domain/email-quota-exceeded.error';
+import { OutboundMessages } from '../../../notifications/outbound/application/outbound-messages.service';
 import type { Appointment } from '../../domain/entities/appointment.entity';
 import {
   SeriesSlotWriteError,
@@ -23,6 +25,7 @@ import {
   type ApplySeriesChangesInput,
   type CreateSeriesRepoInput,
   type SeriesNoticeContext,
+  type SeriesNoticeOutcome,
 } from '../../domain/ports/appointment-series-repository.port';
 import {
   INCLUDE_PATIENT_NAME,
@@ -63,6 +66,7 @@ export class PrismaAppointmentSeriesRepository implements AppointmentSeriesRepos
     private readonly prisma: PrismaService,
     private readonly tenantContext: TenantContextService,
     private readonly appointments: PrismaAppointmentRepository,
+    private readonly outbound: OutboundMessages,
   ) {}
 
   private requireTenantId(): string {
@@ -112,9 +116,11 @@ export class PrismaAppointmentSeriesRepository implements AppointmentSeriesRepos
     }
   }
 
-  create(
-    input: CreateSeriesRepoInput,
-  ): Promise<{ seriesId: string; appointments: Appointment[] }> {
+  create(input: CreateSeriesRepoInput): Promise<{
+    seriesId: string;
+    appointments: Appointment[];
+    notice: SeriesNoticeOutcome;
+  }> {
     const tenantId = this.requireTenantId();
     return this.retryOnDeadlock(() =>
       this.prisma.runWithTenant(
@@ -212,17 +218,56 @@ export class PrismaAppointmentSeriesRepository implements AppointmentSeriesRepos
               },
             },
           });
-          if (input.email) await input.email.insert(tx);
+          const notice = input.email
+            ? await this.enqueueNotice(tx, input.email, ids[0])
+            : null;
           const rows = await tx.appointment.findMany({
             where: { seriesId: series.id },
             orderBy: { seriesIndex: 'asc' },
             include: INCLUDE_PATIENT_NAME,
           });
-          return { seriesId: series.id, appointments: rows.map(mapToEntity) };
+          return {
+            seriesId: series.id,
+            appointments: rows.map(mapToEntity),
+            notice,
+          };
         },
         { timeout: SERIES_TX_TIMEOUT_MS },
       ),
     );
+  }
+
+  /**
+   * El aviso de la serie dentro de su transacción. El tope de emails lo
+   * comprueba el insert bajo su candado (DX-149-bis): el guarda lanza en JS
+   * DESPUÉS de leer el recuento y ANTES de insertar, sin ningún error de SQL,
+   * así que la transacción sigue sana y la serie se crea sin aviso. Encolado:
+   * su registro en `outbound_messages`, QUEUED, con el id que el email lleva
+   * en `referenceId`.
+   */
+  private async enqueueNotice(
+    tx: Prisma.TransactionClient,
+    email: NonNullable<CreateSeriesRepoInput['email']>,
+    firstAppointmentId: string,
+  ): Promise<SeriesNoticeOutcome> {
+    try {
+      await email.insert(tx);
+    } catch (error) {
+      if (error instanceof EmailQuotaExceededError) return 'QUOTA';
+      throw error;
+    }
+    await this.outbound.recordInTx(tx, {
+      id: email.outbound.id,
+      status: 'QUEUED',
+      channel: 'EMAIL',
+      template: 'appointment-series',
+      recipient: email.outbound.recipient,
+      recipientKind: email.outbound.recipientKind,
+      appointmentId: firstAppointmentId,
+      language: email.outbound.language,
+      languageFallbackFrom: email.outbound.languageFallbackFrom,
+    });
+    return 'QUEUED';
   }
 
   applyChanges(input: ApplySeriesChangesInput): Promise<Appointment[]> {

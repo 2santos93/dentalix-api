@@ -38,11 +38,29 @@ export interface CreateSeriesRepoInput {
   /** Las citas, en orden de fecha: su posición en la serie es la de aquí (1..n). */
   slots: { start: Date; end: Date }[];
   audit: AuditRequestContext;
-  /** El aviso al paciente, insertado en la MISMA transacción (DX-463). */
-  email: {
-    insert(tx: Prisma.TransactionClient): Promise<{ id: string }>;
-  } | null;
+  /**
+   * El aviso al paciente, insertado en la MISMA transacción (DX-463) con el
+   * tope de emails comprobado ahí, bajo su candado: si no cabe
+   * (`EmailQuotaExceededError`), la serie se crea igual y sin aviso. Si se
+   * encola, su registro en `outbound_messages` (id = `referenceId` del
+   * email, QUEUED, con la primera cita) va en la misma transacción.
+   */
+  email: SeriesNoticeWrite | null;
 }
+
+export interface SeriesNoticeWrite {
+  insert(tx: Prisma.TransactionClient): Promise<{ id: string }>;
+  outbound: {
+    id: string;
+    recipient: string;
+    recipientKind: 'PATIENT' | 'RESPONSIBLE';
+    language: string;
+    languageFallbackFrom: string | null;
+  };
+}
+
+/** Qué pasó con el aviso dentro de la transacción. */
+export type SeriesNoticeOutcome = 'QUEUED' | 'QUOTA' | null;
 
 /**
  * DX-562: una cita de la serie no se pudo escribir dentro de la transacción
@@ -111,9 +129,11 @@ export interface AppointmentSeriesRepository {
    * escribir: `SeriesSlotWriteError` y no queda nada. Reintenta una vez un
    * interbloqueo (40P01).
    */
-  create(
-    input: CreateSeriesRepoInput,
-  ): Promise<{ seriesId: string; appointments: Appointment[] }>;
+  create(input: CreateSeriesRepoInput): Promise<{
+    seriesId: string;
+    appointments: Appointment[];
+    notice: SeriesNoticeOutcome;
+  }>;
   /**
    * Cancela o mueve citas de la serie en UNA transacción (`updateInTx` por
    * cita) con su único `audit_event`. Una que no se puede escribir:

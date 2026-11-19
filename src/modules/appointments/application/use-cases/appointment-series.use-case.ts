@@ -20,10 +20,12 @@ import { requireLocationFormat } from '../../../../shared/locations/location-reg
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { civilDateIn } from '../../../../shared/time/civil-day';
 import { resolveCatalogLanguage } from '../../../../shared/i18n/patient-language';
+import { randomUUID } from 'node:crypto';
 import {
   EmailOutbox,
   type PreparedEmail,
 } from '../../../notifications/email/application/email-outbox.service';
+import { OutboundMessages } from '../../../notifications/outbound/application/outbound-messages.service';
 import {
   DEFAULT_EMAIL_LOCALE,
   EMAIL_LOCALES,
@@ -38,6 +40,7 @@ import {
   type AppointmentSeriesRepository,
   type AppointmentSeriesSnapshot,
   type SeriesNoticeContext,
+  type SeriesNoticeWrite,
 } from '../../domain/ports/appointment-series-repository.port';
 import {
   SeriesRecurrenceError,
@@ -127,12 +130,39 @@ export interface SeriesPreview {
   occurrences: SeriesPreviewOccurrence[];
 }
 
+/**
+ * DX-562: por qué no se encoló el aviso de la serie. `DISABLED`: se pidió
+ * sin aviso; `OPTED_OUT`, `CHANNEL_NONE`, `CHANNEL_WHATSAPP`, `NO_EMAIL`: la
+ * regla de los envíos automáticos (DX-128, DX-203); `QUOTA`: el tope de
+ * emails (de la clínica o del destinatario) no lo deja, la serie se crea
+ * igual; `UNAVAILABLE`: no se pudo preparar (p. ej. la sede sin formato).
+ */
+export const SERIES_NOTIFY_SKIP_REASONS = [
+  'DISABLED',
+  'OPTED_OUT',
+  'CHANNEL_NONE',
+  'CHANNEL_WHATSAPP',
+  'NO_EMAIL',
+  'QUOTA',
+  'UNAVAILABLE',
+] as const;
+export type SeriesNotifySkipReason =
+  (typeof SERIES_NOTIFY_SKIP_REASONS)[number];
+
 export interface CreatedSeries {
   seriesId: string;
   intervalWeeks: number;
   appointments: Appointment[];
   /** Si se encoló el aviso único al paciente. */
   patientNotified: boolean;
+  /** Si no se encoló, por qué; `null` si se encoló. */
+  notifyReason: SeriesNotifySkipReason | null;
+}
+
+/** El aviso listo para la transacción, con lo que hay que hacer tras ella. */
+interface PreparedNotice {
+  write: SeriesNoticeWrite;
+  prepared: PreparedEmail;
 }
 
 export interface SeriesChangeResult {
@@ -182,6 +212,7 @@ export class AppointmentSeriesUseCase {
     private readonly locations: LocationRepository,
     private readonly email: EmailOutbox,
     private readonly tenantContext: TenantContextService,
+    private readonly outbound: OutboundMessages,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -245,10 +276,11 @@ export class AppointmentSeriesUseCase {
     );
     if (conflicts.length > 0) throw seriesConflict(conflicts);
 
-    const email = input.notifyPatient
+    const notice: PreparedNotice | SeriesNotifySkipReason = input.notifyPatient
       ? await this.prepareNotice(context, slots)
-      : null;
-    let created: { seriesId: string; appointments: Appointment[] };
+      : 'DISABLED';
+    const prepared = typeof notice === 'string' ? null : notice;
+    let created: Awaited<ReturnType<AppointmentSeriesRepository['create']>>;
     try {
       created = await this.series.create({
         intervalWeeks: input.intervalWeeks,
@@ -263,7 +295,7 @@ export class AppointmentSeriesUseCase {
         actorRole: ctx.actor.role,
         slots,
         audit: ctx,
-        email,
+        email: prepared?.write ?? null,
       });
     } catch (error) {
       throw await this.writeConflict(error, (at) =>
@@ -277,12 +309,32 @@ export class AppointmentSeriesUseCase {
           : null,
       );
     }
-    email?.kick();
+    // Tras el COMMIT: el log y el despachador, solo si quedó encolado.
+    if (prepared && created.notice === 'QUEUED') {
+      prepared.prepared.kick();
+      this.outbound.logRecorded(prepared.write.outbound.id, ctx.tenantId, {
+        channel: 'EMAIL',
+        template: 'appointment-series',
+        recipient: prepared.write.outbound.recipient,
+        recipientKind: prepared.write.outbound.recipientKind,
+        appointmentId: created.appointments[0]?.id,
+        language: prepared.write.outbound.language,
+        languageFallbackFrom: prepared.write.outbound.languageFallbackFrom,
+      });
+    }
+    const notifyReason: SeriesNotifySkipReason | null =
+      typeof notice === 'string'
+        ? notice
+        : created.notice === 'QUEUED'
+          ? null
+          : 'QUOTA';
+    if (notifyReason === 'QUOTA') this.skipNotice('QUOTA');
     return {
       seriesId: created.seriesId,
       intervalWeeks: input.intervalWeeks,
       appointments: created.appointments,
-      patientNotified: email !== null,
+      patientNotified: notifyReason === null,
+      notifyReason,
     };
   }
 
@@ -701,21 +753,22 @@ export class AppointmentSeriesUseCase {
    * recordatorios (DX-203: un menor o sin email → su responsable), solo si
    * su canal es EMAIL, no se dio de baja (DX-128) y hay a quién mandarlo.
    * Cualquier fallo al prepararlo deja la serie sin aviso (queda en el log,
-   * sin datos personales): nunca impide crearla.
+   * sin datos personales): nunca impide crearla. El tope de emails se mira
+   * en la transacción (`enforceQuota`): si no cabe, tampoco la impide.
    */
   private async prepareNotice(
     context: SeriesSlotContext,
     slots: readonly { start: Date; end: Date }[],
-  ): Promise<PreparedEmail | null> {
+  ): Promise<PreparedNotice | SeriesNotifySkipReason> {
     const tenantId = this.tenantContext.getTenantId();
-    if (!tenantId) return null;
+    if (!tenantId) return 'UNAVAILABLE';
     try {
       const notice = await this.series.noticeContext({
         patientId: context.input.patientId,
         locationId: context.input.locationId,
         providerId: context.input.providerId,
       });
-      if (!notice) return this.skipNotice('NO_CONTEXT');
+      if (!notice) return this.skipNotice('UNAVAILABLE');
       const recipient = this.recipientOf(notice);
       const blocker = emailReminderBlocker({
         ...notice.contact,
@@ -729,16 +782,21 @@ export class AppointmentSeriesUseCase {
         locale: notice.locationLocale,
         hourCycle: notice.locationHourCycle,
       });
-      const { language } = resolveCatalogLanguage(
+      const { language, fallbackFrom } = resolveCatalogLanguage(
         notice.preferredLanguage,
         EMAIL_LOCALES,
         DEFAULT_EMAIL_LOCALE,
       );
-      return await this.email.prepareInTx({
+      // El registro del envío y el email se enlazan por este id (como el
+      // recordatorio: `referenceId` = el de `outbound_messages`).
+      const outboundId = randomUUID();
+      const prepared = await this.email.prepareInTx({
         tenantId,
         to: recipient.email,
         template: 'appointment-series',
         locale: language,
+        referenceId: outboundId,
+        enforceQuota: true,
         vars: {
           recipientFirstName: recipient.name,
           patientFirstName:
@@ -753,12 +811,26 @@ export class AppointmentSeriesUseCase {
           ),
         },
       });
+      return {
+        prepared,
+        write: {
+          insert: (tx) => prepared.insert(tx),
+          outbound: {
+            id: outboundId,
+            recipient: recipient.email,
+            recipientKind:
+              recipient.kind === 'RESPONSIBLE' ? 'RESPONSIBLE' : 'PATIENT',
+            language,
+            languageFallbackFrom: fallbackFrom,
+          },
+        },
+      };
     } catch (error) {
       this.logger.warn({
         event: 'appointment_series.notice_failed',
         error: (error as Error).name,
       });
-      return null;
+      return 'UNAVAILABLE';
     }
   }
 
@@ -774,9 +846,9 @@ export class AppointmentSeriesUseCase {
     });
   }
 
-  private skipNotice(reason: string): null {
+  private skipNotice<R extends SeriesNotifySkipReason>(reason: R): R {
     this.logger.log({ event: 'appointment_series.notice_skipped', reason });
-    return null;
+    return reason;
   }
 
   private auditBase(ctx: AuditRequestContext, first: Appointment) {

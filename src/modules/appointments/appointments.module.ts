@@ -40,6 +40,7 @@ import { MedicalHistoryModule } from '../medical-history/medical-history.module'
 import { ChairsModule } from '../chairs/chairs.module';
 import { ChairAssignmentService } from './application/chair-assignment';
 import { EmailModule } from '../notifications/email/email.module';
+import { OutboundMessagesModule } from '../notifications/outbound/outbound-messages.module';
 import { AppointmentSeriesController } from './presentation/appointment-series.controller';
 import { AppointmentSeriesUseCase } from './application/use-cases/appointment-series.use-case';
 import { APPOINTMENT_SERIES_REPOSITORY } from './domain/ports/appointment-series-repository.port';
@@ -74,8 +75,9 @@ import { PrismaAppointmentSeriesRepository } from './infrastructure/repositories
     ChairsModule,
     // DX-285: «Ortodoncia: saldo vencido» de las tarjetas y de «En clínica».
     OrthodonticsModule,
-    // DX-562: el aviso único de una serie de citas.
+    // DX-562: el aviso único de una serie de citas y su registro de envío.
     EmailModule,
+    OutboundMessagesModule,
   ],
   // DX-562: el de las series antes que el de citas (rutas más concretas).
   controllers: [

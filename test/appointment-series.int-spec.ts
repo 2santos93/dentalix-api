@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   AppointmentStatus,
   CancellationReasonCode,
@@ -16,6 +16,11 @@ import {
 } from '../src/modules/appointments/domain/ports/appointment-series-repository.port';
 import { overlapExclusionScope } from '../src/modules/appointments/application/appointment-overlap-error';
 import { PrismaReminderRepository } from '../src/modules/reminders/infrastructure/prisma-reminder.repository';
+import { OutboundMessages } from '../src/modules/notifications/outbound/application/outbound-messages.service';
+import { PrismaEmailOutboxRepository } from '../src/modules/notifications/email/infrastructure/repositories/prisma-email-outbox.repository';
+import { EmailQuotaExceededError } from '../src/modules/notifications/email/domain/email-quota-exceeded.error';
+import type { OutboxQuotaGuard } from '../src/modules/notifications/email/domain/ports/email-outbox-repository.port';
+import type { SeriesNoticeWrite } from '../src/modules/appointments/domain/ports/appointment-series-repository.port';
 import type { AuditRequestContext } from '../src/modules/audit/domain/audit-request-context';
 import {
   REGIONAL_CARACAS_FIXTURE,
@@ -70,7 +75,41 @@ describe('DX-562 · citas en serie en la BD (int)', () => {
     prisma,
     tenantContext,
     appointments,
+    new OutboundMessages(prisma),
   );
+  const outbox = new PrismaEmailOutboxRepository(prisma);
+
+  /**
+   * El aviso por el insert REAL de email_outbox: candado y recuento del tope
+   * en la transacción de la serie y el guarda que decide (como EmailOutbox
+   * con `enforceQuota`).
+   */
+  const notice = (c: Clinic, guard: OutboxQuotaGuard): SeriesNoticeWrite => {
+    const outboundId = randomUUID();
+    return {
+      insert: (tx) =>
+        outbox.insertInTx(
+          tx,
+          {
+            tenantId: c.tenantId,
+            template: 'appointment-series',
+            toHash: createHash('sha256').update(outboundId).digest('hex'),
+            toMasked: 'a***@example.com',
+            referenceId: outboundId,
+            payload: Buffer.from('cifrado'),
+          },
+          guard,
+          'recipient-and-tenant',
+        ),
+      outbound: {
+        id: outboundId,
+        recipient: 'ana@example.com',
+        recipientKind: 'PATIENT',
+        language: 'es',
+        languageFallbackFrom: null,
+      },
+    };
+  };
   let a: Clinic;
   let b: Clinic;
 
@@ -216,24 +255,34 @@ describe('DX-562 · citas en serie en la BD (int)', () => {
     expect(rls).toEqual({ enabled: true, forced: true });
   });
 
-  it('crea la serie, sus citas por posición, el evento y el aviso en una transacción', async () => {
-    let inserted = 0;
+  it('crea la serie, sus citas por posición, el evento, el aviso y su registro de envío en una transacción', async () => {
+    let counted = 0;
+    const write = notice(a, () => {
+      counted += 1;
+    });
     const result = await asClinic(a, () =>
-      repo.create(
-        input(a, {
-          email: {
-            insert: (tx) => {
-              inserted += 1;
-              // Dentro de la transacción: ve la serie que aún no se confirmó.
-              return tx.appointmentSeries
-                .count()
-                .then(() => ({ id: randomUUID() }));
-            },
-          },
-        }),
-      ),
+      repo.create(input(a, { email: write })),
     );
-    expect(inserted).toBe(1);
+    expect(result.notice).toBe('QUEUED');
+    expect(counted).toBe(1);
+    const emails = await raw.emailOutbox.findMany({
+      where: { tenantId: a.tenantId, template: 'APPOINTMENT_SERIES' },
+    });
+    expect(emails).toHaveLength(1);
+    expect(emails[0].referenceId).toBe(write.outbound.id);
+    const sent = await raw.outboundMessage.findUniqueOrThrow({
+      where: { id: write.outbound.id },
+    });
+    expect(sent).toMatchObject({
+      tenantId: a.tenantId,
+      channel: 'EMAIL',
+      template: 'appointment-series',
+      status: 'QUEUED',
+      recipientKind: 'PATIENT',
+      appointmentId: result.appointments[0].id,
+      language: 'es',
+    });
+    expect(sent.recipientMasked).not.toContain('ana@example.com');
     expect(result.appointments.map((x) => x.series)).toEqual(
       [1, 2, 3].map((index) => ({ id: result.seriesId, index, total: 3 })),
     );
@@ -256,6 +305,40 @@ describe('DX-562 · citas en serie en la BD (int)', () => {
         intervalWeeks: 1,
       },
     });
+  });
+
+  it('tope de emails lleno (visto en la transacción, bajo su candado): la serie se crea igual, sin email ni registro de envío', async () => {
+    const write = notice(a, () => {
+      throw new EmailQuotaExceededError('La clínica alcanzó el máximo', 3600);
+    });
+    const before = await raw.emailOutbox.count({
+      where: { tenantId: a.tenantId },
+    });
+    const result = await asClinic(a, () =>
+      repo.create(input(a, { slots: [slot(5), slot(6)], email: write })),
+    );
+    expect(result.notice).toBe('QUOTA');
+    expect(result.appointments).toHaveLength(2);
+    expect(
+      await raw.appointmentSeries.count({ where: { id: result.seriesId } }),
+    ).toBe(1);
+    expect(
+      await raw.auditEvent.count({
+        where: {
+          tenantId: a.tenantId,
+          metadata: {
+            path: ['appointmentSeries', 'seriesId'],
+            equals: result.seriesId,
+          },
+        },
+      }),
+    ).toBe(1);
+    expect(
+      await raw.emailOutbox.count({ where: { tenantId: a.tenantId } }),
+    ).toBe(before);
+    expect(
+      await raw.outboundMessage.count({ where: { id: write.outbound.id } }),
+    ).toBe(0);
   });
 
   it('atomicidad: si la 3.ª choca en la EXCLUDE, no queda ni la serie ni ninguna cita', async () => {

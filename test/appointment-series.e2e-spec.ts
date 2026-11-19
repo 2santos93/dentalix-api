@@ -51,6 +51,7 @@ interface CreatedBody {
   intervalWeeks: number;
   appointments: AppointmentBody[];
   patientNotified: boolean;
+  notifyReason: string | null;
 }
 
 interface ConflictBody {
@@ -278,6 +279,7 @@ describe('Citas en serie (e2e, DX-562)', () => {
     created = res.body as CreatedBody;
     expect(created.intervalWeeks).toBe(1);
     expect(created.patientNotified).toBe(true);
+    expect(created.notifyReason).toBeNull();
     expect(created.appointments).toHaveLength(5);
     expect(created.appointments.map((a) => a.series)).toEqual(
       [1, 2, 3, 4, 5].map((index) => ({
@@ -332,11 +334,22 @@ describe('Citas en serie (e2e, DX-562)', () => {
         },
       }),
     ).toBe(1);
-    expect(
-      await raw.emailOutbox.count({
-        where: { tenantId: clinic.tenantId, template: 'APPOINTMENT_SERIES' },
-      }),
-    ).toBe(1);
+    const emails = await raw.emailOutbox.findMany({
+      where: { tenantId: clinic.tenantId, template: 'APPOINTMENT_SERIES' },
+    });
+    expect(emails).toHaveLength(1);
+    // Y su registro de envío (como el recordatorio), enlazado por referenceId.
+    const sent = await raw.outboundMessage.findMany({
+      where: { tenantId: clinic.tenantId, template: 'appointment-series' },
+    });
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({
+      id: emails[0].referenceId,
+      channel: 'EMAIL',
+      status: 'QUEUED',
+      recipientKind: 'PATIENT',
+      appointmentId: created.appointments[0].id,
+    });
     // La cita suelta la lleva al leerla.
     const one = await as(
       api().get(`/api/v1/appointments/${created.appointments[1].id}`),
@@ -403,7 +416,10 @@ describe('Citas en serie (e2e, DX-562)', () => {
         ],
       }),
     ).expect(201);
-    expect((res.body as CreatedBody).patientNotified).toBe(false);
+    expect(res.body as CreatedBody).toMatchObject({
+      patientNotified: false,
+      notifyReason: 'DISABLED',
+    });
     expect(
       await raw.emailOutbox.count({
         where: { tenantId: clinic.tenantId, template: 'APPOINTMENT_SERIES' },

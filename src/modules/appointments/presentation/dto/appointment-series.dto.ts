@@ -33,6 +33,10 @@ import {
   SERIES_MIN_OCCURRENCES,
 } from '../../domain/series-dates';
 import {
+  SERIES_NOTIFY_SKIP_REASONS,
+  type SeriesNotifySkipReason,
+} from '../../application/use-cases/appointment-series.use-case';
+import {
   APPOINTMENT_SERIES_CONFLICT_CODE,
   SERIES_CONFLICT_CODES,
   type SeriesConflictCode,
@@ -123,7 +127,7 @@ export class CreateAppointmentSeriesDto extends AppointmentSeriesBaseDto {
   @ApiPropertyOptional({
     default: true,
     description:
-      'Mandar al paciente UN email con todas las fechas (plantilla `appointment-series`, en su idioma). Va a quien recibe los recordatorios (un menor o sin email: su responsable) y solo si su canal es email y no se dio de baja (DX-128). `false` = sin aviso.',
+      'Mandar al paciente UN email con todas las fechas (plantilla `appointment-series`, en su idioma). Va a quien recibe los recordatorios (un menor o sin email: su responsable) y solo si su canal es email, no se dio de baja (DX-128) y cabe en el tope de emails (si no, la serie se crea igual: `notifyReason: QUOTA`). `false` = sin aviso.',
   })
   @IsOptional()
   @IsBoolean()
@@ -314,6 +318,15 @@ export class CreatedAppointmentSeriesDto {
     description: 'Si se encoló el aviso único al paciente.',
   })
   patientNotified!: boolean;
+
+  @ApiProperty({
+    enum: SERIES_NOTIFY_SKIP_REASONS,
+    enumName: 'SeriesNotifySkipReason',
+    nullable: true,
+    description:
+      'Si no se encoló el aviso, por qué (`null` si se encoló): DISABLED (`notifyPatient: false`); OPTED_OUT, CHANNEL_NONE, CHANNEL_WHATSAPP, NO_EMAIL (la regla de los envíos automáticos, DX-128/DX-203); QUOTA (el tope de emails de la clínica o del destinatario, comprobado en la misma transacción: la serie se crea igual, sin aviso); UNAVAILABLE (no se pudo preparar, p. ej. la sede sin formato regional). Encolado, queda además en el registro de envíos del paciente (`outbound_messages`, con la primera cita).',
+  })
+  notifyReason!: SeriesNotifySkipReason | null;
 }
 
 export class AppointmentSeriesChangeDto {
