@@ -5,7 +5,7 @@
 --   payments."tenderedAmount"   lo que entregó el paciente («Recibido»), en la
 --                       moneda del abono; NULL = cobro sin vuelto (como hasta
 --                       ahora). Solo en efectivo (CHECK payments_tendered_check,
---                       NOT VALID; se valida en 20270118090200). No cambia
+--                       NOT VALID; se valida en 20270120090200). No cambia
 --                       después, y con él tampoco el importe, la moneda ni el
 --                       método (trigger payments_tendered_immutable).
 --   payments."changeRemainder"  la diferencia no devuelta que, confirmada, se
@@ -33,7 +33,7 @@
 --                       VOID y un LATE_PAYMENT por abono, no uno por línea):
 --                       el abono se llega por la línea.
 --   cash_session_adjustments_kind_check  reescrito, NOT VALID (se valida en
---                       20270118090200): las clases de antes con
+--                       20270120090200): las clases de antes con
 --                       "paymentChangeLineId" NULL; CHANGE_LATE resta y
 --                       CHANGE_VOID suma, las dos con línea y sin abono ni
 --                       salida directos.

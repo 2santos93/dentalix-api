@@ -1,5 +1,5 @@
 -- DX-570: dos clases nuevas de ajuste de caja para el vuelto de un abono en
--- efectivo (ver 20270118090100_dx570_payment_change):
+-- efectivo (ver 20270120090100_dx570_payment_change):
 --   CHANGE_LATE  el vuelto de un abono tardío (fecha de un día cuya caja ya
 --                cerró): resta en la caja donde entra su LATE_PAYMENT.
 --   CHANGE_VOID  la anulación, con la caja ya cerrada, de un abono que dio

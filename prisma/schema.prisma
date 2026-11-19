@@ -6480,7 +6480,7 @@ model CashSessionReopening {
 /// el medio del catálogo y su tipo base antiguo (el del arqueo), la moneda, el
 /// importe, la referencia (si el medio la pide), su equivalente en la moneda
 /// del abono y la tasa del día congelada (las 4 columnas juntas; ninguna en la
-/// misma moneda). Trigger en 20270118090100: sin UPDATE ni DELETE; nace con
+/// misma moneda). Trigger en 20270120090100: sin UPDATE ni DELETE; nace con
 /// un abono vivo con «Recibido».
 model PaymentChangeLine {
   id                  String              @id @default(uuid()) @db.Uuid

@@ -1,4 +1,4 @@
--- DX-570: valida los CHECK añadidos NOT VALID en 20270118090100 (en su propio
+-- DX-570: valida los CHECK añadidos NOT VALID en 20270120090100 (en su propio
 -- fichero: VALIDATE toma SHARE UPDATE EXCLUSIVE, no frena las escrituras, y
 -- no debe ir en la transacción del ADD, que retiene ACCESS EXCLUSIVE).
 -- Las filas existentes tienen las columnas nuevas a NULL: pasan siempre.

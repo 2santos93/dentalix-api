@@ -210,7 +210,7 @@ export const EXPENSE_INTEGRITY_MESSAGES = {
 } as const;
 // DX-570: las guardas del vuelto (ERRCODE propios Q3570, Q3571). La API
 // calcula y comprueba antes; esto es la red. Mismo texto que el RAISE de la
-// migración 20270118090100_dx570_payment_change.
+// migración 20270120090100_dx570_payment_change.
 export const CASH_CHANGE_INTEGRITY_MESSAGES = {
   Q3570:
     'Lo recibido no cuadra con lo cobrado más el vuelto. Vuelve a registrar el abono.',
