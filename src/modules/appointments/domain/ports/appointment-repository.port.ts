@@ -6,7 +6,10 @@ import {
   CancellationReasonCode,
   Prisma,
 } from '@prisma/client';
-import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import type {
+  AuditRequestContext,
+  AuditRequestMeta,
+} from '../../../audit/domain/audit-request-context';
 import type { CurrentPolicyRef } from '../../../cancellation-policies/domain/cancellation-policy';
 import {
   Appointment,
@@ -64,6 +67,12 @@ export interface CreateAppointmentRepoInput {
    * (del paciente, de una sede permitida).
    */
   recallContact?: AppointmentRecallContactInput;
+  /**
+   * Revisión DX-465 (ruling 5): la traza de la petición (request id, IP, user
+   * agent) para los eventos que el alta escribe en su transacción (el
+   * «Agendó» del recall, el prospecto). Sin ella, null.
+   */
+  requestMeta?: AuditRequestMeta;
   /**
    * DX-016: trabajo extra en la MISMA transacción que el alta, tras crear la
    * cita (la fila de la reserva online y su auditoría). Si lanza, no se crea

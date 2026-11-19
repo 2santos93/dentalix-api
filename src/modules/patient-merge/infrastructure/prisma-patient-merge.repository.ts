@@ -49,6 +49,7 @@ import type {
   MergeSide,
   PatientMergeRepository,
 } from '../domain/patient-merge-repository.port';
+import { copyPhoneReviewInTx } from '../../recall/infrastructure/recall-phone-review';
 
 type Tx = Prisma.TransactionClient;
 
@@ -459,6 +460,9 @@ export class PrismaPatientMergeRepository implements PatientMergeRepository {
           data: patch as Prisma.PatientUncheckedUpdateInput,
         });
         if (typeof patch.phone === 'string') {
+          // DX-465 (ruling 4): el número del absorbido llega con su marca de
+          // «teléfono por revisar».
+          await copyPhoneReviewInTx(tx, tenantId, absorbedId, keptId);
           await reconcilePatientPhoneE164(
             tx,
             [keptId],

@@ -1,3 +1,4 @@
+import { ConflictException } from '@nestjs/common';
 import type {
   Prisma,
   RecallContactChannel,
@@ -11,10 +12,14 @@ import { flagPhoneReviewInTx } from './recall-phone-review';
  * transacción (D1, código de aplicación, no trigger). Lo usan el contacto
  * suelto, el lote y el cierre al agendar (`recall-from-appointment.ts`).
  *
- * Orden de bloqueo: las filas de `patient_recalls` en orden de id (como
- * `lockExclusionScope` y `recallsFromProcedure`), antes de insertar nada: dos
- * recepcionistas que registran a la vez el mismo recall se serializan y el
- * contador no pierde un intento.
+ * Orden de bloqueo ÚNICO (revisión DX-465, ruling 3): primero los PACIENTES
+ * de esos recalls (por id, FOR NO KEY UPDATE), después los RECALLS (por id,
+ * FOR UPDATE) y solo entonces el resto (el contacto, la marca del teléfono).
+ * Es el orden de la fusión de pacientes y de la oferta de hueco (que bloquean
+ * el paciente antes), así que un intento ya no se cruza con ellas ni con otro
+ * lote: dos recepcionistas que registran a la vez el mismo recall se
+ * serializan y el contador no pierde un intento. Ante un 40P01 que aun así
+ * llegue, los escritores reintentan una vez (`withDeadlockRetry`).
  */
 
 type Tx = Prisma.TransactionClient;
@@ -29,6 +34,10 @@ export interface LockedRecall {
   dueAt: string;
   intervalMonths: number;
   state: RecallCycleState;
+  /** Hoy en la sede del paciente (reloj de la BD): decide si el ciclo caducó. */
+  today: string;
+  /** Día civil (sede) del último intento guardado. */
+  lastAttemptDay: string | null;
 }
 
 interface LockedRow {
@@ -41,6 +50,8 @@ interface LockedRow {
   callbackOn: Date | null;
   skipUntil: Date | null;
   cycleDueAt: Date | null;
+  today: Date;
+  lastAttemptDay: Date | null;
 }
 
 /** FOR UPDATE de los recalls (orden de id); los que no existan, fuera. */
@@ -50,15 +61,35 @@ export async function lockRecallCycles(
   ids: readonly string[],
 ): Promise<Map<string, LockedRecall>> {
   if (ids.length === 0) return new Map();
+  // 1. Los pacientes, por id (ver la cabecera).
+  await tx.$queryRaw`
+    SELECT p."id" FROM "patients" p
+     WHERE p."tenantId" = ${tenantId}::uuid
+       AND p."id" IN (
+         SELECT pr."patientId" FROM "patient_recalls" pr
+          WHERE pr."tenantId" = ${tenantId}::uuid
+            AND pr."id" = ANY(${[...ids]}::uuid[]))
+     ORDER BY p."id"
+       FOR NO KEY UPDATE`;
+  // 2. Los recalls, por id, con el «hoy» de la sede del paciente.
   const rows = await tx.$queryRaw<LockedRow[]>`
     SELECT pr."id", pr."patientId", pr."dueAt", pr."intervalMonths",
            pr."attemptCount", pr."lastAttemptAt", pr."callbackOn",
-           pr."skipUntil", pr."cycleDueAt"
+           pr."skipUntil", pr."cycleDueAt",
+           (pg_catalog.now() AT TIME ZONE z."zone")::date AS "today",
+           ((pr."lastAttemptAt" AT TIME ZONE 'UTC') AT TIME ZONE z."zone")::date AS "lastAttemptDay"
       FROM "patient_recalls" pr
+      CROSS JOIN LATERAL (
+        SELECT coalesce(
+          (SELECT lo."timeZone" FROM "locations" lo
+            WHERE lo."tenantId" = pr."tenantId"
+              AND lo."id" = coalesce(pr."visitLocationId", pr."locationId")),
+          'UTC') AS "zone"
+      ) z
      WHERE pr."tenantId" = ${tenantId}::uuid
        AND pr."id" = ANY(${[...ids]}::uuid[])
      ORDER BY pr."id"
-       FOR UPDATE`;
+       FOR UPDATE OF pr`;
   return new Map(
     rows.map((r) => [
       r.id,
@@ -67,6 +98,8 @@ export async function lockRecallCycles(
         patientId: r.patientId,
         dueAt: civilOf(r.dueAt),
         intervalMonths: r.intervalMonths,
+        today: civilOf(r.today),
+        lastAttemptDay: r.lastAttemptDay ? civilOf(r.lastAttemptDay) : null,
         state: {
           attemptCount: r.attemptCount,
           lastAttemptAt: r.lastAttemptAt,
@@ -141,12 +174,54 @@ export async function recordAttemptInTx(
     at: created.createdAt,
     dueAt: recall.dueAt,
     intervalMonths: recall.intervalMonths,
+    today: recall.today,
+    lastAttemptDay: recall.lastAttemptDay,
     callbackOn: data.outcome === 'CALL_BACK' ? data.callbackOn : null,
   });
   await writeCycleState(tx, tenantId, recall.id, state);
   recall.state = state;
+  recall.lastAttemptDay = state.lastAttemptAt ? recall.today : null;
   if (data.outcome === 'WRONG_NUMBER') {
     await flagPhoneReviewInTx(tx, tenantId, recall.patientId, data.authorId);
   }
   return created;
+}
+
+/** SQLSTATE 40P01 (interbloqueo): crudo, envuelto por Prisma o como P2034. */
+export function isDeadlock(error: unknown): boolean {
+  const text = (e: unknown): string => {
+    if (!e || typeof e !== 'object') return '';
+    const o = e as { code?: unknown; message?: unknown; meta?: unknown };
+    const str = (v: unknown) => (typeof v === 'string' ? v : '');
+    return `${str(o.code)} ${str(o.message)} ${JSON.stringify(o.meta ?? '')}`;
+  };
+  return /40P01|P2034|deadlock detected/i.test(text(error));
+}
+
+export const RECALL_WRITE_BUSY_MESSAGE =
+  'Otra persona está registrando a la vez en estos pacientes. Vuelve a intentarlo.';
+
+/**
+ * Revisión DX-465 (ruling 3): un reintento ante un interbloqueo; si vuelve,
+ * 409 claro, nunca un 500. `run` abre su propia transacción.
+ */
+export async function withDeadlockRetry<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if (!isDeadlock(error)) throw error;
+  }
+  try {
+    return await run();
+  } catch (error) {
+    if (isDeadlock(error)) {
+      throw new ConflictException({
+        statusCode: 409,
+        error: 'Conflict',
+        code: 'RECALL_WRITE_BUSY',
+        message: RECALL_WRITE_BUSY_MESSAGE,
+      });
+    }
+    throw error;
+  }
 }

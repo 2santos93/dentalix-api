@@ -15,14 +15,14 @@
 --                    CALL_BACK, CHECK NOT VALID). Índice ÚNICO parcial
 --                    ("tenantId", "recallId", "appointmentId") WHERE BOOKED:
 --                    el servidor (al crear la cita) y la web no dejan dos
---                    «Agendó» de la misma cita en el mismo recall. Si una base
---                    tuviera ya dos (un reintento de la web tras un corte), el
---                    CREATE falla con la clave repetida: localizarlas con
---                      SELECT "tenantId", "recallId", "appointmentId", count(*)
---                        FROM recall_contacts WHERE "outcome" = 'BOOKED'
---                       GROUP BY 1, 2, 3 HAVING count(*) > 1;
---                    (append-only: se resuelve con el superusuario y criterio
---                    clínico antes de repetir el despliegue).
+--                    «Agendó» de la misma cita en el mismo recall. Antes de
+--                    crearlo, la migración comprueba que no haya duplicados
+--                    (un reintento de la web tras un corte) y, si los hay,
+--                    se detiene con un mensaje claro y la consulta para
+--                    localizarlos: recall_contacts es append-only, así que se
+--                    resuelven con el superusuario y criterio clínico antes de
+--                    repetir el despliegue (no se borran solos). Conviene
+--                    correr esa consulta antes de desplegar.
 --   patients         "phoneReviewFlaggedAt" y "phoneReviewFlaggedById"
 --                    (puntero suave, sin FK): «Número equivocado» marca el
 --                    teléfono para revisar. Las dos o ninguna (CHECK NOT
@@ -37,6 +37,15 @@
 --   dx_phone_e164_stale()  la de DX-266 (20261226140000) + la marca de
 --                    revisión, solo en patients (la función la comparten los
 --                    responsables, que no la tienen).
+--   dx_recall_phone_review_reset()  AFTER UPDATE de patients cuando la marca
+--                    pasa de puesta a NULL (teléfono corregido o «Ya está
+--                    corregido»): los recalls del paciente en su ciclo vuelven
+--                    a 0 intentos y, si el último fue «Número equivocado», sin
+--                    su ocultación (revisión DX-465, ruling 10).
+--   dx_recall_next_due_after(dueAt, meses, día)  el primer vencimiento de la
+--                    serie dueAt + k·meses (k ≥ 1) posterior a ese día: el
+--                    fin del ciclo de intentos y el regreso de un «Rechaza»
+--                    (ruling 2). IMMUTABLE; la usa la lista y el relleno.
 --
 -- Sin evento de auditoría sin usuario: el cierre del ciclo al agendar sin
 -- usuario (reserva online, oferta de hueco) no escribe contacto ni evento, así
@@ -52,6 +61,9 @@
 -- (20261212090600) y
 --   DROP INDEX public."patient_recalls_tenant_due_attempts_idx";
 --   DROP INDEX public."recall_contacts_booked_appointment_key";
+--   DROP TRIGGER patients_phone_review_reset ON public."patients";
+--   DROP FUNCTION public.dx_recall_phone_review_reset();
+--   DROP FUNCTION public.dx_recall_next_due_after(date, integer, date);
 --   DROP TABLE public."location_recall_settings";
 --   ALTER TABLE public."patient_recalls" DROP COLUMN "attemptCount",
 --     DROP COLUMN "lastAttemptAt", DROP COLUMN "callbackOn",
@@ -87,6 +99,22 @@ ALTER TABLE "recall_contacts" ADD COLUMN "callbackOn" DATE;
 ALTER TABLE "recall_contacts"
   ADD CONSTRAINT "recall_contacts_callback_check"
   CHECK ("callbackOn" IS NULL OR "outcome" = 'CALL_BACK') NOT VALID;
+
+DO $$
+DECLARE
+  dup integer;
+BEGIN
+  SELECT count(*) INTO dup FROM (
+    SELECT 1 FROM public."recall_contacts"
+     WHERE "outcome" = 'BOOKED'
+     GROUP BY "tenantId", "recallId", "appointmentId"
+    HAVING count(*) > 1
+  ) d;
+  IF dup > 0 THEN
+    RAISE EXCEPTION 'DX-465: hay % «Agendó» repetidos (misma cita en el mismo recall); recall_contacts es append-only y no se borran solos. Localízalos con: SELECT "tenantId", "recallId", "appointmentId", count(*) FROM recall_contacts WHERE "outcome" = ''BOOKED'' GROUP BY 1, 2, 3 HAVING count(*) > 1; resuélvelos con el superusuario y vuelve a desplegar.', dup;
+  END IF;
+END
+$$;
 
 CREATE UNIQUE INDEX "recall_contacts_booked_appointment_key"
   ON "recall_contacts"("tenantId", "recallId", "appointmentId")
@@ -173,3 +201,66 @@ ALTER TABLE "location_recall_settings" FORCE ROW LEVEL SECURITY;
 
 -- La app lee y guarda (upsert); nunca borra: volver a 7/3 es guardarlos.
 REVOKE DELETE, TRUNCATE ON "location_recall_settings" FROM dentalix_app;
+
+-- ---------------------------------------------------------------------------
+-- Fin del ciclo y regreso de un «Rechaza» (ruling 2)
+-- ---------------------------------------------------------------------------
+
+-- El primer vencimiento de la serie p_due + k·p_months (k ≥ 1) estrictamente
+-- posterior a p_after, con el recorte a fin de mes de make_interval (el
+-- mismo que addCivilMonths/nextDueAfter en la app).
+CREATE OR REPLACE FUNCTION public.dx_recall_next_due_after(p_due date, p_months integer, p_after date)
+ RETURNS date
+ LANGUAGE sql
+ IMMUTABLE PARALLEL SAFE
+ SET search_path TO 'pg_catalog', 'pg_temp'
+AS $function$
+  SELECT CASE
+           WHEN k.k0 >= 1 AND (p_due + make_interval(months => p_months * k.k0))::date > p_after
+             THEN (p_due + make_interval(months => p_months * k.k0))::date
+           ELSE (p_due + make_interval(months => p_months * (k.k0 + 1)))::date
+         END
+    FROM (
+      SELECT greatest(0, floor(
+               ((extract(year FROM p_after) - extract(year FROM p_due)) * 12
+                 + (extract(month FROM p_after) - extract(month FROM p_due))) / p_months
+             ))::integer AS k0
+    ) k
+$function$;
+
+-- ---------------------------------------------------------------------------
+-- Teléfono corregido: los intentos del número equivocado no cuentan (ruling 10)
+-- ---------------------------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.dx_recall_phone_review_reset()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SET search_path TO 'pg_catalog', 'pg_temp'
+AS $function$
+BEGIN
+  -- Mismo orden de candados que la app: el paciente (ya bloqueado por este
+  -- UPDATE) y después sus recalls.
+  UPDATE public."patient_recalls" pr SET
+    "attemptCount" = 0,
+    "lastAttemptAt" = CASE
+      WHEN EXISTS (
+        SELECT 1 FROM public."recall_contacts" x
+         WHERE x."tenantId" = pr."tenantId" AND x."recallId" = pr."id"
+           AND x."createdAt" = pr."lastAttemptAt"
+           AND x."outcome" = 'WRONG_NUMBER'
+      ) THEN NULL
+      ELSE pr."lastAttemptAt"
+    END
+   WHERE pr."tenantId" = NEW."tenantId"
+     AND pr."patientId" = NEW."id"
+     AND pr."cycleDueAt" = pr."dueAt"
+     AND (pr."attemptCount" > 0 OR pr."lastAttemptAt" IS NOT NULL);
+  RETURN NULL;
+END;
+$function$;
+
+CREATE TRIGGER patients_phone_review_reset
+  AFTER UPDATE ON "patients"
+  FOR EACH ROW
+  WHEN (OLD."phoneReviewFlaggedAt" IS NOT NULL AND NEW."phoneReviewFlaggedAt" IS NULL)
+  EXECUTE FUNCTION public.dx_recall_phone_review_reset();

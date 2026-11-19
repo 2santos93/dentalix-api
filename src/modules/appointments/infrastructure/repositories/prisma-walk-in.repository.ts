@@ -207,6 +207,7 @@ export class PrismaWalkInRepository implements WalkInRepository {
         appointmentId: appointment.id,
         appointmentTypeId: input.appointmentTypeId,
         actor: ctx,
+        channel: 'IN_PERSON',
       });
 
       // Sin las señales ni la nota: solo los nombres de campo (DX-009).

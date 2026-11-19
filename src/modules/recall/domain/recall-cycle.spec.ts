@@ -1,6 +1,7 @@
 import type { RecallContactOutcome } from '@prisma/client';
 import { civilDateIn } from '../../../shared/time/civil-day';
 import {
+  nextDueAfter,
   CALLBACK_ON_INVALID_MESSAGE,
   CALLBACK_ON_PAST_MESSAGE,
   CALLBACK_ON_TOO_FAR_MESSAGE,
@@ -37,6 +38,10 @@ const apply = (
     at: over.at ?? AT,
     dueAt: over.dueAt ?? DUE,
     intervalMonths: 6,
+    today: civilDateIn(over.at ?? AT, ZONE),
+    lastAttemptDay: state.lastAttemptAt
+      ? civilDateIn(state.lastAttemptAt, ZONE)
+      : null,
     callbackOn: over.callbackOn ?? null,
   });
 
@@ -49,6 +54,7 @@ const view = (
 ) =>
   cycleView(state, {
     dueAt,
+    intervalMonths: 6,
     today,
     lastAttemptDay: state.lastAttemptAt
       ? civilDateIn(state.lastAttemptAt, ZONE)
@@ -142,7 +148,14 @@ describe('nextCycleState (DX-465, D1)', () => {
       'NO_ANSWER',
     );
     expect(three.attemptCount).toBe(3);
-    expect(currentCycle(three, '2027-07-01')).toEqual({
+    expect(
+      currentCycle(three, {
+        dueAt: '2027-07-01',
+        intervalMonths: 6,
+        today: '2027-01-20',
+        lastAttemptDay: '2027-01-10',
+      }),
+    ).toEqual({
       ...EMPTY_CYCLE,
       cycleDueAt: '2027-07-01',
     });
@@ -258,5 +271,111 @@ describe('recallSettingsError (DX-465, D2)', () => {
     [{ hideDays: 7, maxAttempts: 11 }, RECALL_SETTINGS_MAX_ATTEMPTS_MESSAGE],
   ])('%j → %s', (input, expected) => {
     expect(recallSettingsError(input)).toBe(expected);
+  });
+});
+
+describe('revisión DX-465: «Llamar luego» al tope, fin del ciclo y DST', () => {
+  it('ruling 1: un «Llamar luego» que llega al tope no queda agotado: oculto hasta su día y entonces sale; el siguiente intento lo agota', () => {
+    let state = apply(apply(fresh, 'NO_ANSWER'), 'NO_ANSWER');
+    state = apply(state, 'CALL_BACK', { callbackOn: '2027-01-20' });
+    expect(state.attemptCount).toBe(3);
+    expect(view(state, '2027-01-15')).toMatchObject({
+      exhausted: false,
+      hiddenUntil: '2027-01-20',
+    });
+    expect(view(state, '2027-01-20')).toMatchObject({
+      exhausted: false,
+      hiddenUntil: null,
+    });
+    const after = apply(state, 'NO_ANSWER', {
+      at: new Date('2027-01-20T16:00:00.000Z'),
+    });
+    expect(view(after, '2027-02-20')).toMatchObject({
+      attempts: 4,
+      exhausted: true,
+    });
+  });
+
+  it('ruling 2: agotado hasta el vencimiento de la serie siguiente al último intento; ese día, ciclo nuevo con el contador a 0', () => {
+    let state = fresh;
+    for (let i = 0; i < 3; i += 1) state = apply(state, 'NO_ANSWER');
+    // DUE 01/01/2027, intervalo 6: el siguiente al 10/01/2027 es el 01/07/2027.
+    expect(view(state, '2027-06-30')).toMatchObject({ exhausted: true });
+    expect(view(state, '2027-07-01')).toEqual({
+      attempts: 0,
+      maxAttempts: 3,
+      exhausted: false,
+      lastAttemptDay: null,
+      callbackOn: null,
+      hiddenUntil: null,
+    });
+    // Un intento ese día ya cuenta en el ciclo nuevo.
+    const next = apply(state, 'NO_ANSWER', {
+      at: new Date('2027-07-01T16:00:00.000Z'),
+    });
+    expect(next.attemptCount).toBe(1);
+  });
+
+  it('ruling 2: con un vencimiento muy pasado, el ciclo dura hasta el próximo de su serie (no uno ya pasado) y el «Rechaza» vuelve ese día', () => {
+    const due = '2025-01-01';
+    const at = new Date('2026-11-19T16:00:00.000Z');
+    const state = apply(fresh, 'NO_ANSWER', { dueAt: due, at });
+    expect(
+      view(state, '2026-11-26', RECALL_SETTINGS_DEFAULTS, due),
+    ).toMatchObject({ attempts: 1, hiddenUntil: null });
+    expect(
+      view(state, '2026-12-31', RECALL_SETTINGS_DEFAULTS, due).attempts,
+    ).toBe(1);
+    expect(
+      view(state, '2027-01-01', RECALL_SETTINGS_DEFAULTS, due).attempts,
+    ).toBe(0);
+    expect(apply(fresh, 'DECLINED', { dueAt: due, at }).skipUntil).toBe(
+      '2027-01-01',
+    );
+  });
+
+  it.each([
+    ['2025-01-31', 1, '2025-02-27', '2025-02-28'],
+    ['2025-01-31', 1, '2025-02-28', '2025-03-31'],
+    ['2025-01-01', 6, '2026-11-19', '2027-01-01'],
+    ['2026-01-01', 6, '2025-11-19', '2026-07-01'],
+    ['2025-08-31', 6, '2026-02-28', '2026-08-31'],
+    ['2024-02-29', 12, '2025-01-10', '2025-02-28'],
+  ])(
+    'nextDueAfter(%s, %i, %s) = %s (como dx_recall_next_due_after)',
+    (due, months, after, expected) => {
+      expect(nextDueAfter(due, months, after)).toBe(expected);
+    },
+  );
+
+  it('zona con horario de verano (America/New_York): el día del intento y la vuelta cruzan el cambio de hora sin correrse', () => {
+    const NY = 'America/New_York';
+    // 23:30 del sábado 06/03/2027 en Nueva York (EST, UTC−5) = 04:30Z del 07;
+    // el domingo 14/03 empieza el horario de verano (EDT, UTC−4).
+    const at = new Date('2027-03-07T04:30:00.000Z');
+    expect(civilDateIn(at, NY)).toBe('2027-03-06');
+    const state = nextCycleState(fresh, {
+      outcome: 'NO_ANSWER',
+      at,
+      dueAt: DUE,
+      intervalMonths: 6,
+      today: civilDateIn(at, NY),
+      lastAttemptDay: null,
+      callbackOn: null,
+    });
+    const v = (today: string) =>
+      cycleView(state, {
+        dueAt: DUE,
+        intervalMonths: 6,
+        today,
+        lastAttemptDay: civilDateIn(state.lastAttemptAt!, NY),
+        settings: RECALL_SETTINGS_DEFAULTS,
+      });
+    expect(v('2027-03-12').hiddenUntil).toBe('2027-03-13');
+    expect(v('2027-03-13').hiddenUntil).toBeNull();
+    // 00:30 del domingo 14/03 en EST (05:30Z) también cuenta en su día.
+    expect(civilDateIn(new Date('2027-03-14T05:30:00.000Z'), NY)).toBe(
+      '2027-03-14',
+    );
   });
 });

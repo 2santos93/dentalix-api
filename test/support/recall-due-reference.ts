@@ -25,7 +25,10 @@ import type {
  * día del último intento en la zona de la sede + los días de la sede (sin
  * fila, 7), o «Llamar luego», o el vencimiento siguiente de un «Rechaza», lo
  * que llegue más tarde, es el día en que vuelve; agotado = intentos ≥ el tope
- * de la sede (sin fila, 3). Por defecto, ni ocultos ni agotados;
+ * de la sede (sin fila, 3) sin un «Llamar luego» pendiente; todo el estado
+ * caduca en el vencimiento de la serie siguiente al último intento
+ * (dx_recall_next_due_after, probada contra nextDueAfter). Por defecto, ni
+ * ocultos ni agotados;
  * `includeContacted` deja los ocultos; `exhausted`, solo los agotados.
  */
 
@@ -145,20 +148,29 @@ export async function referenceListDue(
                (${base} + make_interval(months => f."intervalMonths"))::date AS "dueAt"
           FROM f
       ),
-      d AS (
+      w AS (
         SELECT v.*,
-               CASE WHEN v."cycleDueAt" = v."dueAt" THEN v."attemptCount" ELSE 0 END AS "attempts",
-               CASE WHEN v."cycleDueAt" = v."dueAt" THEN v."callbackOn" END AS "cycleCallbackOn",
-               CASE WHEN v."cycleDueAt" = v."dueAt" THEN
-                 greatest(coalesce(v."callbackOn", v."lastAttemptDay" + v."hideDays"), v."skipUntil")
-               END AS "until"
+               (v."cycleDueAt" = v."dueAt"
+                 AND (v."lastAttemptDay" IS NULL
+                   OR v."today" < public.dx_recall_next_due_after(v."dueAt", v."intervalMonths", v."lastAttemptDay"))
+               ) IS TRUE AS "valid"
           FROM v
+      ),
+      d AS (
+        SELECT w.*,
+               CASE WHEN w."valid" THEN w."attemptCount" ELSE 0 END AS "attempts",
+               CASE WHEN w."valid" THEN w."callbackOn" END AS "cycleCallbackOn",
+               CASE WHEN w."valid" THEN
+                 greatest(coalesce(w."callbackOn", w."lastAttemptDay" + w."hideDays"), w."skipUntil")
+               END AS "until"
+          FROM w
       )`;
+  const exhausted = Prisma.sql`(d."attempts" >= d."maxAttempts" AND d."cycleCallbackOn" IS NULL)`;
   const cycleFilter = query.exhausted
-    ? Prisma.sql`AND d."attempts" >= d."maxAttempts"`
+    ? Prisma.sql`AND ${exhausted}`
     : query.includeContacted
-      ? Prisma.sql`AND d."attempts" < d."maxAttempts"`
-      : Prisma.sql`AND d."attempts" < d."maxAttempts"
+      ? Prisma.sql`AND NOT ${exhausted}`
+      : Prisma.sql`AND NOT ${exhausted}
                    AND NOT coalesce(d."until" > d."today", false)`;
   const where = Prisma.sql`
       NOT d."hasUpcomingAppointment"
@@ -197,7 +209,7 @@ export async function referenceListDue(
                  c."createdAt" AS "lastContactAt",
                  d."attempts",
                  d."maxAttempts",
-                 d."attempts" >= d."maxAttempts" AS "exhausted",
+                 ${exhausted} AS "exhausted",
                  CASE WHEN d."until" > d."today" THEN d."until" END AS "hiddenUntil",
                  d."cycleCallbackOn" AS "callbackOn",
                  d."phoneReview"

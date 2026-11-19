@@ -2,7 +2,11 @@ import { BadRequestException, NotFoundException } from '@nestjs/common';
 import type { Prisma, RecallContactChannel } from '@prisma/client';
 import type { AuditRequestContext } from '../../audit/domain/audit-request-context';
 import { writeAuditEvent } from '../../audit/infrastructure/prisma-audit-event.repository';
-import { EMPTY_CYCLE, currentCycle } from '../domain/recall-cycle';
+import {
+  EMPTY_CYCLE,
+  currentCycle,
+  isCurrentCycle,
+} from '../domain/recall-cycle';
 import { RECALL_WITHIN_DAYS_MAX } from '../domain/recall-rules';
 import {
   lockRecallCycles,
@@ -28,8 +32,8 @@ import {
  * la cita futura y el reloj lo mueve el procedimiento realizado).
  *
  *  - Con usuario: un contacto «Agendó» con la cita (canal: el del último
- *    contacto del ciclo, que es por donde se le localizó; sin ninguno, en
- *    persona), su `audit_event` CREATE RECALL_CONTACT y el ciclo cerrado.
+ *    intento del ciclo vigente, que es por donde se le localizó; sin ninguno,
+ *    en persona; el sin cita, siempre en persona), su `audit_event` CREATE RECALL_CONTACT y el ciclo cerrado.
  *    El índice único parcial recall_contacts_booked_appointment_key impide un
  *    segundo «Agendó» de la misma cita; la web que lo registra después recibe
  *    el existente.
@@ -92,6 +96,12 @@ export async function recallOnAppointmentBookedInTx(
     appointmentTypeId: string | null | undefined;
     actor: RecallBookingActor | null;
     requested?: RequestedRecallContact;
+    /**
+     * Canal fijo del «Agendó» de los demás recalls (el sin cita: en persona).
+     * Sin él, el del último intento del ciclo vigente o, sin ninguno, en
+     * persona.
+     */
+    channel?: RecallContactChannel;
   },
 ): Promise<number> {
   const requested = input.actor ? input.requested : undefined;
@@ -127,9 +137,13 @@ export async function recallOnAppointmentBookedInTx(
            lo."id" AS "homeLocationId",
            pr."dueAt" <= ((pg_catalog.now() AT TIME ZONE coalesce(lo."timeZone", 'UTC'))::date
                           + ${RECALL_WITHIN_DAYS_MAX}::int) AS "inWindow",
+           -- El canal del último INTENTO del ciclo guardado (el contacto de
+           -- "lastAttemptAt"); si el ciclo ya no vale, no cuenta (abajo).
            (SELECT x."channel" FROM "recall_contacts" x
              WHERE x."tenantId" = pr."tenantId" AND x."recallId" = pr."id"
-             ORDER BY x."createdAt" DESC, x."id" DESC
+               AND pr."cycleDueAt" = pr."dueAt"
+               AND x."createdAt" = pr."lastAttemptAt"
+             ORDER BY x."id" DESC
              LIMIT 1) AS "lastChannel"
       FROM "patient_recalls" pr
       JOIN "recall_types" rt
@@ -169,7 +183,13 @@ export async function recallOnAppointmentBookedInTx(
     const recall = locked.get(candidate.id);
     if (!recall) continue;
     const isRequested = requested?.recallId === candidate.id;
-    const cycle = currentCycle(recall.state, recall.dueAt);
+    const clock = {
+      dueAt: recall.dueAt,
+      intervalMonths: recall.intervalMonths,
+      today: recall.today,
+      lastAttemptDay: recall.lastAttemptDay,
+    };
+    const cycle = currentCycle(recall.state, clock);
     if (!isRequested && !candidate.inWindow && cycle.attemptCount === 0) {
       continue;
     }
@@ -189,7 +209,10 @@ export async function recallOnAppointmentBookedInTx(
         channel:
           isRequested && requested
             ? requested.channel
-            : (candidate.lastChannel ?? 'IN_PERSON'),
+            : (input.channel ??
+              (isCurrentCycle(recall.state, clock) && candidate.lastChannel
+                ? candidate.lastChannel
+                : 'IN_PERSON')),
         outcome: 'BOOKED',
         note: isRequested && requested ? requested.note : null,
         appointmentId: input.appointmentId,

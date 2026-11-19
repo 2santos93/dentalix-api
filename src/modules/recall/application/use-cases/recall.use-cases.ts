@@ -289,6 +289,7 @@ export class GetPatientRecallsUseCase {
           },
           {
             dueAt: row.dueAt,
+            intervalMonths: row.intervalMonths,
             today: row.today,
             lastAttemptDay: row.lastAttemptDay,
             settings: { hideDays: row.hideDays, maxAttempts: row.maxAttempts },
@@ -322,7 +323,7 @@ export class GetPatientRecallsUseCase {
           maxAttempts: cycle.maxAttempts,
           exhausted: cycle.exhausted,
           lastAttemptAt:
-            row.cycleDueAt === row.dueAt ? row.lastAttemptAt : null,
+            cycle.lastAttemptDay !== null ? row.lastAttemptAt : null,
           hiddenUntil: cycle.hiddenUntil,
           callbackOn: cycle.callbackOn,
         };

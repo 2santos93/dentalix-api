@@ -17,13 +17,17 @@ import { addCivilMonths } from './recall-rules';
  *    el día civil del intento en la sede + los días de la sede.
  *  - CALL_BACK: +1; oculto hasta `callbackOn` (si llega; sin fecha, como los
  *    anteriores).
- *  - DECLINED: contador a 0; no sale hasta el vencimiento siguiente (`dueAt` +
- *    el intervalo del recall). No toca la pausa clínica (`disabledUntil`).
+ *  - DECLINED: contador a 0; no sale hasta el vencimiento siguiente de la
+ *    serie (`dueAt` + k·intervalo del recall, el primero posterior a hoy). No
+ *    toca la pausa clínica (`disabledUntil`).
  *  - BOOKED: cierra el ciclo (contador a 0, sin ocultar ni «Llamar luego»).
  * Cualquier intento que no sea DECLINED quita el `skipUntil` de un DECLINED
  * anterior: alguien volvió a llamar a propósito («Incluir contactados»).
  *
- * «Intentos agotados»: `attempts ≥ maxAttempts` de la sede.
+ * «Intentos agotados»: `attempts ≥ maxAttempts` de la sede, salvo con un
+ * «Llamar luego» pendiente. Todo el estado caduca en el vencimiento siguiente
+ * después del último intento: ahí empieza otro ciclo con el contador a 0, el
+ * mismo día que vuelve un «Rechaza».
  */
 
 /** Ajustes por sede (DX-465, D2): sin fila, estos. */
@@ -75,23 +79,88 @@ export const COUNTED_OUTCOMES: readonly RecallContactOutcome[] = [
   'WRONG_NUMBER',
 ];
 
-/** El estado guardado, o uno vacío si es de otro vencimiento. */
-export function currentCycle(
-  stored: RecallCycleState,
-  dueAt: string,
-): RecallCycleState {
-  return stored.cycleDueAt === dueAt
-    ? stored
-    : { ...EMPTY_CYCLE, cycleDueAt: dueAt };
+/** Lo que decide si el estado guardado sigue valiendo un día de la sede. */
+export interface RecallCycleClock {
+  /** Vencimiento guardado del recall ahora. */
+  dueAt: string;
+  /** Intervalo del recall (el del paciente). */
+  intervalMonths: number;
+  /** Hoy en la sede del paciente. */
+  today: string;
+  /** Día civil (sede) del último intento guardado; null si no hay. */
+  lastAttemptDay: string | null;
 }
 
-export interface RecallOutcomeInput {
+/**
+ * El primer vencimiento de la serie `dueAt` + k·intervalo (k ≥ 1)
+ * estrictamente posterior a `after`. Es `dx_recall_next_due_after` de la BD
+ * (20270121140000), con el mismo recorte a fin de mes.
+ */
+export function nextDueAfter(
+  dueAt: string,
+  intervalMonths: number,
+  after: string,
+): string {
+  const [y1, m1] = dueAt.split('-').map(Number);
+  const [y2, m2] = after.split('-').map(Number);
+  const months = (y2 - y1) * 12 + (m2 - m1);
+  const k0 = Math.max(0, Math.floor(months / intervalMonths));
+  const candidate = addCivilMonths(dueAt, intervalMonths * k0);
+  return k0 >= 1 && candidate > after
+    ? candidate
+    : addCivilMonths(dueAt, intervalMonths * (k0 + 1));
+}
+
+/**
+ * Revisión DX-465 (ruling 2): «agotado» (y todo el estado) dura hasta el
+ * vencimiento siguiente al último intento, el mismo día que vuelve un
+ * «Rechaza»; entonces empieza otro ciclo con el contador a 0. Para un
+ * paciente vencido hace mucho, es el próximo de su serie, no uno ya pasado.
+ */
+export function cycleEndsOn(
+  clock: Pick<RecallCycleClock, 'dueAt' | 'intervalMonths' | 'lastAttemptDay'>,
+): string | null {
+  return clock.lastAttemptDay === null
+    ? null
+    : nextDueAfter(clock.dueAt, clock.intervalMonths, clock.lastAttemptDay);
+}
+
+/** ¿El estado guardado es del ciclo vigente? */
+export function isCurrentCycle(
+  stored: RecallCycleState,
+  clock: RecallCycleClock,
+): boolean {
+  if (stored.cycleDueAt !== clock.dueAt) return false;
+  const ends = cycleEndsOn(clock);
+  return ends === null || clock.today < ends;
+}
+
+/** El estado guardado, o uno vacío si es de otro vencimiento o ya caducó. */
+export function currentCycle(
+  stored: RecallCycleState,
+  clock: RecallCycleClock,
+): RecallCycleState {
+  return isCurrentCycle(stored, clock)
+    ? stored
+    : { ...EMPTY_CYCLE, cycleDueAt: clock.dueAt };
+}
+
+/**
+ * Agotado: intentos del ciclo ≥ tope de la sede, salvo con un «Llamar luego»
+ * pendiente (ruling 1: quien pidió que lo llamen un día sale ese día aunque
+ * con ese intento llegara al tope; el siguiente intento lo quita).
+ */
+export function isExhausted(
+  cycle: Pick<RecallCycleState, 'attemptCount' | 'callbackOn'>,
+  maxAttempts: number,
+): boolean {
+  return cycle.attemptCount >= maxAttempts && cycle.callbackOn === null;
+}
+
+export interface RecallOutcomeInput extends RecallCycleClock {
   outcome: RecallContactOutcome;
   /** Hora del servidor del contacto. */
   at: Date;
-  /** Vencimiento guardado del recall ahora. */
-  dueAt: string;
-  intervalMonths: number;
   /** Solo con CALL_BACK (ya validada). */
   callbackOn: string | null;
 }
@@ -101,7 +170,7 @@ export function nextCycleState(
   stored: RecallCycleState,
   input: RecallOutcomeInput,
 ): RecallCycleState {
-  const cycle = currentCycle(stored, input.dueAt);
+  const cycle = currentCycle(stored, input);
   switch (input.outcome) {
     case 'BOOKED':
       return { ...EMPTY_CYCLE, cycleDueAt: input.dueAt };
@@ -110,7 +179,8 @@ export function nextCycleState(
         attemptCount: 0,
         lastAttemptAt: input.at,
         callbackOn: null,
-        skipUntil: addCivilMonths(input.dueAt, input.intervalMonths),
+        // El vencimiento siguiente al de hoy (no uno ya pasado).
+        skipUntil: nextDueAfter(input.dueAt, input.intervalMonths, input.today),
         cycleDueAt: input.dueAt,
       };
     case 'CALL_BACK':
@@ -151,15 +221,12 @@ export interface RecallCycleView {
  */
 export function cycleView(
   stored: RecallCycleState,
-  facts: {
-    dueAt: string;
-    today: string;
-    lastAttemptDay: string | null;
+  facts: RecallCycleClock & {
     settings: RecallSettingsValues;
   },
 ): RecallCycleView {
-  const cycle = currentCycle(stored, facts.dueAt);
-  const inCycle = stored.cycleDueAt === facts.dueAt;
+  const cycle = currentCycle(stored, facts);
+  const inCycle = isCurrentCycle(stored, facts);
   const lastAttemptDay = inCycle ? facts.lastAttemptDay : null;
   const until = maxDay([
     cycle.callbackOn ??
@@ -171,7 +238,7 @@ export function cycleView(
   return {
     attempts: cycle.attemptCount,
     maxAttempts: facts.settings.maxAttempts,
-    exhausted: cycle.attemptCount >= facts.settings.maxAttempts,
+    exhausted: isExhausted(cycle, facts.settings.maxAttempts),
     lastAttemptDay,
     callbackOn: cycle.callbackOn,
     hiddenUntil: until !== null && until > facts.today ? until : null,

@@ -295,9 +295,9 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
                   role: input.actorRole ?? null,
                 },
                 locationId: created.locationId,
-                requestId: null,
-                ip: null,
-                userAgent: null,
+                requestId: input.requestMeta?.requestId ?? null,
+                ip: input.requestMeta?.ip ?? null,
+                userAgent: input.requestMeta?.userAgent ?? null,
               }
             : null,
         });
@@ -326,9 +326,9 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
                     role: input.actorRole ?? null,
                   },
                   locationId: created.locationId,
-                  requestId: null,
-                  ip: null,
-                  userAgent: null,
+                  requestId: input.requestMeta?.requestId ?? null,
+                  ip: input.requestMeta?.ip ?? null,
+                  userAgent: input.requestMeta?.userAgent ?? null,
                 }
               : null,
           });

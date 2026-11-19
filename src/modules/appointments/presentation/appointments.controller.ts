@@ -289,6 +289,9 @@ export class AppointmentsController {
             note: dto.recallContact.note?.trim() || null,
           }
         : undefined,
+      requestMeta: ctx
+        ? { requestId: ctx.requestId, ip: ctx.ip, userAgent: ctx.userAgent }
+        : undefined,
     });
     await this.auditReservedOverride(created, 'CREATE', ctx);
     // DX-210: nacer marcada «Adelantar si hay hueco» también queda auditado.

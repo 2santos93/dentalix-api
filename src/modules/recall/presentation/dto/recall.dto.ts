@@ -360,7 +360,7 @@ export class CreateRecallContactDto {
 /** DX-465 (D5): un recall del lote. */
 export class RecallContactBatchItemDto {
   @ApiProperty({ format: 'uuid' })
-  @IsUUID('4', { message: 'recallId debe ser un UUID.' })
+  @IsUUID('all', { message: 'recallId debe ser un UUID.' })
   recallId!: string;
 }
 

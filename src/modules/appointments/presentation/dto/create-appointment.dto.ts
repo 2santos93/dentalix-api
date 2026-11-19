@@ -35,7 +35,7 @@ export class AppointmentRecallContactDto {
     format: 'uuid',
     description: 'El recall desde el que se agenda',
   })
-  @IsUUID('4', { message: 'recallContact.recallId debe ser un UUID.' })
+  @IsUUID('all', { message: 'recallContact.recallId debe ser un UUID.' })
   recallId!: string;
 
   @ApiProperty({
