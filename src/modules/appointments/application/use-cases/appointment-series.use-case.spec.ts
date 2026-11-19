@@ -17,7 +17,12 @@ import {
 import { holidayConflict } from '../holiday-check';
 import { RESERVED_SLOT_CODE } from '../schedule-block-check';
 import { OVERLAP_MESSAGES } from '../appointment-overlap-error';
-import { SeriesSlotWriteError } from '../../domain/ports/appointment-series-repository.port';
+import {
+  SeriesSlotWriteError,
+  SeriesStaleError,
+} from '../../domain/ports/appointment-series-repository.port';
+import { ArgumentsHost, Logger } from '@nestjs/common';
+import { PrismaExceptionFilter } from '../../../../shared/prisma/prisma-exception.filter';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import type { SeriesSlotContext } from './create-appointment.use-case';
 
@@ -197,6 +202,10 @@ describe('AppointmentSeriesUseCase (DX-562)', () => {
       failuresFor?: (start: Date) => { step: string; error: Error }[];
       create?: jest.Mock;
       notice?: unknown;
+      snapshot?: unknown;
+      applyChanges?: jest.Mock;
+      timeZone?: string;
+      linkBase?: string | null;
       noticeOutcome?: 'QUEUED' | 'QUOTA' | null;
     } = {},
   ) {
@@ -218,9 +227,33 @@ describe('AppointmentSeriesUseCase (DX-562)', () => {
           notice: over.noticeOutcome ?? null,
         }),
       noticeContext: jest.fn().mockResolvedValue(over.notice ?? null),
-      findById: jest.fn(),
-      applyChanges: jest.fn(),
+      findById: jest.fn().mockResolvedValue(over.snapshot ?? null),
+      applyChanges:
+        over.applyChanges ??
+        jest.fn((input: { changes: { id: string }[] }) =>
+          Promise.resolve(
+            input.changes.map((c) => ({ id: c.id, series: { index: 1 } })),
+          ),
+        ),
     };
+    const update = {
+      checkSeriesMove: jest
+        .fn()
+        .mockResolvedValue({ warnings: [], warningCodes: [] }),
+      planSeriesMove: jest.fn(
+        (_a: unknown, slot: { start: Date; end: Date }) => ({
+          start: slot.start,
+          end: slot.end,
+        }),
+      ),
+      planSeriesCancellation: jest.fn().mockResolvedValue({
+        status: AppointmentStatus.CANCELLED,
+      }),
+    };
+    const linkBases = {
+      forTenant: jest.fn().mockResolvedValue(over.linkBase ?? null),
+    };
+    const config = { get: () => undefined };
     const email = { prepareInTx: jest.fn() };
     const outbound = { logRecorded: jest.fn() };
     const openings = {
@@ -228,9 +261,10 @@ describe('AppointmentSeriesUseCase (DX-562)', () => {
     };
     const chairs = { raceConflict: jest.fn() };
     const locations = {
-      findById: jest
-        .fn()
-        .mockResolvedValue({ id: 'l1', timeZone: 'America/Caracas' }),
+      findById: jest.fn().mockResolvedValue({
+        id: 'l1',
+        timeZone: over.timeZone ?? 'America/Caracas',
+      }),
     };
     const tenantContext = {
       getTenantId: () => 't1',
@@ -238,16 +272,27 @@ describe('AppointmentSeriesUseCase (DX-562)', () => {
     };
     const useCase = new AppointmentSeriesUseCase(
       createUseCase as never,
-      {} as never,
+      update as never,
       openings as never,
       chairs as never,
-      seriesRepo,
+      seriesRepo as never,
       locations as never,
       email as never,
       tenantContext as never,
       outbound as never,
+      linkBases as never,
+      config as never,
     );
-    return { useCase, createUseCase, seriesRepo, email, openings, outbound };
+    return {
+      useCase,
+      createUseCase,
+      seriesRepo,
+      email,
+      openings,
+      outbound,
+      update,
+      chairs,
+    };
   }
 
   const occurrences = [
@@ -262,6 +307,7 @@ describe('AppointmentSeriesUseCase (DX-562)', () => {
         patientId: 'p1',
         start: context.input.start,
         intervalWeeks: 1,
+        count: 2,
         occurrences,
         notifyPatient: false,
       },
@@ -285,20 +331,70 @@ describe('AppointmentSeriesUseCase (DX-562)', () => {
     );
   });
 
-  it('crear con dos fechas iguales: 400', async () => {
-    const { useCase } = build();
-    await expect(
+  it('crear: cada fecha en un día de la propuesta (400 si no) y una por día', async () => {
+    const { useCase, seriesRepo } = build();
+    const create = (starts: string[]) =>
       useCase.createSeries(
         {
           patientId: 'p1',
           start: context.input.start,
           intervalWeeks: 1,
-          occurrences: [occurrences[0], occurrences[0]],
+          count: 3,
+          occurrences: starts.map((x) => ({ start: at(x) })),
           notifyPatient: false,
         },
         ctx,
-      ),
-    ).rejects.toThrow(new BadRequestException(SERIES_MESSAGES.duplicateStarts));
+      );
+    // Otro día (el martes): no es de la serie.
+    await expect(
+      create(['2030-01-07T14:00:00Z', '2030-01-15T14:00:00Z']),
+    ).rejects.toThrow(new BadRequestException(SERIES_MESSAGES.offPattern(1)));
+    // Dos horas el mismo día de la serie.
+    await expect(
+      create(['2030-01-07T14:00:00Z', '2030-01-07T18:00:00Z']),
+    ).rejects.toThrow(new BadRequestException(SERIES_MESSAGES.sameDay));
+    // Más allá de la propuesta (4.ª semana con count 3).
+    await expect(
+      create(['2030-01-07T14:00:00Z', '2030-01-28T14:00:00Z']),
+    ).rejects.toThrow(new BadRequestException(SERIES_MESSAGES.offPattern(1)));
+    expect(seriesRepo.create).not.toHaveBeenCalled();
+    // Otra hora el MISMO día (la alternativa) sí vale.
+    await create(['2030-01-07T14:00:00Z', '2030-01-14T19:30:00Z']);
+    expect(seriesRepo.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('crear: el index del 409 es el de la vista previa aunque se omitan fechas', async () => {
+    const { useCase } = build({
+      failuresFor: (start) =>
+        start.getTime() === at('2030-01-21T14:00:00Z').getTime()
+          ? [
+              {
+                step: 'PROVIDER_OVERLAP',
+                error: new ConflictException(OVERLAP_MESSAGES.provider),
+              },
+            ]
+          : [],
+    });
+    const error = await useCase
+      .createSeries(
+        {
+          patientId: 'p1',
+          start: context.input.start,
+          intervalWeeks: 1,
+          count: 3,
+          // Omitida la 2.ª (14/01).
+          occurrences: [
+            { start: at('2030-01-07T14:00:00Z') },
+            { start: at('2030-01-21T14:00:00Z') },
+          ],
+          notifyPatient: false,
+        },
+        ctx,
+      )
+      .catch((e: unknown) => e);
+    expect((error as ConflictException).getResponse()).toMatchObject({
+      conflicts: [{ index: 3, start: '2030-01-21T14:00:00.000Z' }],
+    });
   });
 
   it('crear con una fecha que falla: 409 con TODAS las razones y no se escribe nada', async () => {
@@ -323,6 +419,7 @@ describe('AppointmentSeriesUseCase (DX-562)', () => {
           patientId: 'p1',
           start: context.input.start,
           intervalWeeks: 1,
+          count: 2,
           occurrences,
           notifyPatient: true,
         },
@@ -360,6 +457,7 @@ describe('AppointmentSeriesUseCase (DX-562)', () => {
           patientId: 'p1',
           start: context.input.start,
           intervalWeeks: 1,
+          count: 2,
           occurrences,
           notifyPatient: false,
         },
@@ -399,6 +497,7 @@ describe('AppointmentSeriesUseCase (DX-562)', () => {
           patientId: 'p1',
           start: context.input.start,
           intervalWeeks: 1,
+          count: 2,
           occurrences,
           notifyPatient: false,
         },
@@ -449,6 +548,7 @@ describe('AppointmentSeriesUseCase (DX-562)', () => {
         patientId: 'p1',
         start: context.input.start,
         intervalWeeks: 1,
+        count: 2,
         occurrences,
         notifyPatient: true,
       },
@@ -520,6 +620,7 @@ describe('AppointmentSeriesUseCase (DX-562)', () => {
         patientId: 'p1',
         start: context.input.start,
         intervalWeeks: 1,
+        count: 2,
         occurrences,
         notifyPatient: true,
       },
@@ -541,6 +642,7 @@ describe('AppointmentSeriesUseCase (DX-562)', () => {
         patientId: 'p1',
         start: context.input.start,
         intervalWeeks: 1,
+        count: 2,
         occurrences,
         notifyPatient: false,
       },
@@ -574,6 +676,7 @@ describe('AppointmentSeriesUseCase (DX-562)', () => {
           patientId: 'p1',
           start: context.input.start,
           intervalWeeks: 1,
+          count: 2,
           occurrences,
           notifyPatient: true,
         },
@@ -595,6 +698,7 @@ describe('AppointmentSeriesUseCase (DX-562)', () => {
         patientId: 'p1',
         start: context.input.start,
         intervalWeeks: 1,
+        count: 2,
         occurrences,
         notifyPatient: true,
       },
@@ -668,5 +772,298 @@ describe('AppointmentSeriesUseCase (DX-562)', () => {
     ).rejects.toThrow(
       new BadRequestException('Repite la cita cada 1 a 12 semanas.'),
     );
+  });
+
+  // --- Revisión independiente (DX-562) -----------------------------------
+
+  /** Estado HTTP con el que el filtro global respondería a `error`. */
+  function httpStatusOf(error: unknown): number {
+    if (error instanceof ConflictException) return error.getStatus();
+    const status = jest.fn(() => ({ json: jest.fn() }));
+    const host = {
+      switchToHttp: () => ({
+        getResponse: () => ({ status, setHeader: jest.fn() }),
+      }),
+    } as unknown as ArgumentsHost;
+    jest.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    jest.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    new PrismaExceptionFilter().catch(error as never, host);
+    jest.restoreAllMocks();
+    return (status.mock.calls[0] as unknown as [number])[0];
+  }
+
+  const known = (
+    code: string,
+    message: string,
+    meta?: Record<string, unknown>,
+  ) =>
+    new Prisma.PrismaClientKnownRequestError(message, {
+      code,
+      clientVersion: 'test',
+      ...(meta ? { meta } : {}),
+    });
+
+  it.each([
+    [
+      'P2028 (la transacción superó su tope)',
+      known('P2028', 'Transaction API error: expired transaction'),
+      503,
+    ],
+    [
+      'P2002 (único de ítems del plan)',
+      known('P2002', 'Unique constraint failed', {
+        target: 'appointment_plan_items_active_key',
+      }),
+      409,
+    ],
+    [
+      '23503 (FK) por SQL crudo',
+      known('P2010', 'Raw query failed. Code: `23503`', { code: '23503' }),
+      409,
+    ],
+    [
+      '40001 (serialización)',
+      known('P2010', 'Raw query failed. Code: `40001`', { code: '40001' }),
+      409,
+    ],
+  ])(
+    'crear: una causa sin razón propia (%s) sale SIN el envoltorio, con su código (nunca 500)',
+    async (_label, cause, expected) => {
+      const { useCase } = build({
+        create: jest
+          .fn()
+          .mockRejectedValue(new SeriesSlotWriteError({ position: 0 }, cause)),
+      });
+      const error = await useCase
+        .createSeries(
+          {
+            patientId: 'p1',
+            start: context.input.start,
+            intervalWeeks: 1,
+            count: 2,
+            occurrences,
+            notifyPatient: false,
+          },
+          ctx,
+        )
+        .catch((e: unknown) => e);
+      expect(error).toBe(cause);
+      expect(httpStatusOf(error)).toBe(expected);
+    },
+  );
+
+  // Serie de 3 lunes a las 10:00 de Caracas (14:00Z), en el futuro.
+  const seriesAppointment = (
+    index: number,
+    start: string,
+    over: object = {},
+  ) => ({
+    id: `a${index}`,
+    patientId: 'p1',
+    providerId: 'd1',
+    locationId: 'l1',
+    chairId: null,
+    status: AppointmentStatus.SCHEDULED,
+    start: at(start),
+    end: new Date(at(start).getTime() + 30 * MIN),
+    series: { id: 's1', index, total: 3 },
+    ...over,
+  });
+  const snapshot = (list: ReturnType<typeof seriesAppointment>[]) => ({
+    id: 's1',
+    intervalWeeks: 1,
+    occurrences: list.length,
+    appointments: list,
+  });
+
+  it('mover: cada cambio exige el estado y la hora leídos; se escribe por fecha actual en la dirección del desplazamiento', async () => {
+    const applyChanges = jest.fn((input: { changes: { id: string }[] }) =>
+      Promise.resolve(
+        input.changes.map((c) => ({
+          id: c.id,
+          series: { index: Number(c.id.slice(1)) },
+          start: at('2030-01-01T00:00:00Z'),
+          end: at('2030-01-01T00:30:00Z'),
+        })),
+      ),
+    );
+    const { useCase } = build({
+      applyChanges,
+      snapshot: snapshot([
+        seriesAppointment(1, '2030-01-07T14:00:00Z'),
+        // La 2.ª se movió suelta DESPUÉS de la 3.ª.
+        seriesAppointment(2, '2030-01-23T14:00:00Z'),
+        seriesAppointment(3, '2030-01-21T14:00:00Z'),
+      ]),
+    });
+    await useCase.moveFollowing(
+      's1',
+      { fromAppointmentId: 'a1', start: at('2030-01-08T14:00:00Z') },
+      ctx,
+    );
+    const input = applyChanges.mock.calls[0][0] as unknown as {
+      changes: { id: string; expect: { status: string; start: Date } }[];
+    };
+    expect(input.changes.map((c) => c.id)).toEqual(['a2', 'a3', 'a1']);
+    expect(input.changes[0].expect).toEqual({
+      status: 'SCHEDULED',
+      start: at('2030-01-23T14:00:00Z'),
+    });
+  });
+
+  it('mover a través de un cambio de hora (Nueva York): la misma hora de pared en cada cita', async () => {
+    const { useCase, update } = build({
+      timeZone: 'America/New_York',
+      snapshot: snapshot([
+        seriesAppointment(1, '2030-03-04T15:00:00Z'), // lunes 10:00 EST
+        seriesAppointment(2, '2030-03-11T14:00:00Z'), // lunes 10:00 EDT
+      ]),
+    });
+    // La 1.ª al martes a las 09:00 EST.
+    await useCase.moveFollowing(
+      's1',
+      { fromAppointmentId: 'a1', start: at('2030-03-05T14:00:00Z') },
+      ctx,
+    );
+    const slots = update.planSeriesMove.mock.calls.map(
+      (c) => (c as unknown as [unknown, { start: Date }])[1].start,
+    );
+    expect(slots.map((d) => d.toISOString()).sort()).toEqual([
+      '2030-03-05T14:00:00.000Z',
+      '2030-03-12T13:00:00.000Z', // martes 09:00 EDT
+    ]);
+  });
+
+  it('mover: una cita que cambió entre leer y escribir → 409 APPOINTMENT_SERIES_STALE', async () => {
+    const { useCase } = build({
+      snapshot: snapshot([
+        seriesAppointment(1, '2030-01-07T14:00:00Z'),
+        seriesAppointment(2, '2030-01-14T14:00:00Z'),
+      ]),
+      applyChanges: jest.fn().mockRejectedValue(new SeriesStaleError(['a2'])),
+    });
+    const error = await useCase
+      .moveFollowing(
+        's1',
+        { fromAppointmentId: 'a1', start: at('2030-01-08T14:00:00Z') },
+        ctx,
+      )
+      .catch((e: unknown) => e);
+    expect((error as ConflictException).getResponse()).toMatchObject({
+      code: 'APPOINTMENT_SERIES_STALE',
+      message: SERIES_MESSAGES.stale,
+      appointmentIds: ['a2'],
+    });
+  });
+
+  it('mover y cancelar: un 40P01 vuelve a LEER y planificar (no repite el plan); el segundo, 409 sin fechas', async () => {
+    const deadlock = new SeriesSlotWriteError(
+      { appointmentId: 'a1' },
+      new Prisma.PrismaClientUnknownRequestError(
+        'ERROR: deadlock detected (40P01)',
+        { clientVersion: 'test' },
+      ),
+    );
+    const applyChanges = jest
+      .fn()
+      .mockRejectedValueOnce(deadlock)
+      .mockResolvedValueOnce([]);
+    const { useCase, seriesRepo } = build({
+      snapshot: snapshot([seriesAppointment(1, '2030-01-07T14:00:00Z')]),
+      applyChanges,
+    });
+    await useCase.moveFollowing(
+      's1',
+      { fromAppointmentId: 'a1', start: at('2030-01-08T14:00:00Z') },
+      ctx,
+    );
+    expect(seriesRepo.findById).toHaveBeenCalledTimes(2);
+    expect(applyChanges).toHaveBeenCalledTimes(2);
+
+    applyChanges.mockReset().mockRejectedValue(deadlock);
+    const error = await useCase
+      .cancelFollowing(
+        's1',
+        {
+          fromAppointmentId: 'a1',
+          cancellation: { byKind: 'CLINIC', reasonCode: 'CLINIC_RESCHEDULE' },
+        },
+        ctx,
+      )
+      .catch((e: unknown) => e);
+    expect(applyChanges).toHaveBeenCalledTimes(2);
+    expect((error as ConflictException).getResponse()).toMatchObject({
+      code: 'APPOINTMENT_SERIES_CONFLICT',
+      message: SERIES_MESSAGES.busy,
+      conflicts: [],
+    });
+  });
+
+  it('cancelar: cada cambio exige el estado y la hora leídos', async () => {
+    const applyChanges = jest.fn().mockResolvedValue([{ id: 'a2' }]);
+    const { useCase } = build({
+      snapshot: snapshot([
+        seriesAppointment(1, '2030-01-07T14:00:00Z'),
+        seriesAppointment(2, '2030-01-14T14:00:00Z', {
+          status: AppointmentStatus.CONFIRMED,
+        }),
+      ]),
+      applyChanges,
+    });
+    await useCase.cancelFollowing(
+      's1',
+      {
+        fromAppointmentId: 'a2',
+        cancellation: { byKind: 'CLINIC', reasonCode: 'CLINIC_RESCHEDULE' },
+      },
+      ctx,
+    );
+    expect(applyChanges).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lock: null,
+        changes: [
+          expect.objectContaining({
+            id: 'a2',
+            expect: {
+              status: 'CONFIRMED',
+              start: at('2030-01-14T14:00:00Z'),
+            },
+          }),
+        ],
+      }),
+    );
+  });
+
+  it('DX-128: con host seguro, el aviso lleva el enlace de baja y su fila va con el email', async () => {
+    const { useCase, email, seriesRepo } = build({
+      notice: notice(),
+      noticeOutcome: 'QUEUED',
+      linkBase: 'https://demo.dentalix.app',
+    });
+    email.prepareInTx.mockResolvedValue({ insert: jest.fn(), kick: jest.fn() });
+    await useCase.createSeries(
+      {
+        patientId: 'p1',
+        start: context.input.start,
+        intervalWeeks: 1,
+        count: 2,
+        occurrences,
+        notifyPatient: true,
+      },
+      ctx,
+    );
+    const vars = (
+      email.prepareInTx.mock.calls[0] as [{ vars: { unsubscribeUrl: string } }]
+    )[0].vars;
+    expect(vars.unsubscribeUrl).toMatch(
+      /^https:\/\/demo\.dentalix\.app\/baja\/[A-Za-z0-9_-]{43}$/,
+    );
+    const write = (
+      seriesRepo.create.mock.calls[0] as [
+        { email: { optOut: { patientId: string; tokenHash: string } } },
+      ]
+    )[0].email;
+    expect(write.optOut.patientId).toBe('p1');
+    expect(write.optOut.tokenHash).toMatch(/^[0-9a-f]{64}$/);
   });
 });

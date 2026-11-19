@@ -426,6 +426,8 @@ export interface AppointmentSeriesEmailVars {
   providerName: string | null;
   /** Inicio de cada cita, ya formateado en la zona y el formato de la sede. 2–26. */
   dateLabels: string[];
+  /** Enlace de baja de los avisos (DX-128), si se emitió uno. */
+  unsubscribeUrl: string | null;
 }
 
 export interface SlotOfferEmailVars {

@@ -25,6 +25,7 @@ const vars = (
     'lunes 15 de febrero de 2027 a las 9:00 a. m.',
     'lunes 15 de marzo de 2027 a las 9:00 a. m.',
   ],
+  unsubscribeUrl: null,
   ...overrides,
 });
 
@@ -95,6 +96,19 @@ describe('plantilla appointment-series (DX-562)', () => {
     expect(email.html).not.toContain('<b>Sede</b>');
     expect(email.html).toContain('&lt;b&gt;Sede&lt;/b&gt;');
     expect(email.html).not.toContain('<i>x</i>');
+  });
+
+  it('DX-128: con enlace de baja, al pie (HTML y texto); sin él, no sale', () => {
+    const email = renderEmail(
+      'appointment-series',
+      vars({ unsubscribeUrl: 'https://demo.dentalix.app/baja/xyz' }),
+      brand,
+    );
+    expect(email.html).toContain('href="https://demo.dentalix.app/baja/xyz"');
+    expect(email.text).toContain('Dejar de recibir avisos');
+    expect(email.text).toContain('https://demo.dentalix.app/baja/xyz');
+    const without = renderEmail('appointment-series', vars(), brand);
+    expect(without.text).not.toContain('Dejar de recibir avisos');
   });
 
   it('de 2 a 26 fechas', () => {

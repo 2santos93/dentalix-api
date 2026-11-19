@@ -780,7 +780,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
    * en la zona de su sede). Cualquier otro error sigue su camino. Sin
    * `planItemIds` explícitos, los ítems vivos de la cita.
    */
-  private async rethrowPlanItemConflict(
+  async rethrowPlanItemConflict(
     error: unknown,
     planItemIds: string[] | undefined,
     appointmentId?: string,

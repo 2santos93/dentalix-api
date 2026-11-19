@@ -1,4 +1,4 @@
-import type { ClinicRole, Prisma } from '@prisma/client';
+import type { AppointmentStatus, ClinicRole, Prisma } from '@prisma/client';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import type { AuditEventDraft } from '../../../audit/domain/audit-event';
 import type { ReminderContact } from '../../../reminders/domain/reminder-eligibility';
@@ -19,7 +19,6 @@ export interface AppointmentSeriesSnapshot {
   id: string;
   intervalWeeks: number;
   occurrences: number;
-  cancelledAt: Date | null;
   appointments: Appointment[];
 }
 
@@ -50,6 +49,11 @@ export interface CreateSeriesRepoInput {
 
 export interface SeriesNoticeWrite {
   insert(tx: Prisma.TransactionClient): Promise<{ id: string }>;
+  /**
+   * DX-128: el enlace de baja que lleva el email (su hash), creado en la
+   * misma transacción solo si el email se encola: sin aviso, sin enlace.
+   */
+  optOut: { patientId: string; tokenHash: string; expiresAt: Date } | null;
   outbound: {
     id: string;
     recipient: string;
@@ -78,23 +82,34 @@ export class SeriesSlotWriteError extends Error {
   }
 }
 
+/**
+ * DX-562: alguna cita de la serie ya no está como se leyó al planificar (otra
+ * persona la canceló, la atendió o la movió entre la vista y la escritura):
+ * no se escribió nada.
+ */
+export class SeriesStaleError extends Error {
+  constructor(readonly appointmentIds: string[]) {
+    super('Alguna cita de la serie cambió mientras tanto');
+    this.name = 'SeriesStaleError';
+  }
+}
+
 /** DX-562: una cita de la serie que se cancela o se mueve, con su cambio. */
 export interface SeriesAppointmentChange {
   id: string;
+  /**
+   * Cómo se leyó al planificar: con la fila bloqueada se exige igual (estado
+   * y hora); si no, `SeriesStaleError`.
+   */
+  expect: { status: AppointmentStatus; start: Date };
   patch: UpdateAppointmentRepoInput;
 }
 
 export interface ApplySeriesChangesInput {
-  seriesId: string;
   /** En el orden en que se escriben (al mover, el que no pisa a la siguiente). */
   changes: SeriesAppointmentChange[];
   /** Mover: candado de las agendas de estos profesionales y de la sede. */
   lock: { providerIds: string[]; locationId: string } | null;
-  /**
-   * Cancelar: si tras el cambio no queda ninguna cita pendiente (agendada o
-   * confirmada) en la serie, se marca cancelada con este usuario.
-   */
-  markCancelledBy: string | null;
   /** El ÚNICO `audit_event` de la operación, en la misma transacción. */
   auditEvent: (appointments: Appointment[]) => AuditEventDraft;
 }
@@ -136,8 +151,12 @@ export interface AppointmentSeriesRepository {
   }>;
   /**
    * Cancela o mueve citas de la serie en UNA transacción (`updateInTx` por
-   * cita) con su único `audit_event`. Una que no se puede escribir:
-   * `SeriesSlotWriteError` y no cambia nada. Reintenta una vez un 40P01.
+   * cita) con su único `audit_event`. Orden de candados: el de las series de
+   * la clínica, las FILAS de las citas (por id, `FOR UPDATE`) y luego las
+   * agendas (como el PATCH suelto: fila → agenda). Una cita que ya no está
+   * como se leyó: `SeriesStaleError`; una que no se puede escribir:
+   * `SeriesSlotWriteError` (un ítem del plan reservado en otra cita sale ya
+   * como su 409). Sin reintento: un 40P01 lo replanifica el caso de uso.
    */
   applyChanges(input: ApplySeriesChangesInput): Promise<Appointment[]>;
   /** Para el aviso de la serie (paciente, responsables, sede, clínica). */

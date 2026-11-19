@@ -30,6 +30,8 @@ export interface SeriesConflictReason {
 }
 
 export const APPOINTMENT_SERIES_CONFLICT_CODE = 'APPOINTMENT_SERIES_CONFLICT';
+/** DX-562: alguna cita cambió entre la lectura y la escritura (mover/cancelar). */
+export const APPOINTMENT_SERIES_STALE_CODE = 'APPOINTMENT_SERIES_STALE';
 
 export const SERIES_MESSAGES = {
   conflict:
@@ -44,7 +46,11 @@ export const SERIES_MESSAGES = {
   sameStart: 'La cita ya está a esa hora.',
   differentLocations:
     'Las citas de la serie están en sedes distintas: muévelas una a una.',
-  duplicateStarts: 'Hay dos fechas iguales en la serie.',
+  stale:
+    'Alguna cita de la serie cambió mientras tanto (otra persona la movió, la canceló o la atendió). Vuelve a abrir la serie y repite el cambio.',
+  offPattern: (weeks: number) =>
+    `Cada fecha tiene que caer en uno de los días de la serie (cada ${weeks === 1 ? 'semana' : `${weeks} semanas`} desde la primera cita). Para otro día, agenda una cita aparte.`,
+  sameDay: 'Hay dos fechas para el mismo día de la serie.',
   busy: 'Otra persona estaba agendando a la vez y no se pudo terminar. Vuelve a intentarlo.',
 } as const;
 

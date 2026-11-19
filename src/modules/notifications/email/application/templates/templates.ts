@@ -867,6 +867,14 @@ function appointmentSeries(
       { kind: 'note', text: t.note },
     ],
     action: null,
+    // DX-128: como el recordatorio, la baja al pie.
+    footerLink: vars.unsubscribeUrl
+      ? {
+          lead: t.unsubscribeLead,
+          label: t.unsubscribeLabel,
+          url: vars.unsubscribeUrl,
+        }
+      : null,
   });
 }
 

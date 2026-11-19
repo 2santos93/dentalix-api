@@ -18,8 +18,10 @@ import { requireLocationTimeZone } from '../../../../shared/locations/location-t
 import { EmailQuotaExceededError } from '../../../notifications/email/domain/email-quota-exceeded.error';
 import { OutboundMessages } from '../../../notifications/outbound/application/outbound-messages.service';
 import type { Appointment } from '../../domain/entities/appointment.entity';
+import { isPlanItemConflict } from '../appointment-plan-items';
 import {
   SeriesSlotWriteError,
+  SeriesStaleError,
   type AppointmentSeriesRepository,
   type AppointmentSeriesSnapshot,
   type ApplySeriesChangesInput,
@@ -83,7 +85,6 @@ export class PrismaAppointmentSeriesRepository implements AppointmentSeriesRepos
           id: true,
           intervalWeeks: true,
           occurrences: true,
-          cancelledAt: true,
         },
       });
       if (!series) return null;
@@ -256,6 +257,17 @@ export class PrismaAppointmentSeriesRepository implements AppointmentSeriesRepos
       if (error instanceof EmailQuotaExceededError) return 'QUOTA';
       throw error;
     }
+    if (email.optOut) {
+      await tx.reminderOptOutLink.create({
+        data: {
+          tenantId: this.requireTenantId(),
+          patientId: email.optOut.patientId,
+          tokenHash: email.optOut.tokenHash,
+          expiresAt: email.optOut.expiresAt,
+        },
+        select: { id: true },
+      });
+    }
     await this.outbound.recordInTx(tx, {
       id: email.outbound.id,
       status: 'QUEUED',
@@ -270,13 +282,14 @@ export class PrismaAppointmentSeriesRepository implements AppointmentSeriesRepos
     return 'QUEUED';
   }
 
-  applyChanges(input: ApplySeriesChangesInput): Promise<Appointment[]> {
+  async applyChanges(input: ApplySeriesChangesInput): Promise<Appointment[]> {
     const tenantId = this.requireTenantId();
-    return this.retryOnDeadlock(() =>
-      this.prisma.runWithTenant(
+    try {
+      return await this.prisma.runWithTenant(
         async (tx) => {
+          await this.lockSeries(tx, tenantId);
+          await this.lockRowsAsPlanned(tx, input.changes);
           if (input.lock) {
-            await this.lockSeries(tx, tenantId);
             // Todos los profesionales primero (en orden) y luego la sede: el
             // mismo orden que lockAgenda de una cita suelta (profesional →
             // sede), sin ciclos.
@@ -306,37 +319,63 @@ export class PrismaAppointmentSeriesRepository implements AppointmentSeriesRepos
               );
             }
           }
-          if (input.markCancelledBy !== null) {
-            const pending = await tx.appointment.count({
-              where: {
-                seriesId: input.seriesId,
-                deletedAt: null,
-                status: {
-                  in: [
-                    AppointmentStatus.SCHEDULED,
-                    AppointmentStatus.CONFIRMED,
-                  ],
-                },
-              },
-            });
-            if (pending === 0) {
-              await tx.appointmentSeries.updateMany({
-                where: { id: input.seriesId, cancelledAt: null },
-                data: {
-                  cancelledAt: new Date(),
-                  cancelledById: input.markCancelledBy,
-                },
-              });
-            }
-          }
           if (updated.length > 0) {
             await writeAuditEvent(tx, input.auditEvent(updated));
           }
           return updated;
         },
         { timeout: SERIES_TX_TIMEOUT_MS },
-      ),
-    );
+      );
+    } catch (error) {
+      // DX-271/273: un ítem del plan de la cita ya reservado en otra (el
+      // trigger al reagendar): el MISMO 409 que la cita suelta.
+      if (
+        error instanceof SeriesSlotWriteError &&
+        'appointmentId' in error.at &&
+        isPlanItemConflict(error.cause)
+      ) {
+        await this.appointments.rethrowPlanItemConflict(
+          error.cause,
+          undefined,
+          error.at.appointmentId,
+        );
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Las filas de las citas que se cambian, bloqueadas en orden de id (sin
+   * ciclos entre dos operaciones de la misma serie), y comprobadas como se
+   * leyeron: estado, hora y sin retirar.
+   */
+  private async lockRowsAsPlanned(
+    tx: Prisma.TransactionClient,
+    changes: ApplySeriesChangesInput['changes'],
+  ): Promise<void> {
+    if (changes.length === 0) return;
+    const ids = changes.map((c) => c.id);
+    const rows = await tx.$queryRaw<
+      { id: string; status: AppointmentStatus; start: Date; deleted: boolean }[]
+    >`
+      SELECT "id", "status", "start", ("deletedAt" IS NOT NULL) AS "deleted"
+        FROM "appointments"
+       WHERE "id" = ANY(${ids}::uuid[])
+       ORDER BY "id"
+         FOR UPDATE`;
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const stale = changes
+      .filter((c) => {
+        const row = byId.get(c.id);
+        return (
+          !row ||
+          row.deleted ||
+          row.status !== c.expect.status ||
+          row.start.getTime() !== c.expect.start.getTime()
+        );
+      })
+      .map((c) => c.id);
+    if (stale.length > 0) throw new SeriesStaleError(stale);
   }
 
   async noticeContext(input: {

@@ -12,6 +12,8 @@ import { PrismaAppointmentRepository } from '../src/modules/appointments/infrast
 import { PrismaAppointmentSeriesRepository } from '../src/modules/appointments/infrastructure/repositories/prisma-appointment-series.repository';
 import {
   SeriesSlotWriteError,
+  SeriesStaleError,
+  type ApplySeriesChangesInput,
   type CreateSeriesRepoInput,
 } from '../src/modules/appointments/domain/ports/appointment-series-repository.port';
 import { overlapExclusionScope } from '../src/modules/appointments/application/appointment-overlap-error';
@@ -101,6 +103,13 @@ describe('DX-562 · citas en serie en la BD (int)', () => {
           guard,
           'recipient-and-tenant',
         ),
+      optOut: {
+        patientId: c.patientId,
+        tokenHash: createHash('sha256')
+          .update(`baja-${outboundId}`)
+          .digest('hex'),
+        expiresAt: new Date(Date.now() + 60 * 86_400_000),
+      },
       outbound: {
         id: outboundId,
         recipient: 'ana@example.com',
@@ -283,6 +292,12 @@ describe('DX-562 · citas en serie en la BD (int)', () => {
       language: 'es',
     });
     expect(sent.recipientMasked).not.toContain('ana@example.com');
+    // DX-128: el enlace de baja del email, en la misma transacción.
+    expect(
+      await raw.reminderOptOutLink.count({
+        where: { tokenHash: write.optOut!.tokenHash },
+      }),
+    ).toBe(1);
     expect(result.appointments.map((x) => x.series)).toEqual(
       [1, 2, 3].map((index) => ({ id: result.seriesId, index, total: 3 })),
     );
@@ -338,6 +353,12 @@ describe('DX-562 · citas en serie en la BD (int)', () => {
     ).toBe(before);
     expect(
       await raw.outboundMessage.count({ where: { id: write.outbound.id } }),
+    ).toBe(0);
+    // Sin aviso, sin enlace de baja suelto.
+    expect(
+      await raw.reminderOptOutLink.count({
+        where: { tokenHash: write.optOut!.tokenHash },
+      }),
     ).toBe(0);
   });
 
@@ -441,6 +462,14 @@ describe('DX-562 · citas en serie en la BD (int)', () => {
           tx.$executeRaw`DELETE FROM "appointment_series" WHERE "id" = ${created.seriesId}::uuid`,
       ),
     ).rejects.toThrow(/permission denied|permiso/i);
+    // Solo se crea: tampoco UPDATE (su estado sale de sus citas).
+    await expect(
+      prisma.runWithTenant(
+        a.tenantId,
+        (tx) =>
+          tx.$executeRaw`UPDATE "appointment_series" SET "occurrences" = 3 WHERE "id" = ${created.seriesId}::uuid`,
+      ),
+    ).rejects.toThrow(/permission denied|permiso/i);
   });
 
   const cancelPatch = (from: AppointmentStatus) => ({
@@ -457,19 +486,18 @@ describe('DX-562 · citas en serie en la BD (int)', () => {
     callbackRequestedAt: null,
   });
 
-  it('cancelar todas las pendientes en una transacción: datos de la cancelación, un evento y la serie cancelada; sin «Pendientes por agendar»', async () => {
+  it('cancelar todas las pendientes en una transacción: datos de la cancelación y un evento; sin «Pendientes por agendar»', async () => {
     const created = await asClinic(a, () =>
       repo.create(input(a, { slots: [slot(50), slot(51), slot(52)] })),
     );
     const updated = await asClinic(a, () =>
       repo.applyChanges({
-        seriesId: created.seriesId,
         changes: created.appointments.map((x) => ({
           id: x.id,
+          expect: { status: AppointmentStatus.SCHEDULED, start: x.start },
           patch: cancelPatch(AppointmentStatus.SCHEDULED),
         })),
         lock: null,
-        markCancelledBy: a.userId,
         auditEvent: (list) => ({
           tenantId: a.tenantId,
           locationId: a.locationId,
@@ -501,11 +529,6 @@ describe('DX-562 · citas en serie en la BD (int)', () => {
       lateCancellation: false,
     });
     expect(updated[0].noticeMinutes).toBeGreaterThan(0);
-    const series = await raw.appointmentSeries.findUniqueOrThrow({
-      where: { id: created.seriesId },
-    });
-    expect(series.cancelledById).toBe(a.userId);
-    expect(series.cancelledAt).not.toBeNull();
     expect(
       await raw.appointmentWaitlistEntry.count({
         where: { tenantId: a.tenantId },
@@ -524,7 +547,7 @@ describe('DX-562 · citas en serie en la BD (int)', () => {
     ).toBe(1);
   });
 
-  it('cancelar: si otra persona cambió una a la vez (estado leído), no se cancela ninguna', async () => {
+  it('cancelar: si otra persona cambió una a la vez (estado leído), SeriesStaleError con la fila bloqueada y no se cancela ninguna', async () => {
     const created = await asClinic(a, () =>
       repo.create(input(a, { slots: [slot(60), slot(61)] })),
     );
@@ -534,19 +557,21 @@ describe('DX-562 · citas en serie en la BD (int)', () => {
     });
     const error = await asClinic(a, () =>
       repo.applyChanges({
-        seriesId: created.seriesId,
         changes: created.appointments.map((x) => ({
           id: x.id,
+          expect: { status: AppointmentStatus.SCHEDULED, start: x.start },
           patch: cancelPatch(AppointmentStatus.SCHEDULED),
         })),
         lock: null,
-        markCancelledBy: a.userId,
         auditEvent: () => {
           throw new Error('no debería auditar');
         },
       }),
     ).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(SeriesSlotWriteError);
+    expect(error).toBeInstanceOf(SeriesStaleError);
+    expect((error as SeriesStaleError).appointmentIds).toEqual([
+      created.appointments[1].id,
+    ]);
     const rows = await raw.appointment.findMany({
       where: { seriesId: created.seriesId },
       orderBy: { seriesIndex: 'asc' },
@@ -578,13 +603,19 @@ describe('DX-562 · citas en serie en la BD (int)', () => {
     });
     const error = await asClinic(a, () =>
       repo.applyChanges({
-        seriesId: created.seriesId,
         changes: [
-          { id: created.appointments[1].id, patch: move(71) },
-          { id: created.appointments[0].id, patch: move(70) },
+          {
+            id: created.appointments[1].id,
+            expect: { status: AppointmentStatus.SCHEDULED, start: week(71) },
+            patch: move(71),
+          },
+          {
+            id: created.appointments[0].id,
+            expect: { status: AppointmentStatus.SCHEDULED, start: week(70) },
+            patch: move(70),
+          },
         ].reverse(),
         lock: { providerIds: [a.userId], locationId: a.locationId },
-        markCancelledBy: null,
         auditEvent: () => {
           throw new Error('no debería auditar');
         },
@@ -607,9 +638,9 @@ describe('DX-562 · citas en serie en la BD (int)', () => {
     );
     const updated = await asClinic(a, () =>
       repo.applyChanges({
-        seriesId: created.seriesId,
         changes: [...created.appointments].reverse().map((x, i) => ({
           id: x.id,
+          expect: { status: AppointmentStatus.SCHEDULED, start: x.start },
           patch: {
             start: week(83 - i),
             end: week(83 - i, 30),
@@ -619,7 +650,6 @@ describe('DX-562 · citas en serie en la BD (int)', () => {
           },
         })),
         lock: { providerIds: [a.userId], locationId: a.locationId },
-        markCancelledBy: null,
         auditEvent: (list) => ({
           tenantId: a.tenantId,
           locationId: a.locationId,
@@ -662,5 +692,167 @@ describe('DX-562 · citas en serie en la BD (int)', () => {
       );
       expect(due.map((d) => d.appointmentId)).toContain(appointment.id);
     }
+  });
+
+  const audit = (c: Clinic, reason: string) => (list: { id: string }[]) => ({
+    tenantId: c.tenantId,
+    locationId: c.locationId,
+    actor: { kind: 'user' as const, userId: c.userId, role: ClinicRole.ADMIN },
+    action: 'UPDATE' as const,
+    resourceType: 'APPOINTMENT' as const,
+    resourceId: list[0].id,
+    patient: { kind: 'patient' as const, id: c.patientId },
+    requestId: null,
+    ip: null,
+    userAgent: null,
+    metadata: { reason },
+  });
+
+  const moveChanges = (
+    list: { id: string; start: Date }[],
+    minutes: number,
+  ): ApplySeriesChangesInput['changes'] =>
+    [...list].reverse().map((x) => ({
+      id: x.id,
+      expect: { status: AppointmentStatus.SCHEDULED, start: x.start },
+      patch: {
+        start: new Date(x.start.getTime() + minutes * 60_000),
+        end: new Date(x.start.getTime() + (minutes + 30) * 60_000),
+        expectStatus: AppointmentStatus.SCHEDULED,
+        confirmationSentAt: null,
+        callbackRequestedAt: null,
+        revokeConfirmations: true as const,
+      },
+    }));
+
+  /** Ni un interbloqueo sin manejar ni un error que no sea del dominio. */
+  const expectNoDeadlock = (results: PromiseSettledResult<unknown>[]) => {
+    for (const r of results) {
+      if (r.status === 'rejected') {
+        expect(String((r.reason as Error)?.message)).not.toMatch(
+          /40P01|deadlock/i,
+        );
+        expect(
+          r.reason instanceof SeriesStaleError ||
+            r.reason instanceof SeriesSlotWriteError ||
+            (r.reason as { status?: number })?.status === 409,
+        ).toBe(true);
+      }
+    }
+  };
+
+  it('a la vez: mover la serie y un PATCH suelto de una de sus citas (mismo orden fila → agenda): sin interbloqueo', async () => {
+    for (let round = 0; round < 3; round++) {
+      const created = await asClinic(a, () =>
+        repo.create(
+          input(a, {
+            slots: [slot(100 + round * 3), slot(101 + round * 3)],
+          }),
+        ),
+      );
+      const second = created.appointments[1];
+      const results = await Promise.allSettled([
+        asClinic(a, () =>
+          repo.applyChanges({
+            changes: moveChanges(created.appointments, 60),
+            lock: { providerIds: [a.userId], locationId: a.locationId },
+            auditEvent: audit(a, 'APPOINTMENT_SERIES_MOVED'),
+          }),
+        ),
+        asClinic(a, () =>
+          appointments.update(second.id, {
+            start: new Date(second.start.getTime() + 120 * 60_000),
+            end: new Date(second.start.getTime() + 150 * 60_000),
+            revokeConfirmations: true,
+          }),
+        ),
+      ]);
+      expectNoDeadlock(results);
+      // El PATCH suelto siempre se aplica; la serie, o antes (y el PATCH
+      // pisa la 2.ª después) o se queda sin escribir porque la 2.ª cambió.
+      expect(results[1].status).toBe('fulfilled');
+      const row = await raw.appointment.findUniqueOrThrow({
+        where: { id: second.id },
+      });
+      expect(row.start).toEqual(
+        new Date(second.start.getTime() + 120 * 60_000),
+      );
+    }
+  });
+
+  it('a la vez: cancelar y mover la misma serie: se serializan (candado de series → filas por id); la segunda ve la fila cambiada y no escribe', async () => {
+    const created = await asClinic(a, () =>
+      repo.create(input(a, { slots: [slot(120), slot(121), slot(122)] })),
+    );
+    const results = await Promise.allSettled([
+      asClinic(a, () =>
+        repo.applyChanges({
+          changes: created.appointments.map((x) => ({
+            id: x.id,
+            expect: { status: AppointmentStatus.SCHEDULED, start: x.start },
+            patch: cancelPatch(AppointmentStatus.SCHEDULED),
+          })),
+          lock: null,
+          auditEvent: audit(a, 'APPOINTMENT_SERIES_CANCELLED'),
+        }),
+      ),
+      asClinic(a, () =>
+        repo.applyChanges({
+          changes: moveChanges(created.appointments, 60),
+          lock: { providerIds: [a.userId], locationId: a.locationId },
+          auditEvent: audit(a, 'APPOINTMENT_SERIES_MOVED'),
+        }),
+      ),
+    ]);
+    expectNoDeadlock(results);
+    expect(results.map((r) => r.status).sort()).toEqual([
+      'fulfilled',
+      'rejected',
+    ]);
+    const lost = results.find(
+      (r): r is PromiseRejectedResult => r.status === 'rejected',
+    )!;
+    expect(lost.reason).toBeInstanceOf(SeriesStaleError);
+    const rows = await raw.appointment.findMany({
+      where: { seriesId: created.seriesId },
+    });
+    // Todo de una operación o de la otra, nunca mezclado.
+    const cancelled = rows.filter((r) => r.status === 'CANCELLED').length;
+    const before = new Map(
+      created.appointments.map((x) => [x.id, x.start.getTime()]),
+    );
+    const moved = rows.filter(
+      (r) => r.start.getTime() !== before.get(r.id),
+    ).length;
+    expect([cancelled, moved].sort()).toEqual([0, 3]);
+  });
+
+  it('a la vez: una serie y una cita suelta sobre el mismo profesional y hora: una gana, la otra choca en la EXCLUDE, sin interbloqueo', async () => {
+    const results = await Promise.allSettled([
+      asClinic(a, () =>
+        repo.create(input(a, { slots: [slot(130), slot(131)] })),
+      ),
+      asClinic(a, () =>
+        appointments.create({
+          patientId: a.otherPatientId,
+          providerId: a.userId,
+          locationId: a.locationId,
+          start: week(131),
+          end: week(131, 30),
+          createdById: a.userId,
+        }),
+      ),
+    ]);
+    expect(results.map((r) => r.status).sort()).toEqual([
+      'fulfilled',
+      'rejected',
+    ]);
+    const lost = results.find(
+      (r): r is PromiseRejectedResult => r.status === 'rejected',
+    )!;
+    const reason: unknown = lost.reason;
+    const cause =
+      reason instanceof SeriesSlotWriteError ? reason.cause : reason;
+    expect(overlapExclusionScope(cause)).toBe('provider');
   });
 });

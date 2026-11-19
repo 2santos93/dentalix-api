@@ -109,13 +109,18 @@ export class AppointmentSeriesOccurrenceInputDto {
   start!: string;
 }
 
-export class CreateAppointmentSeriesDto extends AppointmentSeriesBaseDto {
+/**
+ * Crear: la MISMA recurrencia que la vista previa (`count` o `until`) y las
+ * fechas finales; el servidor vuelve a generar la propuesta y exige que cada
+ * fecha caiga en uno de sus días.
+ */
+export class CreateAppointmentSeriesDto extends PreviewAppointmentSeriesDto {
   @ApiProperty({
     type: [AppointmentSeriesOccurrenceInputDto],
     minItems: SERIES_MIN_OCCURRENCES,
     maxItems: SERIES_MAX_OCCURRENCES,
     description:
-      'Las fechas FINALES de la serie, tras la vista previa: cada una con su inicio (la propuesta, la alternativa elegida u otra hora); las omitidas no se envían. De 2 a 26, sin repetir. La duración de todas es la de la cita base (`end` − `start`, o la del tipo). La posición en la serie sale del orden por fecha.',
+      'Las fechas FINALES de la serie, tras la vista previa: cada una con su inicio (la propuesta, la alternativa elegida u otra hora del MISMO día civil de la sede); las omitidas no se envían. De 2 a 26, una por día de la propuesta (si no, 400: «Cada fecha tiene que caer en uno de los días de la serie…» o «Hay dos fechas para el mismo día de la serie.»). La duración de todas es la de la cita base (`end` − `start`, o la del tipo). La posición guardada en la serie (`series.index`) sale del orden por fecha entre las creadas; el `index` de un 409 es el de la vista previa.',
   })
   @IsArray()
   @ArrayMinSize(SERIES_MIN_OCCURRENCES, { message: SERIES_DATE_MESSAGES.count })
@@ -342,13 +347,22 @@ export class AppointmentSeriesChangeDto {
 }
 
 export class SeriesConflictItemDto {
-  @ApiProperty({ minimum: 1, maximum: 26 })
+  @ApiProperty({
+    minimum: 1,
+    maximum: 26,
+    description:
+      'Al crear: la posición de esa fecha en la vista previa (la propuesta), la misma que `occurrences[].index` del preview, aunque se omitieran otras. Al mover: la posición de la cita en la serie (`series.index`).',
+  })
   index!: number;
 
   @ApiPropertyOptional({ format: 'uuid' })
   appointmentId?: string;
 
-  @ApiProperty({ format: 'date-time' })
+  @ApiProperty({
+    format: 'date-time',
+    description:
+      'Al crear: el inicio ENVIADO para esa fecha (tal cual). Al mover: el nuevo inicio propuesto.',
+  })
   start!: string;
 
   @ApiProperty({ format: 'date-time' })

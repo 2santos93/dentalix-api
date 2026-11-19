@@ -32,11 +32,20 @@ import {
 } from '../../../notifications/email/domain/email-message';
 import { noticeRecipient } from '../../../patients/domain/communication/notice-recipient';
 import { emailReminderBlocker } from '../../../reminders/domain/reminder-eligibility';
-import { firstNameOnly } from '../../../appointment-confirmations/application/confirmation-token';
+import {
+  firstNameOnly,
+  generateConfirmationToken,
+  hashConfirmationToken,
+} from '../../../appointment-confirmations/application/confirmation-token';
+import { ConfigService } from '@nestjs/config';
+import { TenantLinkBaseService } from '../../../../shared/tenancy/tenant-link-base.service';
+import { optOutPositiveInteger } from '../../../reminders/application/opt-out-config';
+import { OPT_OUT_PATH } from '../../../reminders/application/reminder-opt-out-links';
 import type { Appointment } from '../../domain/entities/appointment.entity';
 import {
   APPOINTMENT_SERIES_REPOSITORY,
   SeriesSlotWriteError,
+  SeriesStaleError,
   type AppointmentSeriesRepository,
   type AppointmentSeriesSnapshot,
   type SeriesNoticeContext,
@@ -44,6 +53,7 @@ import {
 } from '../../domain/ports/appointment-series-repository.port';
 import {
   SeriesRecurrenceError,
+  type SeriesSlot,
   overlappingWithin,
   seriesDates,
   shiftedStart,
@@ -51,6 +61,7 @@ import {
 import { cancellationAuditMetadata } from '../../domain/cancellation-audit';
 import {
   APPOINTMENT_SERIES_CONFLICT_CODE,
+  APPOINTMENT_SERIES_STALE_CODE,
   SERIES_MESSAGES,
   SERIES_PENDING_STATUSES,
   followingAppointments,
@@ -96,9 +107,12 @@ export interface PreviewSeriesInput extends SeriesBaseInput {
   until?: string;
 }
 
-export interface CreateSeriesInput extends SeriesBaseInput {
-  intervalWeeks: number;
-  /** Las fechas finales (la propuesta o la hora elegida); las omitidas no van. */
+export interface CreateSeriesInput extends PreviewSeriesInput {
+  /**
+   * Las fechas finales: cada una en el día civil (zona de la sede) de una
+   * fecha distinta de la propuesta (`count`/`until` desde la base), a su hora
+   * o a otra; las omitidas no van.
+   */
   occurrences: { start: Date }[];
   /** Mandar el aviso único al paciente (por defecto sí). */
   notifyPatient: boolean;
@@ -213,7 +227,18 @@ export class AppointmentSeriesUseCase {
     private readonly email: EmailOutbox,
     private readonly tenantContext: TenantContextService,
     private readonly outbound: OutboundMessages,
-  ) {}
+    private readonly linkBases: TenantLinkBaseService,
+    config: ConfigService,
+  ) {
+    // El mismo TTL que el enlace de baja del recordatorio (DX-128).
+    this.optOutTtlDays = optOutPositiveInteger(
+      config,
+      'REMINDER_OPT_OUT_LINK_TTL_DAYS',
+      60,
+    );
+  }
+
+  private readonly optOutTtlDays: number;
 
   // ---------------------------------------------------------------------------
   // Crear
@@ -260,19 +285,38 @@ export class AppointmentSeriesUseCase {
     const context = await this.create.prepareSeries(
       this.baseInput(input, ctx.actor.role),
     );
+    const timeZone = await this.timeZoneOf(context.input.locationId);
+    // El servidor vuelve a generar la propuesta: cada fecha enviada cae en el
+    // día de una suya (la misma hora, la alternativa u otra hora ese día), y
+    // su `index` es el de la vista previa (así la web casa el 409).
+    const proposal = this.generate(input, context, timeZone);
+    const indexByDay = new Map(
+      proposal.map((p) => [civilDateIn(p.start, timeZone), p.index]),
+    );
     const starts = input.occurrences
       .map((o) => o.start)
       .sort((a, b) => a.getTime() - b.getTime());
-    if (new Set(starts.map((s) => s.getTime())).size !== starts.length) {
-      throw new BadRequestException(SERIES_MESSAGES.duplicateStarts);
-    }
-    const slots = starts.map((start) => ({
-      start,
-      end: new Date(start.getTime() + context.durationMs),
-    }));
+    const used = new Set<number>();
+    const slots = starts.map((start) => {
+      const index = indexByDay.get(civilDateIn(start, timeZone));
+      if (index === undefined) {
+        throw new BadRequestException(
+          SERIES_MESSAGES.offPattern(input.intervalWeeks),
+        );
+      }
+      if (used.has(index)) {
+        throw new BadRequestException(SERIES_MESSAGES.sameDay);
+      }
+      used.add(index);
+      return {
+        index,
+        start,
+        end: new Date(start.getTime() + context.durationMs),
+      };
+    });
     const checked = await this.checkNewSlots(context, slots);
     const conflicts = conflictsOf(
-      checked.map((c, i) => ({ ...c, index: i + 1 })),
+      checked.map((c, i) => ({ ...c, index: slots[i].index })),
     );
     if (conflicts.length > 0) throw seriesConflict(conflicts);
 
@@ -293,21 +337,23 @@ export class AppointmentSeriesUseCase {
         notes: context.input.notes ?? null,
         createdById: ctx.actor.userId,
         actorRole: ctx.actor.role,
-        slots,
+        slots: slots.map(({ start, end }) => ({ start, end })),
         audit: ctx,
         email: prepared?.write ?? null,
       });
     } catch (error) {
-      throw await this.writeConflict(error, (at) =>
+      const mapped = await this.writeConflict(error, (at) =>
         'position' in at
           ? {
-              index: at.position + 1,
+              index: slots[at.position].index,
               start: slots[at.position].start,
               end: slots[at.position].end,
               chairId: context.chair?.id ?? null,
             }
           : null,
       );
+      // El repositorio ya reintentó el 40P01 una vez.
+      throw isDeadlockError(mapped) ? busyConflict() : mapped;
     }
     // Tras el COMMIT: el log y el despachador, solo si quedó encolado.
     if (prepared && created.notice === 'QUEUED') {
@@ -349,7 +395,17 @@ export class AppointmentSeriesUseCase {
    * agendar». Las atendidas, en clínica, canceladas y anteriores no se tocan.
    * Sin ninguna que cancelar: 200 con la lista vacía.
    */
-  async cancelFollowing(
+  cancelFollowing(
+    seriesId: string,
+    input: CancelSeriesInput,
+    ctx: AuditRequestContext,
+  ): Promise<SeriesChangeResult> {
+    return replanOnDeadlock(() =>
+      this.cancelFollowingOnce(seriesId, input, ctx),
+    );
+  }
+
+  private async cancelFollowingOnce(
     seriesId: string,
     input: CancelSeriesInput,
     ctx: AuditRequestContext,
@@ -367,6 +423,7 @@ export class AppointmentSeriesUseCase {
     for (const appointment of targets) {
       changes.push({
         id: appointment.id,
+        expect: { status: appointment.status, start: appointment.start },
         patch: await this.update.planSeriesCancellation(
           appointment,
           input.cancellation,
@@ -380,10 +437,8 @@ export class AppointmentSeriesUseCase {
     let appointments: Appointment[];
     try {
       appointments = await this.series.applyChanges({
-        seriesId,
         changes,
         lock: null,
-        markCancelledBy: ctx.actor.userId,
         auditEvent: (updated) => ({
           ...this.auditBase(ctx, updated[0]),
           action: 'UPDATE',
@@ -442,7 +497,16 @@ export class AppointmentSeriesUseCase {
    * alguna choca, 409 `APPOINTMENT_SERIES_CONFLICT` con todas y no se mueve
    * ninguna; la web pide ajustarlas una a una.
    */
-  async moveFollowing(
+  moveFollowing(
+    seriesId: string,
+    input: MoveSeriesInput,
+    ctx: AuditRequestContext,
+  ): Promise<SeriesChangeResult> {
+    // Un 40P01 vuelve a planificar desde cero (no repite el plan viejo).
+    return replanOnDeadlock(() => this.moveFollowingOnce(seriesId, input, ctx));
+  }
+
+  private async moveFollowingOnce(
     seriesId: string,
     input: MoveSeriesInput,
     ctx: AuditRequestContext,
@@ -456,29 +520,40 @@ export class AppointmentSeriesUseCase {
       })),
     );
     if (conflicts.length > 0) throw seriesConflict(conflicts);
-    // Hacia delante se escribe desde la última (cada una deja libre la hora
-    // a la que llega la anterior); hacia atrás, desde la primera.
+    // Por FECHA actual (no por posición: una pudo moverse suelta fuera de
+    // orden), en la dirección del desplazamiento: hacia delante desde la
+    // última (cada una deja libre la hora a la que llega la anterior), hacia
+    // atrás desde la primera. La EXCLUDE no es diferible: así no choca
+    // consigo misma.
     const later = input.start.getTime() > plan.pivot.start.getTime();
-    const ordered = later ? [...plan.items].reverse() : plan.items;
+    const ordered = [...plan.items].sort((a, b) =>
+      later
+        ? b.appointment.start.getTime() - a.appointment.start.getTime()
+        : a.appointment.start.getTime() - b.appointment.start.getTime(),
+    );
     let appointments: Appointment[];
     try {
       appointments = await this.series.applyChanges({
-        seriesId,
         changes: ordered.map((item) => ({
           id: item.appointment.id,
+          expect: {
+            status: item.appointment.status,
+            start: item.appointment.start,
+          },
           patch: this.update.planSeriesMove(item.appointment, item, ctx),
         })),
         lock: {
           providerIds: plan.items.map((i) => i.appointment.providerId),
           locationId: plan.pivot.locationId,
         },
-        markCancelledBy: null,
         auditEvent: (updated) => {
           const byIndex = [...updated].sort(
             (a, b) => a.series!.index - b.series!.index,
           );
+          const pivotAfter =
+            updated.find((a) => a.id === plan.pivot.id) ?? byIndex[0];
           return {
-            ...this.auditBase(ctx, byIndex[0]),
+            ...this.auditBase(ctx, pivotAfter),
             action: 'UPDATE',
             metadata: {
               reason: 'APPOINTMENT_SERIES_MOVED',
@@ -490,7 +565,7 @@ export class AppointmentSeriesUseCase {
               // La cita pivote, antes y después (como APPOINTMENT_MOVED).
               move: {
                 from: slotOf(plan.pivot),
-                to: slotOf(byIndex[0]),
+                to: slotOf(pivotAfter),
               },
             },
           };
@@ -545,7 +620,7 @@ export class AppointmentSeriesUseCase {
     input: PreviewSeriesInput,
     context: SeriesSlotContext,
     timeZone: string,
-  ): { start: Date; end: Date }[] {
+  ): SeriesSlot[] {
     try {
       return seriesDates({
         start: context.input.start,
@@ -790,6 +865,11 @@ export class AppointmentSeriesUseCase {
       // El registro del envío y el email se enlazan por este id (como el
       // recordatorio: `referenceId` = el de `outbound_messages`).
       const outboundId = randomUUID();
+      // DX-128: la baja al pie, como el recordatorio (por el host de
+      // PLATAFORMA de la clínica; sin host seguro, sin enlace). Su fila va
+      // en la transacción de la serie, solo si el email se encola.
+      const linkBase = await this.linkBases.forTenant(tenantId);
+      const optOutToken = linkBase ? generateConfirmationToken() : null;
       const prepared = await this.email.prepareInTx({
         tenantId,
         to: recipient.email,
@@ -809,12 +889,25 @@ export class AppointmentSeriesUseCase {
           dateLabels: slots.map((s) =>
             format.longDateTime(s.start, notice.locationTimeZone),
           ),
+          unsubscribeUrl:
+            linkBase && optOutToken
+              ? `${linkBase}${OPT_OUT_PATH}/${optOutToken}`
+              : null,
         },
       });
       return {
         prepared,
         write: {
           insert: (tx) => prepared.insert(tx),
+          optOut: optOutToken
+            ? {
+                patientId: context.input.patientId,
+                tokenHash: hashConfirmationToken(optOutToken),
+                expiresAt: new Date(
+                  Date.now() + this.optOutTtlDays * 86_400_000,
+                ),
+              }
+            : null,
           outbound: {
             id: outboundId,
             recipient: recipient.email,
@@ -884,12 +977,12 @@ export class AppointmentSeriesUseCase {
       at: SeriesSlotWriteError['at'],
     ) => (Omit<SeriesConflict, 'reasons'> & { chairId: string | null }) | null,
   ): Promise<unknown> {
-    if (!(error instanceof SeriesSlotWriteError)) {
-      return isDeadlockError(error) ? busyConflict() : error;
-    }
+    if (error instanceof SeriesStaleError) return staleConflict(error);
+    if (!(error instanceof SeriesSlotWriteError)) return error;
     const cause = error.cause;
-    if (cause instanceof HttpException) return cause;
-    if (isDeadlockError(cause)) return busyConflict();
+    // Una excepción HTTP de las reglas de la cita, o un interbloqueo (lo
+    // decide quien llama: replanificar o 409 sin fechas): tal cual.
+    if (cause instanceof HttpException || isDeadlockError(cause)) return cause;
     const slot = locate(error.at);
     let reason: SeriesConflictReason | null = null;
     if (cause instanceof ScheduleBlockedRaceError) {
@@ -912,7 +1005,10 @@ export class AppointmentSeriesUseCase {
         };
       }
     }
-    if (!reason) return error;
+    // Sin razón conocida, la causa SIN el envoltorio: así el filtro de Prisma
+    // la mapea como en la cita suelta (P2028/40001 → 503 con Retry-After,
+    // P2002 → 409, 23503 → 409/404…) y nunca sale un 500 por el envoltorio.
+    if (!reason) return cause;
     if (!slot) return busyConflict();
     const { chairId: _chair, ...located } = slot;
     return seriesConflict([{ ...located, reasons: [reason] }]);
@@ -998,7 +1094,36 @@ export function closestStart(
     : { start: new Date(best), end: new Date(best + durationMs) };
 }
 
-function isDeadlockError(error: unknown): boolean {
+/**
+ * DX-562: cancelar y mover «esta y las siguientes» ante un 40P01: se vuelve
+ * a leer la serie y a planificar desde cero una vez (nunca se repite el plan
+ * viejo); si vuelve a pasar, 409 sin fechas.
+ */
+async function replanOnDeadlock<T>(run: () => Promise<T>): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if (!isDeadlockError(error)) throw error;
+  }
+  try {
+    return await run();
+  } catch (error) {
+    throw isDeadlockError(error) ? busyConflict() : error;
+  }
+}
+
+/** 409 `APPOINTMENT_SERIES_STALE`: alguna cita cambió entre leer y escribir. */
+function staleConflict(error: SeriesStaleError): ConflictException {
+  return new ConflictException({
+    statusCode: 409,
+    error: 'Conflict',
+    code: APPOINTMENT_SERIES_STALE_CODE,
+    message: SERIES_MESSAGES.stale,
+    appointmentIds: error.appointmentIds,
+  });
+}
+
+export function isDeadlockError(error: unknown): boolean {
   const message = (error as { message?: unknown })?.message;
   return (
     typeof message === 'string' &&

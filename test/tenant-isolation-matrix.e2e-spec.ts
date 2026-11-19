@@ -882,6 +882,7 @@ async function seedSeries(
     start: futureAt(daysAhead, 15),
     end: futureAt(daysAhead, 16),
     intervalWeeks: 1,
+    count: 2,
     notifyPatient: false,
     occurrences: [
       { start: futureAt(daysAhead, 15) },
@@ -3744,7 +3745,8 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
                 ],
                 notifyPatient: false,
               }
-            : { count: 2 }),
+            : {}),
+          count: 2,
           ...patch(),
         }),
         bodyIds: [field],

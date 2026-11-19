@@ -420,6 +420,8 @@ export class UpdateAppointmentUseCase {
     return {
       start: slot.start,
       end: slot.end,
+      // Condicionado al estado leído, como un paso del flujo: si cambió, 409.
+      expectStatus: existing.status,
       confirmationSentAt: null,
       callbackRequestedAt: null,
       revokeConfirmations: true,

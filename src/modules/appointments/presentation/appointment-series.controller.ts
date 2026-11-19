@@ -52,8 +52,11 @@ interface AuthenticatedRequest {
   headers: Record<string, string | string[] | undefined>;
 }
 
+const STALE_DESCRIPTION =
+  '`code: APPOINTMENT_SERIES_STALE` (`appointmentIds`): alguna cita cambió entre leer la serie y escribir (otra persona la movió, la canceló o la atendió); con las filas bloqueadas no coincide su estado o su hora y no se escribió nada.';
+
 const CONFLICT_DESCRIPTION =
-  '`code: APPOINTMENT_SERIES_CONFLICT`: alguna fecha ya no se puede agendar (revisada otra vez en el servidor, o la BD resolvió una carrera). `conflicts` trae TODAS las que chocan, con su posición y sus razones (mismos códigos que la vista previa); no se escribió nada: vuelve a la vista previa. `conflicts` vacío = otra escritura a la vez no dejó terminar (reintentar).';
+  '`code: APPOINTMENT_SERIES_CONFLICT`: alguna fecha ya no se puede agendar (revisada otra vez en el servidor, o la BD resolvió una carrera). `conflicts` trae TODAS las que chocan, con su `index` (al crear, el de la vista previa; al mover, `series.index`), el `start` enviado o propuesto y sus razones (mismos códigos que la vista previa); no se escribió nada: vuelve a la vista previa. `conflicts` vacío = otra escritura a la vez no dejó terminar (reintentar).';
 
 /**
  * DX-562: citas en serie («cada N semanas, N veces o hasta una fecha»). Mismos
@@ -108,11 +111,11 @@ export class AppointmentSeriesController {
   @ApiCreatedResponse({
     type: CreatedAppointmentSeriesDto,
     description:
-      'D4: crea la serie con las fechas finales, en UNA transacción (candado de la agenda, bloqueos y EXCLUDE de la BD como árbitro): todas o ninguna. Cada cita con `series` (posición y total); recordatorios por cita como siempre. El prospecto del paciente (DX-556) se mueve una vez. UN `audit_event` CREATE APPOINTMENT `APPOINTMENT_SERIES_CREATED` con la serie, sus citas y sus fechas. Con `notifyPatient` (por defecto), UN email con todas las fechas.',
+      'D4: crea la serie con las fechas finales, en UNA transacción (candado de la agenda, bloqueos y EXCLUDE de la BD como árbitro): todas o ninguna. Cada cita con `series` (posición y total); recordatorios por cita como siempre. El prospecto del paciente (DX-556) se mueve una vez. UN `audit_event` CREATE APPOINTMENT `APPOINTMENT_SERIES_CREATED` con la serie, sus citas y sus fechas. Con `notifyPatient` (por defecto), UN email con todas las fechas y el enlace de baja (DX-128), si cabe en el tope de emails; si no, la serie se crea igual (`notifyReason: QUOTA`). Lleva la MISMA recurrencia que la vista previa (`count`/`until`): el servidor regenera la propuesta y cada fecha enviada tiene que caer en uno de sus días.',
   })
   @ApiBadRequestResponse({
     description:
-      'Datos inválidos (como al agendar), menos de 2 o más de 26 fechas, fechas repetidas o intervalo fuera de 1–12',
+      'Datos inválidos (como al agendar o como la vista previa: `count`/`until` e intervalo), menos de 2 o más de 26 fechas, una fecha fuera de los días de la serie («Cada fecha tiene que caer en uno de los días de la serie…») o dos el mismo día («Hay dos fechas para el mismo día de la serie.»)',
   })
   @ApiForbiddenResponse({ description: 'Sede no permitida al usuario' })
   @ApiNotFoundResponse({
@@ -129,6 +132,8 @@ export class AppointmentSeriesController {
     return this.series.createSeries(
       {
         ...this.base(dto),
+        count: dto.count,
+        until: dto.until,
         occurrences: dto.occurrences.map((o) => ({ start: new Date(o.start) })),
         notifyPatient: dto.notifyPatient ?? true,
       },
@@ -155,8 +160,7 @@ export class AppointmentSeriesController {
     description: 'Serie de otra clínica, o la cita no es de la serie',
   })
   @ApiConflictResponse({
-    description:
-      'Otra persona cambió el estado de alguna cita mientras tanto (no se canceló ninguna)',
+    description: `${STALE_DESCRIPTION} Un interbloqueo se replanifica una vez; si vuelve, \`APPOINTMENT_SERIES_CONFLICT\` con \`conflicts: []\`.`,
   })
   cancel(
     @Param('id', ParseUUIDPipe) id: string,
@@ -223,7 +227,7 @@ export class AppointmentSeriesController {
   })
   @ApiConflictResponse({
     type: AppointmentSeriesConflictDto,
-    description: `${CONFLICT_DESCRIPTION} También: la cita no se puede mover, o las citas están en sedes distintas.`,
+    description: `${CONFLICT_DESCRIPTION} También: la cita no se puede mover, o las citas están en sedes distintas. ${STALE_DESCRIPTION} Un interbloqueo se replanifica una vez desde cero.`,
   })
   move(
     @Param('id', ParseUUIDPipe) id: string,

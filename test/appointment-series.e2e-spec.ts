@@ -10,6 +10,10 @@ import {
   resetDatabase,
   seedMember,
 } from './support/e2e-fixtures';
+import {
+  REGIONAL_CARACAS_FIXTURE,
+  locationBody,
+} from './support/location-fixtures';
 
 // DX-562: citas en serie por HTTP real (Caracas, UTC−4, horario de alta).
 //  - vista previa: las fechas con la misma hora, las que chocan con TODAS
@@ -251,6 +255,7 @@ describe('Citas en serie (e2e, DX-562)', () => {
     const before = await appointmentCount();
     const res = await create(
       base({
+        count: 6,
         occurrences: previewBody.occurrences.map((o) => ({ start: o.start })),
       }),
     ).expect(409);
@@ -263,6 +268,35 @@ describe('Citas en serie (e2e, DX-562)', () => {
       [3, 'LOCATION_HOLIDAY'],
       [5, 'PROVIDER_OVERLAP'],
     ]);
+    // Omitida la 3.ª (el festivo), el 409 sigue nombrando la 5.ª de la vista
+    // previa (no la 4.ª de las enviadas) con el `start` enviado.
+    const omitted = await create(
+      base({
+        count: 6,
+        occurrences: previewBody.occurrences
+          .filter((o) => o.index !== 3)
+          .map((o) => ({ start: o.start })),
+      }),
+    ).expect(409);
+    expect((omitted.body as ConflictBody).conflicts).toEqual([
+      expect.objectContaining({
+        index: 5,
+        start: previewBody.occurrences[4].start,
+      }),
+    ]);
+    // Una fecha fuera de los días de la serie: 400.
+    const offDay = await create(
+      base({
+        count: 6,
+        occurrences: [
+          { start: at(firstMonday) },
+          { start: at(plusDays(firstMonday, 1)) },
+        ],
+      }),
+    ).expect(400);
+    expect((offDay.body as { message: string }).message).toBe(
+      'Cada fecha tiene que caer en uno de los días de la serie (cada semana desde la primera cita). Para otro día, agenda una cita aparte.',
+    );
     expect(await appointmentCount()).toBe(before);
     expect(await seriesCount()).toBe(0);
   });
@@ -273,9 +307,9 @@ describe('Citas en serie (e2e, DX-562)', () => {
     const occurrences = previewBody.occurrences
       .filter((o) => o.reasons[0]?.code !== 'LOCATION_HOLIDAY')
       .map((o) => ({ start: o.alternative?.start ?? o.start }));
-    const res = await create(base({ intervalWeeks: 1, occurrences })).expect(
-      201,
-    );
+    const res = await create(
+      base({ intervalWeeks: 1, count: 6, occurrences }),
+    ).expect(201);
     created = res.body as CreatedBody;
     expect(created.intervalWeeks).toBe(1);
     expect(created.patientNotified).toBe(true);
@@ -299,7 +333,6 @@ describe('Citas en serie (e2e, DX-562)', () => {
       intervalWeeks: 1,
       occurrences: 5,
       createdById: clinic.adminUserId,
-      cancelledAt: null,
     });
     const events = await raw.auditEvent.findMany({
       where: {
@@ -381,6 +414,7 @@ describe('Citas en serie (e2e, DX-562)', () => {
         patientId: leadPatientId,
         start: at(day, '13:00'),
         end: at(day, '13:30'),
+        count: 3,
         notifyPatient: false,
         occurrences: [0, 7, 14].map((n) => ({
           start: at(plusDays(day, n), '13:00'),
@@ -407,8 +441,9 @@ describe('Citas en serie (e2e, DX-562)', () => {
     const res = await create(
       base({
         patientId: otherPatientId,
-        start: at(firstMonday, '15:00'),
-        end: at(firstMonday, '15:30'),
+        start: at(plusDays(firstMonday, 1), '15:00'),
+        end: at(plusDays(firstMonday, 1), '15:30'),
+        count: 2,
         notifyPatient: false,
         occurrences: [
           { start: at(plusDays(firstMonday, 1), '15:00') },
@@ -434,6 +469,7 @@ describe('Citas en serie (e2e, DX-562)', () => {
         patientId: patient,
         start: at(day, '16:00'),
         end: at(day, '16:30'),
+        count: 2,
         notifyPatient: false,
         occurrences: [
           { start: at(day, '16:00') },
@@ -511,14 +547,6 @@ describe('Citas en serie (e2e, DX-562)', () => {
       cancellation: { byKind: 'STAFF_FOR_PATIENT', reasonCode: 'WORK' },
     });
     expect(JSON.stringify(events[0].metadata)).not.toContain('turno');
-    // Quedan pendientes: la serie no está cancelada.
-    expect(
-      (
-        await raw.appointmentSeries.findUniqueOrThrow({
-          where: { id: created.seriesId },
-        })
-      ).cancelledAt,
-    ).toBeNull();
     // Repetirlo no cancela nada más.
     const again = await as(
       api().post(`/api/v1/appointments/series/${created.seriesId}/cancel`),
@@ -582,6 +610,7 @@ describe('Citas en serie (e2e, DX-562)', () => {
       base({
         start: at(day, '13:00'),
         end: at(day, '13:45'),
+        count: 4,
         notifyPatient: false,
         occurrences: [0, 7, 14, 21].map((n) => ({
           start: at(plusDays(day, n), '13:00'),
@@ -707,5 +736,236 @@ describe('Citas en serie (e2e, DX-562)', () => {
     expect((res.body as { message: string }).message).toBe(
       'La cita no es de esta serie.',
     );
+  });
+
+  // --- Revisión independiente (DX-562) -------------------------------------
+
+  it('equivalencia: hueco reservado, sillón ocupado, fuera del horario de la sede y del profesional (estricto) salen igual en la vista previa y en el 409', async () => {
+    const dentist = await seedMember(raw, clinic, ClinicRole.DENTIST);
+    const urgent = await as(api().post('/api/v1/appointment-types'))
+      .send({
+        name: 'Urgencia de la serie',
+        durationMinutes: 30,
+        color: '#DC2626',
+        isUrgent: true,
+      })
+      .expect(201);
+    const chair = await as(api().post('/api/v1/chairs'))
+      .send({ locationId: mainId, name: 'Sillón serie' })
+      .expect(201);
+    const chairId = (chair.body as { id: string }).id;
+    const day = plusDays(firstMonday, 49);
+    // 2.ª fecha: un hueco reservado para urgencias en la agenda del dentista.
+    await as(api().post('/api/v1/schedule-blocks'))
+      .send({
+        providerId: dentist.userId,
+        locationId: mainId,
+        start: at(plusDays(day, 7), '13:45'),
+        end: at(plusDays(day, 7), '15:00'),
+        kind: 'RESERVED',
+        reservedForTypeIds: [(urgent.body as { id: string }).id],
+      })
+      .expect(201);
+    // 3.ª fecha: el sillón lo ocupa otra cita (de otro profesional y paciente).
+    await as(api().post('/api/v1/appointments'))
+      .send({
+        patientId: otherPatientId,
+        providerId: clinic.adminUserId,
+        chairId,
+        start: at(plusDays(day, 14), '14:00'),
+        end: at(plusDays(day, 14), '14:30'),
+      })
+      .expect(201);
+    const body = (over: object = {}) =>
+      base({
+        providerId: dentist.userId,
+        chairId,
+        start: at(day),
+        end: at(day, '14:30'),
+        count: 4,
+        notifyPatient: false,
+        ...over,
+      });
+    const codesOf = (b: SeriesPreviewBody) =>
+      b.occurrences.map((o) => o.reasons.map((r) => r.code));
+    const conflictCodes = (b: ConflictBody) =>
+      b.conflicts.map((c) => [c.index, c.reasons.map((r) => r.code)]);
+
+    const seen = (await preview(body()).expect(200)).body as SeriesPreviewBody;
+    expect(codesOf(seen)).toEqual([
+      [],
+      ['RESERVED_SLOT'],
+      ['CHAIR_OVERLAP'],
+      [],
+    ]);
+    const all = seen.occurrences.map((o) => ({ start: o.start }));
+    const refused = (await create(body({ occurrences: all })).expect(409))
+      .body as ConflictBody;
+    expect(conflictCodes(refused)).toEqual([
+      [2, ['RESERVED_SLOT']],
+      [3, ['CHAIR_OVERLAP']],
+    ]);
+
+    // Fuera del horario de la sede (13:30–14:00 de Caracas, entre tramos).
+    const lunch = (over: object = {}) =>
+      body({
+        start: at(day, '17:30'),
+        end: at(day, '18:00'),
+        count: 2,
+        ...over,
+      });
+    const hours = (await preview(lunch()).expect(200))
+      .body as SeriesPreviewBody;
+    expect(codesOf(hours)).toEqual([['BUSINESS_HOURS'], ['BUSINESS_HOURS']]);
+    const hoursRefused = (
+      await create(
+        lunch({
+          occurrences: hours.occurrences.map((o) => ({ start: o.start })),
+        }),
+      ).expect(409)
+    ).body as ConflictBody;
+    expect(conflictCodes(hoursRefused)).toEqual([
+      [1, ['BUSINESS_HOURS']],
+      [2, ['BUSINESS_HOURS']],
+    ]);
+
+    // El dentista solo atiende los martes y la clínica está en modo estricto.
+    await as(api().put(`/api/v1/providers/${dentist.userId}/schedule`))
+      .send({
+        locations: [
+          {
+            locationId: mainId,
+            ranges: [{ weekday: 2, startMinute: 540, endMinute: 780 }],
+          },
+        ],
+      })
+      .expect(200);
+    await as(api().put('/api/v1/schedule/settings'))
+      .send({ strictProviderSchedule: true })
+      .expect(200);
+    try {
+      const plain = (over: object = {}) =>
+        body({
+          chairId: undefined,
+          start: at(plusDays(day, 28)),
+          end: at(plusDays(day, 28), '14:30'),
+          count: 2,
+          ...over,
+        });
+      const off = (await preview(plain()).expect(200))
+        .body as SeriesPreviewBody;
+      expect(codesOf(off)).toEqual([
+        ['PROVIDER_OFF_SCHEDULE'],
+        ['PROVIDER_OFF_SCHEDULE'],
+      ]);
+      const offRefused = (
+        await create(
+          plain({
+            occurrences: off.occurrences.map((o) => ({ start: o.start })),
+          }),
+        ).expect(409)
+      ).body as ConflictBody;
+      expect(conflictCodes(offRefused)).toEqual([
+        [1, ['PROVIDER_OFF_SCHEDULE']],
+        [2, ['PROVIDER_OFF_SCHEDULE']],
+      ]);
+    } finally {
+      await as(api().put('/api/v1/schedule/settings'))
+        .send({ strictProviderSchedule: false })
+        .expect(200);
+    }
+  });
+
+  it('mover hacia delante con una cita movida suelta fuera de orden: se escribe por fecha y no choca consigo misma', async () => {
+    const day = plusDays(firstMonday, 44); // miércoles
+    const made = (
+      await create(
+        base({
+          start: at(day, '13:00'),
+          end: at(day, '13:30'),
+          count: 3,
+          notifyPatient: false,
+          occurrences: [0, 7, 14].map((n) => ({
+            start: at(plusDays(day, n), '13:00'),
+          })),
+        }),
+      ).expect(201)
+    ).body as CreatedBody;
+    // La 2.ª, suelta, a una semana DESPUÉS de la 3.ª.
+    await as(api().patch(`/api/v1/appointments/${made.appointments[1].id}`))
+      .send({
+        start: at(plusDays(day, 21), '13:00'),
+        end: at(plusDays(day, 21), '13:30'),
+      })
+      .expect(200);
+    // +7 días: la 3.ª llega a la hora que deja la 2.ª.
+    const moved = (
+      await as(api().post(`/api/v1/appointments/series/${made.seriesId}/move`))
+        .send({
+          fromAppointmentId: made.appointments[0].id,
+          start: at(plusDays(day, 7), '13:00'),
+        })
+        .expect(200)
+    ).body as { appointments: AppointmentBody[] };
+    expect(moved.appointments.map((a) => [a.series?.index, a.start])).toEqual([
+      [1, at(plusDays(day, 7), '13:00')],
+      [2, at(plusDays(day, 28), '13:00')],
+      [3, at(plusDays(day, 21), '13:00')],
+    ]);
+  });
+
+  it('una serie y una cita suelta a la vez sobre la misma hora: una gana, la otra 409, sin 500', async () => {
+    const day = plusDays(firstMonday, 45); // jueves
+    const results = await Promise.all([
+      create(
+        base({
+          start: at(day, '13:00'),
+          end: at(day, '13:30'),
+          count: 2,
+          notifyPatient: false,
+          occurrences: [0, 7].map((n) => ({
+            start: at(plusDays(day, n), '13:00'),
+          })),
+        }),
+      ),
+      as(api().post('/api/v1/appointments')).send({
+        patientId: otherPatientId,
+        providerId: clinic.adminUserId,
+        start: at(plusDays(day, 7), '13:00'),
+        end: at(plusDays(day, 7), '13:30'),
+      }),
+    ]);
+    expect(results.map((r) => r.status).sort()).toEqual([201, 409]);
+  });
+
+  it('cancelar la serie siendo de una sede no permitida al usuario: 403 y no se cancela nada', async () => {
+    const otherLocation = await as(api().post('/api/v1/locations'))
+      .send(locationBody(REGIONAL_CARACAS_FIXTURE, { name: 'Sede Este' }))
+      .expect(201);
+    const otherLocationId = (otherLocation.body as { id: string }).id;
+    const reception = await seedMember(raw, clinic, ClinicRole.RECEPTION);
+    await as(api().put(`/api/v1/staff/${reception.userId}/locations`))
+      .send({ locationIds: [otherLocationId] })
+      .expect(200);
+    const token = await loginAs(app, clinic.host, reception.email);
+    const res = await api()
+      .post(`/api/v1/appointments/series/${created.seriesId}/cancel`)
+      .set('X-Tenant-Host', clinic.host)
+      .set('Authorization', `Bearer ${token}`)
+      .set('X-Location-Id', otherLocationId)
+      .send({
+        fromAppointmentId: created.appointments[0].id,
+        cancelledByKind: 'CLINIC',
+        cancelReasonCode: 'CLINIC_RESCHEDULE',
+      })
+      .expect(403);
+    expect(typeof (res.body as { message: string }).message).toBe('string');
+    expect(
+      (
+        await raw.appointment.findUniqueOrThrow({
+          where: { id: created.appointments[0].id },
+        })
+      ).status,
+    ).not.toBe('CANCELLED');
   });
 });

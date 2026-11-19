@@ -20,6 +20,8 @@ export interface AppointmentSeriesTexts {
   }) => string;
   datesLead: string;
   note: string;
+  unsubscribeLead: string;
+  unsubscribeLabel: string;
   buttonFallback: string;
   footerClinic: (clinic: string, product: string) => string;
   footerPlatform: (product: string) => string;
@@ -43,6 +45,8 @@ export const APPOINTMENT_SERIES_CATALOG: Readonly<
     },
     datesLead: 'Fechas y horas:',
     note: 'Si necesitas cambiar o cancelar alguna, avisa a la clínica por su canal habitual. Si no esperabas este correo, avisa a la clínica.',
+    unsubscribeLead: '¿No quieres recibir más avisos de la clínica?',
+    unsubscribeLabel: 'Dejar de recibir avisos',
     buttonFallback:
       'Si el botón no funciona, copia este enlace en tu navegador:',
     footerClinic: (clinic, product) =>
@@ -64,6 +68,8 @@ export const APPOINTMENT_SERIES_CATALOG: Readonly<
     },
     datesLead: 'Dates and times:',
     note: 'If you need to change or cancel any of them, contact the clinic through its usual channel. If you were not expecting this email, let the clinic know.',
+    unsubscribeLead: 'Don’t want to receive more notices from the clinic?',
+    unsubscribeLabel: 'Stop receiving notices',
     buttonFallback:
       'If the button does not work, copy this link into your browser:',
     footerClinic: (clinic, product) => `Sent by ${clinic} via ${product}.`,
