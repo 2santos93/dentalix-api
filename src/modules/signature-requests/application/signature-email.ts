@@ -3,6 +3,7 @@ import type { Prisma } from '@prisma/client';
 import { EmailOutbox } from '../../notifications/email/application/email-outbox.service';
 import { withEmailQuotaAs429 } from '../../notifications/email/application/email-quota-http';
 import type {
+  EmailLocale,
   SignatureBudgetAcceptedEmailVars,
   SignatureCodeEmailVars,
   SignatureRequestEmailVars,
@@ -41,6 +42,8 @@ export interface SignatureEmailSender {
     to: string;
     referenceId: string;
     vars: SignatureRequestEmailVars;
+    /** DX-565: el idioma del paciente (catálogo es/en); sin él, español. */
+    locale?: EmailLocale;
   }): Promise<PreparedSignatureLinkEmail>;
   sendCode(input: {
     to: string;
@@ -87,13 +90,16 @@ export class OutboxSignatureEmailSender implements SignatureEmailSender {
     to: string;
     referenceId: string;
     vars: SignatureRequestEmailVars;
+    locale?: EmailLocale;
   }): Promise<PreparedSignatureLinkEmail> {
-    // Marca, plantilla y cifrado ANTES de abrir la transacción.
+    // Marca, plantilla, texto de la clínica (DX-565) y cifrado ANTES de abrir
+    // la transacción.
     const mail = await this.outbox.prepareInTx({
       tenantId: tenantIdOf(this.tenantContext),
       to: input.to,
       template: 'signature-request',
       vars: input.vars,
+      ...(input.locale ? { locale: input.locale } : {}),
       referenceId: input.referenceId,
       enforceQuota: true,
     });

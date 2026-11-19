@@ -354,6 +354,7 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
           emergencyContactName: true,
           reminderOptOutAt: true,
           contactChannel: true,
+          preferredLanguage: true,
         },
       });
       if (!patient) return null;

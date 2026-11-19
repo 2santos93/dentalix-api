@@ -342,6 +342,27 @@ export class PrismaEmailOutboxRepository implements EmailOutboxRepository {
     };
   }
 
+  async findMessageTemplate(
+    tenantId: string,
+    key: string,
+    language: string,
+  ): Promise<{ subject: string | null; body: string } | null> {
+    // RLS FORCE: con la clínica del envío en el GUC.
+    return this.prisma.runWithTenant(tenantId, (tx) =>
+      tx.messageTemplate.findUnique({
+        where: {
+          tenantId_key_channel_language: {
+            tenantId,
+            key,
+            channel: 'EMAIL',
+            language,
+          },
+        },
+        select: { subject: true, body: true },
+      }),
+    );
+  }
+
   async findBrand(tenantId: string): Promise<{
     name: string;
     logoUrl: string | null;

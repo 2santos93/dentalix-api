@@ -255,4 +255,17 @@ export class InMemoryEmailOutboxRepository implements EmailOutboxRepository {
   } | null> {
     return Promise.resolve(this.brands.get(tenantId) ?? null);
   }
+
+  /** DX-565: textos de la clínica por `tenantId|key|language`. */
+  messageTemplates = new Map<string, { subject: string | null; body: string }>();
+
+  findMessageTemplate(
+    tenantId: string,
+    key: string,
+    language: string,
+  ): Promise<{ subject: string | null; body: string } | null> {
+    return Promise.resolve(
+      this.messageTemplates.get(`${tenantId}|${key}|${language}`) ?? null,
+    );
+  }
 }

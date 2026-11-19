@@ -35,8 +35,12 @@ import {
 import { PRESCRIPTION_COPY_CATALOG } from './catalog/prescription-copy.catalog';
 import { QUOTE_FOLLOW_UP_CATALOG } from './catalog/quote-follow-up.catalog';
 import { APPOINTMENT_SERIES_CATALOG } from './catalog/appointment-series.catalog';
+import { SIGNATURE_REQUEST_CATALOG } from './catalog/signature-request.catalog';
 import { EmailBlock, EmailTable, renderLayout } from './layout';
 import { appointmentReminder } from './appointment-reminder.template';
+import type { MessageText } from '../../../../message-templates/domain/message-catalog';
+import type { MessageValues } from '../../../../message-templates/domain/message-variables';
+import { customEmailText, splitDateTimeLabel } from './editable-text';
 
 // DX-497: re-exportado para quien ya lo importaba de aquí (vista previa).
 export { cancellationPolicyText } from './appointment-reminder.template';
@@ -302,33 +306,50 @@ function postOpInstructions(
   });
 }
 
+/** DX-565: valores del texto de la clínica; null si escribe al responsable de un menor. */
+export function signatureRequestValues(
+  vars: SignatureRequestEmailVars,
+): MessageValues | null {
+  if (vars.patientFirstName?.trim()) return null;
+  return {
+    paciente: vars.recipientFirstName,
+    clinica: vars.clinicName,
+    caduca: vars.expiresAtLabel,
+  };
+}
+
+/**
+ * DX-243: el enlace para firmar a distancia. DX-565: en el idioma del
+ * paciente (catálogo por clave) y con el asunto y la introducción de la
+ * clínica si los guardó; el aviso del código y la caducidad son fijos.
+ */
 function signatureRequest(
   vars: SignatureRequestEmailVars,
   brand: EmailBrand | null,
+  locale: EmailLocale,
+  override?: MessageText | null,
 ): RenderedEmail {
+  const t = SIGNATURE_REQUEST_CATALOG[locale];
   const clinic = vars.clinicName;
   const patient = vars.patientFirstName?.trim() || null;
+  const custom = customEmailText(
+    'signature-request',
+    override,
+    signatureRequestValues(vars),
+  );
   return renderLayout({
     brand,
-    subject: `${clinic} te envió un documento para firmar`,
-    heading: `Hola, ${vars.recipientFirstName}`,
+    chrome: t,
+    subject: custom?.subject ?? t.subject(clinic),
+    heading: t.heading(vars.recipientFirstName),
     blocks: [
-      {
-        kind: 'paragraph',
-        text: patient
-          ? `${clinic} te envió un documento de ${patient} para que lo leas y lo firmes desde tu teléfono o tu computador.`
-          : `${clinic} te envió un documento para que lo leas y lo firmes desde tu teléfono o tu computador.`,
-      },
-      {
-        kind: 'paragraph',
-        text: 'Al abrir el enlace te pediremos un código de 6 dígitos que te enviaremos a este mismo correo.',
-      },
-      {
-        kind: 'note',
-        text: `El enlace caduca el ${vars.expiresAtLabel} y solo sirve una vez. Si no esperabas este correo, no lo abras y avisa a la clínica.`,
-      },
+      ...(custom?.blocks ?? [
+        { kind: 'paragraph' as const, text: t.intro(clinic, patient) },
+      ]),
+      { kind: 'paragraph', text: t.code },
+      { kind: 'note', text: t.note(vars.expiresAtLabel) },
     ],
-    action: { label: 'Ver y firmar', url: vars.url },
+    action: { label: t.action, url: vars.url },
   });
 }
 
@@ -557,24 +578,42 @@ function onlineBookingReceived(
   });
 }
 
+/** DX-565: valores del texto de la clínica para la oferta de hueco. */
+export function slotOfferValues(vars: SlotOfferEmailVars): MessageValues {
+  return {
+    paciente: vars.patientFirstName,
+    clinica: vars.clinicName,
+    sede: vars.locationName,
+    ...splitDateTimeLabel(vars.slotLabel),
+    profesional: vars.providerName,
+    caduca: vars.expiresAtLabel,
+  };
+}
+
 function slotOffer(
   vars: SlotOfferEmailVars,
   brand: EmailBrand | null,
+  _locale: EmailLocale,
+  override?: MessageText | null,
 ): RenderedEmail {
   const withProvider = vars.providerName ? ` con ${vars.providerName}` : '';
+  // DX-565: el asunto y los dos párrafos de la clínica, si los guardó.
+  const custom = customEmailText('slot-offer', override, slotOfferValues(vars));
   return renderLayout({
     brand,
-    subject: `${vars.clinicName} tiene un hueco libre para ti`,
+    subject: custom?.subject ?? `${vars.clinicName} tiene un hueco libre para ti`,
     heading: `Hola, ${vars.patientFirstName}`,
     blocks: [
-      {
-        kind: 'paragraph',
-        text: `Se liberó un hueco el ${vars.slotLabel} en ${vars.locationName}${withProvider}.`,
-      },
-      {
-        kind: 'paragraph',
-        text: 'Si te viene bien, ábrelo y acéptalo: se lo queda el primero que lo acepte. Si no, puedes rechazarlo desde el mismo enlace.',
-      },
+      ...(custom?.blocks ?? [
+        {
+          kind: 'paragraph' as const,
+          text: `Se liberó un hueco el ${vars.slotLabel} en ${vars.locationName}${withProvider}.`,
+        },
+        {
+          kind: 'paragraph' as const,
+          text: 'Si te viene bien, ábrelo y acéptalo: se lo queda el primero que lo acepte. Si no, puedes rechazarlo desde el mismo enlace.',
+        },
+      ]),
       {
         kind: 'note',
         text: `La oferta caduca el ${vars.expiresAtLabel} y el enlace solo sirve una vez. Si no esperabas este correo, ignóralo.`,
@@ -784,26 +823,44 @@ const OPTION_LETTERS = ['A', 'B', 'C'] as const;
  * del paciente. Una opción: un botón. Varias (A/B): un enlace por opción con
  * su letra, nunca su etiqueta (puede nombrar el tratamiento). La baja, al pie.
  */
+/** DX-565: valores del texto de la clínica; null si escribe al responsable de un menor. */
+export function quoteFollowUpValues(
+  vars: QuoteFollowUpEmailVars,
+): MessageValues | null {
+  if (vars.patientFirstName?.trim()) return null;
+  return { paciente: vars.recipientFirstName, clinica: vars.clinicName };
+}
+
 function quoteFollowUp(
   vars: QuoteFollowUpEmailVars,
   brand: EmailBrand | null,
   locale: EmailLocale,
+  override?: MessageText | null,
 ): RenderedEmail {
   if (vars.urls.length < 1 || vars.urls.length > OPTION_LETTERS.length) {
     throw new Error('El aviso de seguimiento lleva de 1 a 3 enlaces');
   }
   const t = QUOTE_FOLLOW_UP_CATALOG[locale];
   const single = vars.urls.length === 1;
+  // DX-565: el asunto y la introducción de la clínica, si los guardó.
+  const custom = customEmailText(
+    'quote-follow-up',
+    override,
+    quoteFollowUpValues(vars),
+  );
   return renderLayout({
     brand,
     chrome: t,
-    subject: t.subject(vars.clinicName, vars.patientFirstName),
+    subject:
+      custom?.subject ?? t.subject(vars.clinicName, vars.patientFirstName),
     heading: t.heading(vars.recipientFirstName),
     blocks: [
-      {
-        kind: 'paragraph',
-        text: t.intro(vars.clinicName, vars.patientFirstName),
-      },
+      ...(custom?.blocks ?? [
+        {
+          kind: 'paragraph' as const,
+          text: t.intro(vars.clinicName, vars.patientFirstName),
+        },
+      ]),
       { kind: 'note', text: t.expires(vars.expiresInHours) },
       { kind: 'note', text: t.note },
     ],
@@ -832,30 +889,55 @@ function quoteFollowUp(
  * dónde, con quién y la lista de fechas (numeradas, una por línea). Sin
  * botón: cada cita lleva su enlace de confirmación en su recordatorio.
  */
+/** DX-565: valores del texto de la clínica; null si escribe al responsable de un menor. */
+export function appointmentSeriesValues(
+  vars: AppointmentSeriesEmailVars,
+): MessageValues | null {
+  if (vars.patientFirstName?.trim()) return null;
+  return {
+    paciente: vars.recipientFirstName,
+    clinica: vars.clinicName,
+    sede: vars.locationName,
+    profesional: vars.providerName,
+    cantidad: String(vars.dateLabels.length),
+  };
+}
+
 function appointmentSeries(
   vars: AppointmentSeriesEmailVars,
   brand: EmailBrand | null,
   locale: EmailLocale,
+  override?: MessageText | null,
 ): RenderedEmail {
   if (vars.dateLabels.length < 2 || vars.dateLabels.length > 26) {
     throw new Error('El aviso de una serie lleva de 2 a 26 fechas');
   }
   const t = APPOINTMENT_SERIES_CATALOG[locale];
+  // DX-565: el asunto y la introducción de la clínica, si los guardó; la
+  // lista de fechas es fija (no se puede quitar).
+  const custom = customEmailText(
+    'appointment-series',
+    override,
+    appointmentSeriesValues(vars),
+  );
   return renderLayout({
     brand,
     chrome: t,
-    subject: t.subject(vars.clinicName, vars.patientFirstName),
+    subject:
+      custom?.subject ?? t.subject(vars.clinicName, vars.patientFirstName),
     heading: t.heading(vars.recipientFirstName),
     blocks: [
-      {
-        kind: 'paragraph',
-        text: t.intro({
-          count: vars.dateLabels.length,
-          location: vars.locationName,
-          provider: vars.providerName,
-          patient: vars.patientFirstName,
-        }),
-      },
+      ...(custom?.blocks ?? [
+        {
+          kind: 'paragraph' as const,
+          text: t.intro({
+            count: vars.dateLabels.length,
+            location: vars.locationName,
+            provider: vars.providerName,
+            patient: vars.patientFirstName,
+          }),
+        },
+      ]),
       {
         kind: 'paragraph',
         lead: t.datesLead,
@@ -882,6 +964,8 @@ type Renderer<T extends EmailTemplateName> = (
   vars: EmailVarsByTemplate[T],
   brand: EmailBrand | null,
   locale: EmailLocale,
+  /** DX-565: el texto de la clínica (solo las plantillas editables lo leen). */
+  override?: MessageText | null,
 ) => RenderedEmail;
 
 const RENDERERS: { [T in EmailTemplateName]: Renderer<T> } = {
@@ -916,13 +1000,16 @@ const RENDERERS: { [T in EmailTemplateName]: Renderer<T> } = {
  * Renderiza una plantilla en el idioma pedido. Solo las de
  * `LOCALIZED_EMAIL_TEMPLATES` tienen catálogo por idioma (DX-497); las demás
  * existen solo en el de la clínica. La marca de la clínica firma el email
- * cuando hay tenant; sin ella firma Dentalix.
+ * cuando hay tenant; sin ella firma Dentalix. DX-565: `override` = el texto
+ * que la clínica guardó para esa plantilla e idioma (solo lo leen las
+ * editables, `EDITABLE_EMAIL_TEMPLATES`); null = el de siempre.
  */
 export function renderEmail<T extends EmailTemplateName>(
   template: T,
   vars: EmailVarsByTemplate[T],
   brand: EmailBrand | null,
   locale: EmailLocale = DEFAULT_EMAIL_LOCALE,
+  override: MessageText | null = null,
 ): RenderedEmail {
   if (
     !EMAIL_LOCALES.includes(locale) ||
@@ -932,5 +1019,5 @@ export function renderEmail<T extends EmailTemplateName>(
     throw new Error(`Idioma de email no soportado: ${String(locale)}`);
   }
   const render = RENDERERS[template] as Renderer<T>;
-  return render(vars, brand, locale);
+  return render(vars, brand, locale, override);
 }
