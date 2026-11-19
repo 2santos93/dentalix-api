@@ -4391,11 +4391,10 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     {
       spec: 'recall-attempts.e2e-spec.ts',
       checks:
-        'DX-465: la sede de otra clínica en los ajustes de intentos → 404 «Sede no encontrada» y nada cambia; «Ya está corregido» con el paciente de otra clínica → 404; el lote con un recall de otra clínica → 404 y no se registra ninguno; la RLS de location_recall_settings en recall-attempts.int-spec.ts',
+        'B → 404 «Sede no encontrada» al guardar los intentos de recall en la sede de A, sin evento ni fila; 404 en «Ya está corregido» con el paciente de A, sin tocar su marca (DX-465)',
       routes: [
         'PUT /recall-settings/:locationId',
         'POST /patients/:id/phone-review/clear',
-        'POST /recall/contacts/batch',
       ],
     },
     {

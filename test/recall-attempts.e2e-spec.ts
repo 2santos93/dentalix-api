@@ -309,6 +309,7 @@ describe('Recall con intentos (DX-465, e2e)', () => {
     }
   });
 
+  // ISOLATION_COVERS: PUT /recall-settings/:locationId
   it('Ajustes › Recall: solo ADMIN; 400 en español; guardar audita antes y después (sin evento si nada cambia); el tope se aplica al instante', async () => {
     for (const role of [
       ClinicRole.RECEPTION,
@@ -359,6 +360,16 @@ describe('Recall con intentos (DX-465, e2e)', () => {
       .send({ hideDays: 3, maxAttempts: 2 })
       .expect(404);
     expect(messageOf(notFound)).toBe('Sede no encontrada');
+    await expect(
+      raw.locationRecallSettings.count({
+        where: { locationId: otherLocation },
+      }),
+    ).resolves.toBe(0);
+    await expect(
+      raw.auditEvent.count({
+        where: { resourceType: 'CLINIC_SETTINGS', resourceId: otherLocation },
+      }),
+    ).resolves.toBe(0);
     const saved = await http(
       ClinicRole.ADMIN,
       'put',
@@ -521,6 +532,7 @@ describe('Recall con intentos (DX-465, e2e)', () => {
     expect(JSON.stringify(events)).not.toContain('Buzón de voz');
   });
 
+  // ISOLATION_COVERS: POST /patients/:id/phone-review/clear
   it('«Número equivocado» marca el teléfono en la ficha y en la lista; «Ya está corregido» lo quita (los cuatro roles), auditado una vez', async () => {
     const { patientId, recallId } = await dueRecall('Numero');
     await attempt(recallId, {
@@ -547,6 +559,20 @@ describe('Recall con intentos (DX-465, e2e)', () => {
     expect((await find(recallId, '&includeContacted=true'))?.phoneReview).toBe(
       true,
     );
+    // B (otra clínica) no la quita: 404 y la marca sigue.
+    await http(
+      ClinicRole.ADMIN,
+      'post',
+      `/patients/${patientId}/phone-review/clear`,
+      undefined,
+      other,
+    ).expect(404);
+    await expect(
+      raw.patient.findUniqueOrThrow({
+        where: { id: patientId },
+        select: { phoneReviewFlaggedById: true },
+      }),
+    ).resolves.toEqual({ phoneReviewFlaggedById: ids.RECEPTION });
     const cleared = await http(
       ClinicRole.ASSISTANT,
       'post',
@@ -559,13 +585,6 @@ describe('Recall con intentos (DX-465, e2e)', () => {
       `/patients/${patientId}/phone-review/clear`,
     ).expect(200);
     expect(again.body).toEqual({ patientId, cleared: false });
-    await http(
-      ClinicRole.ADMIN,
-      'post',
-      `/patients/${patientId}/phone-review/clear`,
-      undefined,
-      other,
-    ).expect(404);
     const events = await raw.auditEvent.findMany({
       where: {
         tenantId: clinic.tenantId,
