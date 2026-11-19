@@ -257,6 +257,9 @@ interface SeedA {
   /** DX-559: una plantilla de plan de A y su línea. */
   planTemplateId: string;
   planTemplateLineId: string;
+  /** DX-562: una serie de citas de A y su primera cita. */
+  seriesId: string;
+  seriesAppointmentId: string;
 }
 
 interface SeedB {
@@ -301,6 +304,8 @@ interface SeedB {
   draftPlanId: string;
   /** DX-016: tipo de cita propio de B (B lo ofrece online con ids de A). */
   onlineTypeId: string;
+  /** DX-562: una serie propia de B (B la cancela o mueve con una cita de A). */
+  seriesId: string;
 }
 
 function futureAt(daysAhead: number, hourUtc: number): string {
@@ -857,9 +862,36 @@ async function seedA(app: INestApplication<App>, a: Clinic): Promise<SeedA> {
     notePromptId: notePrompt.id,
     planTemplateId: planTemplate.id,
     planTemplateLineId: planTemplateLine.id,
+    ...(await seedSeries(app, a, patientId, 70)),
     confirmationToken: (link.body as { url: string }).url.split(
       '/confirmar/',
     )[1],
+  };
+}
+
+/** DX-562: una serie de dos citas (sin aviso) a `daysAhead` días. */
+async function seedSeries(
+  app: INestApplication<App>,
+  clinic: Clinic,
+  patientId: string,
+  daysAhead: number,
+): Promise<{ seriesId: string; seriesAppointmentId: string }> {
+  const res = await api(app, clinic, 'post', '/appointments/series', {
+    patientId,
+    providerId: clinic.adminUserId,
+    start: futureAt(daysAhead, 15),
+    end: futureAt(daysAhead, 16),
+    intervalWeeks: 1,
+    notifyPatient: false,
+    occurrences: [
+      { start: futureAt(daysAhead, 15) },
+      { start: futureAt(daysAhead + 7, 15) },
+    ],
+  }).expect(201);
+  const body = res.body as { seriesId: string; appointments: IdBody[] };
+  return {
+    seriesId: body.seriesId,
+    seriesAppointmentId: body.appointments[0].id,
   };
 }
 
@@ -881,6 +913,7 @@ async function seedBExtras(
     | 'planTemplateId'
     | 'draftPlanId'
     | 'onlineTypeId'
+    | 'seriesId'
   >
 > {
   await api(app, b, 'put', '/locations/schedule', {
@@ -1062,7 +1095,10 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       planTemplateId: '',
       draftPlanId: '',
       onlineTypeId: '',
+      // DX-562: también.
+      seriesId: '',
     };
+    b.seriesId = (await seedSeries(app, clinicB, dataB.patientId, 72)).seriesId;
     b.onlineTypeId = (
       await create(app, clinicB, '/appointment-types', {
         name: 'Tipo online de B',
@@ -1312,6 +1348,41 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       status: 404,
     },
     // --- appointments ---
+    // DX-562: la serie de A no existe para B (y no se cancela ni mueve nada).
+    {
+      name: 'POST /appointments/series/:id/cancel',
+      verb: 'post',
+      path: () => `/appointments/series/${a.seriesId}/cancel`,
+      body: () => ({
+        fromAppointmentId: a.seriesAppointmentId,
+        cancelledByKind: 'CLINIC',
+        cancelReasonCode: 'CLINIC_RESCHEDULE',
+      }),
+      status: 404,
+      message: 'Serie no encontrada',
+    },
+    {
+      name: 'POST /appointments/series/:id/move/preview',
+      verb: 'post',
+      path: () => `/appointments/series/${a.seriesId}/move/preview`,
+      body: () => ({
+        fromAppointmentId: a.seriesAppointmentId,
+        start: futureAt(71, 15),
+      }),
+      status: 404,
+      message: 'Serie no encontrada',
+    },
+    {
+      name: 'POST /appointments/series/:id/move',
+      verb: 'post',
+      path: () => `/appointments/series/${a.seriesId}/move`,
+      body: () => ({
+        fromAppointmentId: a.seriesAppointmentId,
+        start: futureAt(71, 15),
+      }),
+      status: 404,
+      message: 'Serie no encontrada',
+    },
     {
       name: 'GET /appointments/:id',
       verb: 'get',
@@ -3623,6 +3694,88 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       bodyIds: [field],
       status,
       message,
+    })),
+    // DX-562: la serie de B (vista previa y crear) con un id de A.
+    ...(
+      ['/appointments/series/preview', '/appointments/series'] as const
+    ).flatMap((route) =>
+      (
+        [
+          [
+            'patientId',
+            () => ({ patientId: a.patientId }),
+            404,
+            'Paciente no encontrado',
+          ],
+          [
+            'providerId',
+            () => ({ providerId: a.dentistUserId }),
+            404,
+            'Profesional no encontrado',
+          ],
+          [
+            'appointmentTypeId',
+            () => ({ appointmentTypeId: a.appointmentTypeId }),
+            400,
+            'El tipo de cita no existe o está desactivado',
+          ],
+          [
+            'chairId',
+            () => ({ chairId: a.chairId }),
+            404,
+            'Sillón no encontrado',
+          ],
+        ] as const
+      ).map(([field, patch, status, message]): IsolationCase => ({
+        name: `POST ${route} body.${field} de A`,
+        verb: 'post',
+        path: () => route,
+        body: () => ({
+          patientId: b.patientId,
+          providerId: clinicB.adminUserId,
+          start: futureAt(90, 15),
+          end: futureAt(90, 16),
+          intervalWeeks: 1,
+          ...(route === '/appointments/series'
+            ? {
+                occurrences: [
+                  { start: futureAt(90, 15) },
+                  { start: futureAt(97, 15) },
+                ],
+                notifyPatient: false,
+              }
+            : { count: 2 }),
+          ...patch(),
+        }),
+        bodyIds: [field],
+        status,
+        message,
+      })),
+    ),
+    // DX-562: la serie de B con una cita de A como pivote.
+    ...(
+      [
+        [
+          'cancel',
+          () => ({
+            cancelledByKind: 'CLINIC',
+            cancelReasonCode: 'CLINIC_RESCHEDULE',
+          }),
+        ],
+        ['move/preview', () => ({ start: futureAt(73, 15) })],
+        ['move', () => ({ start: futureAt(73, 15) })],
+      ] as const
+    ).map(([action, extra]): IsolationCase => ({
+      name: `POST /appointments/series/:id/${action} body.fromAppointmentId de A`,
+      verb: 'post',
+      path: () => `/appointments/series/${b.seriesId}/${action}`,
+      body: () => ({
+        fromAppointmentId: a.seriesAppointmentId,
+        ...extra(),
+      }),
+      bodyIds: ['fromAppointmentId'],
+      status: 404,
+      message: 'La cita no es de esta serie.',
     })),
     // DX-470: «Atender sin cita» de B con un id de A (sobrecupo: no
     // depende de los huecos reservados de B).
