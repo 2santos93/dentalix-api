@@ -209,6 +209,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // dentalix-docs/docs/plans/2026-07-28-user-profile.md (/me) y
   // 2026-07-24-exchange-service.md (referencia).
   'GET /me': AUTHENTICATED,
+  // DX-574: clave de los borradores cifrados en el dispositivo.
+  'GET /me/draft-key': AUTHENTICATED,
   'PATCH /me': AUTHENTICATED,
   'POST /me/password': AUTHENTICATED,
   // DX-021: verificación en dos pasos de la cuenta propia (sesión de clínica).

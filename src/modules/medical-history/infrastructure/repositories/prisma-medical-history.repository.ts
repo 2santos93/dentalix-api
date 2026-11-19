@@ -23,6 +23,10 @@ import {
   readStoredPregnancy,
 } from '../../domain/anamnesis-answers';
 import { lockPatientAnamnesis } from './anamnesis-lock';
+import type {
+  IdempotencyRequest,
+  IdempotentRecord,
+} from '../../../../shared/validation/idempotent-create';
 
 type PrismaMedicalHistoryVersion = Prisma.MedicalHistoryVersionGetPayload<
   Record<string, never>
@@ -98,6 +102,8 @@ export async function insertMedicalHistoryVersionInTx(
     data: MedicalHistoryVersionData;
     createdById: string | null;
     source: MedicalHistorySource;
+    /** DX-574: Idempotency-Key del guardado del personal. */
+    idempotency?: IdempotencyRequest;
   },
 ): Promise<PrismaMedicalHistoryVersion> {
   const { tenantId, patientId, data } = input;
@@ -130,6 +136,8 @@ export async function insertMedicalHistoryVersionInTx(
       hasCriticalAlert,
       source: input.source,
       createdById: input.createdById,
+      idempotencyKey: input.idempotency?.key ?? null,
+      idempotencyFingerprint: input.idempotency?.fingerprint ?? null,
     },
   });
 }
@@ -169,6 +177,7 @@ export class PrismaMedicalHistoryRepository implements MedicalHistoryRepository 
     patientId: string,
     data: MedicalHistoryVersionData,
     createdById?: string,
+    idempotency?: IdempotencyRequest,
   ): Promise<MedicalHistory> {
     const tenantId = this.requireTenantId();
     const row = await this.prisma.runWithTenant((tx) =>
@@ -178,8 +187,26 @@ export class PrismaMedicalHistoryRepository implements MedicalHistoryRepository 
         data,
         createdById: createdById ?? null,
         source: 'STAFF',
+        idempotency,
       }),
     );
     return mapMedicalHistoryVersion(row);
+  }
+
+  async findByIdempotencyKey(
+    key: string,
+  ): Promise<IdempotentRecord<MedicalHistory> | null> {
+    const tenantId = this.requireTenantId();
+    const row = await this.prisma.runWithTenant((tx) =>
+      tx.medicalHistoryVersion.findFirst({
+        where: { tenantId, idempotencyKey: key },
+      }),
+    );
+    return row
+      ? {
+          fingerprint: row.idempotencyFingerprint,
+          value: mapMedicalHistoryVersion(row),
+        }
+      : null;
   }
 }

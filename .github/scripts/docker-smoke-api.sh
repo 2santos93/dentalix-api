@@ -67,6 +67,7 @@ docker run -d --name "$NAME" --network host \
   -e DATABASE_URL="$DATABASE_URL" -e DIRECT_URL="$DIRECT_URL" \
   -e JWT_ACCESS_SECRET="$(openssl rand -hex 32)" \
   -e JWT_REFRESH_SECRET="$(openssl rand -hex 32)" \
+  -e DEVICE_DRAFT_KEY_SECRET="$(openssl rand -hex 32)" \
   -e JWT_ACCESS_TTL=900s -e JWT_REFRESH_TTL=30d \
   -e CORS_ORIGINS=https://dentalix.example \
   -e CORS_ROOT_DOMAIN=dentalix.example -e TENANT_BASE_DOMAINS=dentalix.example \

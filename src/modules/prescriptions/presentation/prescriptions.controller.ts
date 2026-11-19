@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Headers,
   HttpCode,
   Param,
   ParseUUIDPipe,
@@ -26,6 +27,11 @@ import {
   ApiTooManyRequestsResponse,
   ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
+import {
+  CLINICAL_IDEMPOTENCY_HEADER,
+  CLINICAL_IDEMPOTENCY_REUSED_DESCRIPTION,
+  type IdempotencySignals,
+} from '../../../shared/validation/idempotent-create';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import {
@@ -87,6 +93,8 @@ import {
 
 interface AuthenticatedRequest {
   user: TenantJwtPayload;
+  /** DX-574: la repetición de una emisión idempotente no escribe: no se audita. */
+  skipAudit?: boolean;
 }
 
 export const PRESCRIPTION_SETTINGS_FORBIDDEN_MESSAGE =
@@ -181,6 +189,10 @@ export class PatientPrescriptionsController {
   @Post()
   @Roles(...PRESCRIPTION_ISSUE_ROLES)
   @ApiHeader(LOCATION_HEADER)
+  @ApiHeader(CLINICAL_IDEMPOTENCY_HEADER)
+  @ApiUnprocessableEntityResponse({
+    description: CLINICAL_IDEMPOTENCY_REUSED_DESCRIPTION,
+  })
   @ApiCreatedResponse({ type: PrescriptionDto })
   @ApiBadRequestResponse({
     description:
@@ -199,7 +211,9 @@ export class PatientPrescriptionsController {
     @Param('patientId', ParseUUIDPipe) patientId: string,
     @Body() dto: IssuePrescriptionDto,
     @Req() req: AuthenticatedRequest,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
   ): Promise<PrescriptionDto> {
+    const signals: IdempotencySignals = {};
     const issued = await this.issuePrescription.execute(
       patientId,
       {
@@ -212,7 +226,10 @@ export class PatientPrescriptionsController {
         safetyOverrideReason: dto.safetyOverrideReason,
       },
       req.user.sub,
+      { idempotencyKey, signals },
     );
+    // DX-574: un reintento con la misma clave no escribió nada.
+    if (signals.replayed) req.skipAudit = true;
     return presentPrescription(issued);
   }
 }

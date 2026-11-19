@@ -95,6 +95,8 @@ function makeRepo(
       Promise.reject(new Error('not implemented in this fake')),
     addItem: (): Promise<TreatmentPlanItem> =>
       Promise.reject(new Error('not implemented in this fake')),
+    findPlanByIdempotencyKey: () => Promise.resolve(null),
+    findItemByIdempotencyKey: () => Promise.resolve(null),
     findItemById: (): Promise<TreatmentPlanItem | null> =>
       Promise.resolve(null),
     updateItem: (): Promise<TreatmentPlanItemUpdate> =>
@@ -166,6 +168,8 @@ function applying(
 describe('UpdateTreatmentPlanItemUseCase', () => {
   it('throws NotFoundException when the item does not exist (or belongs to another tenant)', async () => {
     const repo = makeRepo({
+      findPlanByIdempotencyKey: () => Promise.resolve(null),
+      findItemByIdempotencyKey: () => Promise.resolve(null),
       findItemById: (): Promise<TreatmentPlanItem | null> =>
         Promise.resolve(null),
       updateItem: (): Promise<TreatmentPlanItemUpdate> =>
@@ -186,6 +190,8 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
   it('DX-111: un ítem de otro plan responde 404 y no se toca', async () => {
     const existing = fakeItem();
     const repo = makeRepo({
+      findPlanByIdempotencyKey: () => Promise.resolve(null),
+      findItemByIdempotencyKey: () => Promise.resolve(null),
       findItemById: (): Promise<TreatmentPlanItem | null> =>
         Promise.resolve(existing),
       updateItem: (): Promise<TreatmentPlanItemUpdate> =>
@@ -217,6 +223,8 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
     const existing = fakeItem();
     let receivedPatch: UpdateTreatmentPlanItemRepoInput | undefined;
     const repo = makeRepo({
+      findPlanByIdempotencyKey: () => Promise.resolve(null),
+      findItemByIdempotencyKey: () => Promise.resolve(null),
       findItemById: (id: string): Promise<TreatmentPlanItem | null> =>
         Promise.resolve(id === existing.id ? existing : null),
       updateItem: applying(existing, (patch) => {
@@ -247,6 +255,8 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
   ])('allows changing status to %s', async (status) => {
     const existing = fakeItem();
     const repo = makeRepo({
+      findPlanByIdempotencyKey: () => Promise.resolve(null),
+      findItemByIdempotencyKey: () => Promise.resolve(null),
       findItemById: (id: string): Promise<TreatmentPlanItem | null> =>
         Promise.resolve(id === existing.id ? existing : null),
       updateItem: (): Promise<TreatmentPlanItemUpdate> =>
@@ -268,6 +278,8 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
     const existing = fakeItem();
     let receivedPatch: UpdateTreatmentPlanItemRepoInput | undefined;
     const repo = makeRepo({
+      findPlanByIdempotencyKey: () => Promise.resolve(null),
+      findItemByIdempotencyKey: () => Promise.resolve(null),
       findItemById: (id: string): Promise<TreatmentPlanItem | null> =>
         Promise.resolve(id === existing.id ? existing : null),
       updateItem: applying(existing, (patch) => {
@@ -313,6 +325,8 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
         mirror: DoneMirrorInput | undefined;
       }[] = [];
       const repo = makeRepo({
+        findPlanByIdempotencyKey: () => Promise.resolve(null),
+        findItemByIdempotencyKey: () => Promise.resolve(null),
         findItemById: (): Promise<TreatmentPlanItem | null> =>
           Promise.resolve(existing),
         updateItem: applying(existing, (patch, mirror) => {
@@ -420,6 +434,8 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
     it('fails as a whole if the mirror cannot be written (never DONE without its record)', async () => {
       const existing = fakeItem();
       const repo = makeRepo({
+        findPlanByIdempotencyKey: () => Promise.resolve(null),
+        findItemByIdempotencyKey: () => Promise.resolve(null),
         findItemById: (): Promise<TreatmentPlanItem | null> =>
           Promise.resolve(existing),
         findPlanById: (): Promise<TreatmentPlanWithItems | null> =>
@@ -463,6 +479,8 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
     ) {
       const calls: { change: ItemChange; audit: unknown }[] = [];
       const repo = makeRepo({
+        findPlanByIdempotencyKey: () => Promise.resolve(null),
+        findItemByIdempotencyKey: () => Promise.resolve(null),
         findItemById: (): Promise<TreatmentPlanItem | null> =>
           Promise.resolve(existing),
         updateItem: (_id, decide, audit) => {
@@ -651,6 +669,8 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
     const useCase = (existing: TreatmentPlanItem, written: unknown[]) =>
       new UpdateTreatmentPlanItemUseCase(
         makeRepo({
+          findPlanByIdempotencyKey: () => Promise.resolve(null),
+          findItemByIdempotencyKey: () => Promise.resolve(null),
           findItemById: () => Promise.resolve(existing),
           updateItem: applying(existing, (patch) => {
             written.push(patch);
@@ -716,6 +736,8 @@ describe('UpdateTreatmentPlanItemUseCase', () => {
     const useCase = (existing: TreatmentPlanItem, written: unknown[]) =>
       new UpdateTreatmentPlanItemUseCase(
         makeRepo({
+          findPlanByIdempotencyKey: () => Promise.resolve(null),
+          findItemByIdempotencyKey: () => Promise.resolve(null),
           findItemById: () => Promise.resolve(existing),
           updateItem: applying(existing, (patch) => {
             written.push(patch);

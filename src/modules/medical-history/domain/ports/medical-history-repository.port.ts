@@ -9,6 +9,10 @@ import {
   Surgery,
   VitalSigns,
 } from '../entities/medical-history.entity';
+import type {
+  IdempotencyRequest,
+  IdempotentRecord,
+} from '../../../../shared/validation/idempotent-create';
 
 // NO `tenantId`/`version`/`id`/`safetyFlags`/`hasCriticalAlert`: tenant de
 // contexto, version calculada por el repo, banderas derivadas en el dominio.
@@ -44,5 +48,15 @@ export interface MedicalHistoryRepository {
     patientId: string,
     data: MedicalHistoryVersionData,
     createdById?: string,
+    /** DX-574: clave y huella del guardado; un choque del único deshace todo. */
+    idempotency?: IdempotencyRequest,
   ): Promise<MedicalHistory>;
+
+  /**
+   * DX-574: la versión que guardó esta Idempotency-Key en la clínica, con la
+   * huella de su petición, o null.
+   */
+  findByIdempotencyKey(
+    key: string,
+  ): Promise<IdempotentRecord<MedicalHistory> | null>;
 }

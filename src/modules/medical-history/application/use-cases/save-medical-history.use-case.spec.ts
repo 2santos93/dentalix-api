@@ -17,7 +17,19 @@ import { deriveSafetyFlags } from '../../domain/safety-flags';
  */
 class InMemoryMedicalHistoryRepository implements MedicalHistoryRepository {
   readonly rows: MedicalHistory[] = [];
+  /** DX-574: Idempotency-Key → id de la versión y huella. */
+  readonly keys = new Map<string, { id: string; fingerprint: string }>();
   private nextId = 1;
+
+  findByIdempotencyKey(
+    key: string,
+  ): Promise<{ fingerprint: string | null; value: MedicalHistory } | null> {
+    const stored = this.keys.get(key);
+    const row = stored && this.rows.find((r) => r.id === stored.id);
+    return Promise.resolve(
+      row && stored ? { fingerprint: stored.fingerprint, value: row } : null,
+    );
+  }
 
   getLatest(patientId: string): Promise<MedicalHistory | null> {
     const versions = this.rows
@@ -30,7 +42,11 @@ class InMemoryMedicalHistoryRepository implements MedicalHistoryRepository {
     patientId: string,
     data: MedicalHistoryVersionData,
     createdById?: string,
+    idempotency?: { key: string; fingerprint: string },
   ): Promise<MedicalHistory> {
+    if (idempotency && this.keys.has(idempotency.key)) {
+      throw new Error('P2002 medical_history_versions_tenant_idempotency_key');
+    }
     const latest = await this.getLatest(patientId);
     const version = (latest?.version ?? 0) + 1;
     const { safetyFlags, hasCriticalAlert } = deriveSafetyFlags(data);
@@ -57,6 +73,12 @@ class InMemoryMedicalHistoryRepository implements MedicalHistoryRepository {
     };
     // Append-only: push a NEW row, never mutate/replace an existing one.
     this.rows.push(row);
+    if (idempotency) {
+      this.keys.set(idempotency.key, {
+        id: row.id,
+        fingerprint: idempotency.fingerprint,
+      });
+    }
     return row;
   }
 }
@@ -229,5 +251,48 @@ describe('SaveMedicalHistoryUseCase — pertenencia del paciente (SEC-004)', () 
       uc.execute('p-otra-clinica', { notes: 'Penicilina' }, 'user-1'),
     ).rejects.toThrow(new NotFoundException('Paciente no encontrado'));
     expect(repo.rows).toHaveLength(0);
+  });
+
+  describe('Idempotency-Key (DX-574)', () => {
+    const KEY = '5a4b3c2d-1e0f-4a9b-8c7d-6e5f4a3b2c1d';
+
+    it('repetir el mismo guardado con la misma clave no crea otra versión', async () => {
+      const repo = new InMemoryMedicalHistoryRepository();
+      const uc = new SaveMedicalHistoryUseCase(repo, patientsInClinic('p1'));
+      const data = { notes: 'Hipertensión controlada con losartán' };
+
+      const first = await uc.execute('p1', data, 'u1', { idempotencyKey: KEY });
+      const signals: { replayed?: boolean } = {};
+      const again = await uc.execute('p1', { ...data }, 'u1', {
+        idempotencyKey: KEY,
+        signals,
+      });
+
+      expect(again.id).toBe(first.id);
+      expect(again.version).toBe(1);
+      expect(signals.replayed).toBe(true);
+      expect(repo.rows).toHaveLength(1);
+    });
+
+    it('la misma clave con otras respuestas es un 422', async () => {
+      const repo = new InMemoryMedicalHistoryRepository();
+      const uc = new SaveMedicalHistoryUseCase(repo, patientsInClinic('p1'));
+      await uc.execute('p1', { notes: 'A' }, 'u1', { idempotencyKey: KEY });
+
+      await expect(
+        uc.execute('p1', { notes: 'B' }, 'u1', { idempotencyKey: KEY }),
+      ).rejects.toMatchObject({
+        response: { code: 'IDEMPOTENCY_KEY_REUSED' },
+      });
+      expect(repo.rows).toHaveLength(1);
+    });
+
+    it('sin clave cada guardado sigue siendo una versión nueva', async () => {
+      const repo = new InMemoryMedicalHistoryRepository();
+      const uc = new SaveMedicalHistoryUseCase(repo, patientsInClinic('p1'));
+      await uc.execute('p1', { notes: 'A' }, 'u1');
+      await uc.execute('p1', { notes: 'A' }, 'u1');
+      expect(repo.rows.map((r) => r.version)).toEqual([1, 2]);
+    });
   });
 });

@@ -9,6 +9,15 @@ import { MedicalHistory } from '../../domain/entities/medical-history.entity';
 import { PATIENT_REPOSITORY } from '../../../patients/domain/ports/patient-repository.port';
 import type { PatientRepository } from '../../../patients/domain/ports/patient-repository.port';
 import { assertPatientInClinic } from '../../../patients/application/assert-patient-in-clinic';
+import {
+  idempotencyRequest,
+  idempotentCreate,
+  type IdempotencySignals,
+} from '../../../../shared/validation/idempotent-create';
+
+/** DX-574: 422 de una Idempotency-Key repetida con otra anamnesis. */
+export const ANAMNESIS_IDEMPOTENCY_KEY_REUSED_MESSAGE =
+  'Esta anamnesis ya se guardó con otras respuestas. Revisa la versión vigente antes de volver a intentarlo.';
 
 // NOTE: deliberately NO `tenantId`/`version`/`id`/`safetyFlags`/
 // `hasCriticalAlert` fields — same rationale as MedicalHistoryVersionData
@@ -41,10 +50,29 @@ export class SaveMedicalHistoryUseCase {
     patientId: string,
     data: MedicalHistoryInput,
     createdById?: string,
+    idempotency?: { idempotencyKey?: string; signals?: IdempotencySignals },
   ): Promise<MedicalHistory> {
-    await assertPatientInClinic(this.patients, patientId);
-
-    const normalized = toVersionData(data);
-    return this.repo.createVersion(patientId, normalized, createdById);
+    // DX-574: cada guardado añade una versión, así que un reintento tras un
+    // corte de red con la misma clave devuelve la que ya guardó.
+    const request = idempotencyRequest(idempotency?.idempotencyKey, [
+      'MEDICAL_HISTORY',
+      patientId,
+      data,
+    ]);
+    return idempotentCreate(request, {
+      find: (key) => this.repo.findByIdempotencyKey(key),
+      create: async () => {
+        await assertPatientInClinic(this.patients, patientId);
+        const normalized = toVersionData(data);
+        return this.repo.createVersion(
+          patientId,
+          normalized,
+          createdById,
+          request,
+        );
+      },
+      reusedMessage: ANAMNESIS_IDEMPOTENCY_KEY_REUSED_MESSAGE,
+      signals: idempotency?.signals,
+    });
   }
 }

@@ -1216,6 +1216,13 @@ model MedicalHistoryVersion {
   // DX-099: el envío del paciente que la originó (si vino del formulario).
   submissions MedicalHistorySubmission[]
 
+  // DX-574: Idempotency-Key (UUID) del alta y huella de la petición: un
+  // reintento tras un corte de red devuelve esta fila en vez de crear otra.
+  idempotencyKey         String?
+  idempotencyFingerprint String?
+
+  // DX-574: único parcial por clínica (WHERE "idempotencyKey" IS NOT NULL, solo SQL).
+  @@unique([tenantId, idempotencyKey], map: "medical_history_versions_tenant_idempotency_key")
   @@unique([tenantId, patientId, version], map: "mhv_tenant_patient_version_key")
   // DX-247: destino de la FK compuesta de medical_history_reviews (misma
   // clínica y mismo paciente que la versión confirmada).
@@ -1368,6 +1375,13 @@ model ClinicalEntry {
   // `performedById` es obligatorio en lo nuevo (CHECK NOT VALID). Corregir =
   // añadir una ClinicalEntryAddendum.
   // Destino de la FK compuesta de las adendas (misma clínica y paciente).
+  // DX-574: Idempotency-Key (UUID) del alta y huella de la petición: un
+  // reintento tras un corte de red devuelve esta fila en vez de crear otra.
+  idempotencyKey         String?
+  idempotencyFingerprint String?
+
+  // DX-574: único parcial por clínica (WHERE "idempotencyKey" IS NOT NULL, solo SQL).
+  @@unique([tenantId, idempotencyKey], map: "clinical_entries_tenant_idempotency_key")
   @@unique([tenantId, patientId, id], map: "clinical_entries_tenantId_patientId_id_key")
   @@index([tenantId, patientId, entryDate])
   // PARCIALES (WHERE ... IS NOT NULL), no declarables en Prisma (DX-170):
@@ -2454,6 +2468,13 @@ model TreatmentPlan {
   quoteFollowUpPausedBy User?                  @relation("TreatmentPlanFollowUpPausedBy", fields: [quoteFollowUpPausedById], references: [id], onDelete: Restrict, map: "treatment_plans_quote_follow_up_paused_by_fkey")
   quoteFollowUpMessages QuoteFollowUpMessage[]
 
+  // DX-574: Idempotency-Key (UUID) del alta y huella de la petición: un
+  // reintento tras un corte de red devuelve esta fila en vez de crear otra.
+  idempotencyKey         String?
+  idempotencyFingerprint String?
+
+  // DX-574: único parcial por clínica (WHERE "idempotencyKey" IS NOT NULL, solo SQL).
+  @@unique([tenantId, idempotencyKey], map: "treatment_plans_tenant_idempotency_key")
   @@unique([tenantId, id], map: "treatment_plans_tenant_id_key")
   @@unique([tenantId, id, patientId], map: "treatment_plans_tenant_id_patient_key")
   @@index([tenantId, patientId])
@@ -2601,6 +2622,13 @@ model TreatmentPlanItem {
   // DX-285: el cargo de ortodoncia que es este ítem (si lo es).
   orthoCharges          OrthoCaseCharge[]
 
+  // DX-574: Idempotency-Key (UUID) del alta y huella de la petición: un
+  // reintento tras un corte de red devuelve esta fila en vez de crear otra.
+  idempotencyKey         String?
+  idempotencyFingerprint String?
+
+  // DX-574: único parcial por clínica (WHERE "idempotencyKey" IS NOT NULL, solo SQL).
+  @@unique([tenantId, idempotencyKey], map: "treatment_plan_items_tenant_idempotency_key")
   @@unique([tenantId, patientId, id], map: "treatment_plan_items_tenant_patient_id_key")
   // DX-051: destino de las FK de la imputación (el ítem es del plan del abono).
   @@unique([tenantId, id, planId], map: "treatment_plan_items_tenant_id_plan_key")
@@ -4703,6 +4731,13 @@ model Prescription {
   // DX-468: enlaces de la copia para el paciente.
   copyLinks    PrescriptionCopyLink[]
 
+  // DX-574: Idempotency-Key (UUID) del alta y huella de la petición: un
+  // reintento tras un corte de red devuelve esta fila en vez de crear otra.
+  idempotencyKey         String?
+  idempotencyFingerprint String?
+
+  // DX-574: único parcial por clínica (WHERE "idempotencyKey" IS NOT NULL, solo SQL).
+  @@unique([tenantId, idempotencyKey], map: "prescriptions_tenant_idempotency_key")
   @@unique([tenantId, id], map: "prescriptions_tenant_id_key")
   // Lista del paciente, más reciente primero.
   @@index([tenantId, patientId, issuedAt(sort: Desc)])

@@ -14,6 +14,9 @@ import { PasswordService } from '../../shared/crypto/password.service';
 import { TokenService } from '../../shared/crypto/token.service';
 import { StorageModule } from '../../shared/storage/storage.module';
 import { AuthModule } from '../auth/auth.module';
+import { GetDeviceDraftKeyUseCase } from './application/use-cases/get-device-draft-key.use-case';
+import { DRAFT_KEY_GATE } from './domain/ports/draft-key-gate.port';
+import { PrismaDraftKeyGate } from './infrastructure/repositories/prisma-draft-key-gate';
 
 // JwtModule.register({}) + TokenService: JwtAuthGuard depende de TokenService
 // (patrón de patients.module). StorageModule aporta FILE_STORAGE. AuthModule
@@ -31,6 +34,9 @@ import { AuthModule } from '../auth/auth.module';
     PasswordService,
     TokenService,
     { provide: USER_PROFILE_REPOSITORY, useClass: PrismaUserProfileRepository },
+    // DX-574: clave de los borradores cifrados en el dispositivo.
+    GetDeviceDraftKeyUseCase,
+    { provide: DRAFT_KEY_GATE, useClass: PrismaDraftKeyGate },
   ],
 })
 export class MeModule {}

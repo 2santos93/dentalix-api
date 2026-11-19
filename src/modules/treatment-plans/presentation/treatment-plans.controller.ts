@@ -4,6 +4,7 @@ import {
   Delete,
   ForbiddenException,
   Get,
+  Headers,
   HttpCode,
   Inject,
   Param,
@@ -33,6 +34,11 @@ import {
   ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
 import { CreateTreatmentPlanDto } from './dto/create-treatment-plan.dto';
+import {
+  CLINICAL_IDEMPOTENCY_HEADER,
+  CLINICAL_IDEMPOTENCY_REUSED_DESCRIPTION,
+  type IdempotencySignals,
+} from '../../../shared/validation/idempotent-create';
 import { UpdateTreatmentPlanDto } from './dto/update-treatment-plan.dto';
 import { AddTreatmentPlanItemDto } from './dto/add-treatment-plan-item.dto';
 import { UpdateTreatmentPlanItemDto } from './dto/update-treatment-plan-item.dto';
@@ -113,6 +119,8 @@ const DISCOUNT_UNPROCESSABLE =
 
 interface AuthenticatedRequest extends AuditableRequest {
   user: JwtPayload;
+  /** DX-574: la repetición de un alta idempotente no escribe: no se audita. */
+  skipAudit?: boolean;
 }
 
 const TRANSITION_CONFLICT =
@@ -171,7 +179,11 @@ export class TreatmentPlansController {
   })
   @Post('patients/:patientId/treatment-plans')
   @ApiParam({ name: 'patientId', format: 'uuid' })
+  @ApiHeader(CLINICAL_IDEMPOTENCY_HEADER)
   @ApiCreatedResponse({ type: TreatmentPlanDto })
+  @ApiUnprocessableEntityResponse({
+    description: CLINICAL_IDEMPOTENCY_REUSED_DESCRIPTION,
+  })
   @ApiNotFoundResponse({
     description:
       'Paciente no encontrado en esta clínica (inexistente o de otra clínica).',
@@ -180,18 +192,24 @@ export class TreatmentPlansController {
     @Param('patientId', ParseUUIDPipe) patientId: string,
     @Body() dto: CreateTreatmentPlanDto,
     @Req() req: AuthenticatedRequest,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
   ): Promise<StampedPlan<TreatmentPlan>> {
     // `createdById` comes from the authenticated user (req.user.sub), never
     // from the client body — same convention as AppointmentsController.create
     // / OdontogramController.create.
-    return this.quoteExpiry.one(
-      await this.createTreatmentPlan.execute({
+    const signals: IdempotencySignals = {};
+    const plan = await this.createTreatmentPlan.execute(
+      {
         patientId,
         currency: dto.currency,
         notes: dto.notes,
         createdById: req.user.sub,
-      }),
+      },
+      { idempotencyKey, signals },
     );
+    // DX-574: un reintento con la misma clave no escribió nada.
+    if (signals.replayed) req.skipAudit = true;
+    return this.quoteExpiry.one(plan);
   }
 
   @Audit({
@@ -384,16 +402,21 @@ export class TreatmentPlansController {
     patient: { lookup: 'treatmentPlan', param: 'id' },
   })
   @Post('treatment-plans/:id/items')
+  @ApiHeader(CLINICAL_IDEMPOTENCY_HEADER)
   @ApiCreatedResponse({ type: TreatmentPlanItemDto })
   @ApiForbiddenResponse({ description: DISCOUNT_FORBIDDEN })
   @ApiConflictResponse({ description: DISCOUNT_LOCKED_CONFLICT })
-  @ApiUnprocessableEntityResponse({ description: DISCOUNT_UNPROCESSABLE })
-  addItem(
+  @ApiUnprocessableEntityResponse({
+    description: `${DISCOUNT_UNPROCESSABLE} ${CLINICAL_IDEMPOTENCY_REUSED_DESCRIPTION}`,
+  })
+  async addItem(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: AddTreatmentPlanItemDto,
     @Req() req: AuthenticatedRequest,
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
   ): Promise<TreatmentPlanItem> {
-    return this.addTreatmentPlanItem.execute(
+    const signals: IdempotencySignals = {};
+    const item = await this.addTreatmentPlanItem.execute(
       id,
       {
         toothNumber: dto.toothNumber,
@@ -406,7 +429,11 @@ export class TreatmentPlansController {
         notes: dto.notes,
       },
       actorRole(req),
+      { idempotencyKey, signals },
     );
+    // DX-574: un reintento con la misma clave no escribió nada.
+    if (signals.replayed) req.skipAudit = true;
+    return item;
   }
 
   // Un solo evento por petición (DX-009): UPDATE de TREATMENT_PLAN_ITEM con

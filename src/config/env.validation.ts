@@ -189,6 +189,8 @@ function jwtSecretProblems(env: Env, isProd: boolean): string[] {
     }
   }
 
+  problems.push(...deviceDraftKeyProblems(env, isProd));
+
   const access = str(env, 'JWT_ACCESS_SECRET')?.trim();
   const refresh = str(env, 'JWT_REFRESH_SECRET')?.trim();
   if (access != null && refresh != null && access === refresh) {
@@ -197,6 +199,48 @@ function jwtSecretProblems(env: Env, isProd: boolean): string[] {
     );
   }
   return problems;
+}
+
+/**
+ * DX-574: `DEVICE_DRAFT_KEY_SECRET` deriva la clave de los borradores cifrados
+ * en el dispositivo. Es una función accesoria: si FALTA (también en
+ * producción) la API arranca igual, avisa en el log al iniciar
+ * (`GetDeviceDraftKeyUseCase`) y `GET /me/draft-key` da 503, así que la web no
+ * guarda borradores. Si está y es débil (corta, de ejemplo, de CI en
+ * producción o igual a un secreto JWT), el arranque falla.
+ */
+function deviceDraftKeyProblems(env: Env, isProd: boolean): string[] {
+  const key = 'DEVICE_DRAFT_KEY_SECRET';
+  const value = str(env, key)?.trim();
+  if (value == null || value === '') return [];
+  const normalized = value.toLowerCase();
+  if (
+    KNOWN_INSECURE_SECRETS.has(normalized) ||
+    PLACEHOLDER_PATTERN.test(value)
+  ) {
+    return [`${key} usa un valor conocido o de ejemplo. ${HOW_TO_GENERATE}`];
+  }
+  if (value.length < JWT_SECRET_MIN_LENGTH) {
+    return [
+      `${key} es demasiado corto: tiene ${value.length} caracteres y el mínimo es ${JWT_SECRET_MIN_LENGTH}. ${HOW_TO_GENERATE}`,
+    ];
+  }
+  if (new Set(value).size < JWT_SECRET_MIN_DISTINCT_CHARS) {
+    return [
+      `${key} es demasiado repetitivo (menos de ${JWT_SECRET_MIN_DISTINCT_CHARS} caracteres distintos). ${HOW_TO_GENERATE}`,
+    ];
+  }
+  if (isProd && normalized.includes(TEST_ONLY_MARKER)) {
+    return [
+      `${key} es un secreto ficticio de CI (marcado "${TEST_ONLY_MARKER}"), público y no apto para producción. ${HOW_TO_GENERATE}`,
+    ];
+  }
+  for (const jwtKey of JWT_SECRETS) {
+    if (str(env, jwtKey)?.trim() === value) {
+      return [`${key} no puede ser igual a ${jwtKey}. ${HOW_TO_GENERATE}`];
+    }
+  }
+  return [];
 }
 
 /**

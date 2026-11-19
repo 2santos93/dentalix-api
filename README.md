@@ -7182,6 +7182,14 @@ Runbook completo (orden backup → `migrate deploy` → API gradual → web →
   worker (`APP_ROLE=worker`) sigue con `enableShutdownHooks`.
 - Swagger (`/docs`) no se publica con `NODE_ENV=production` salvo
   `SWAGGER_ENABLED="true"` (SEC-019).
+- `DEVICE_DRAFT_KEY_SECRET` (DX-574, `openssl rand -hex 32`, distinta de los
+  `JWT_*`): deriva la clave de los borradores clínicos cifrados en el
+  dispositivo. Es accesoria: si falta, la API arranca igual, registra al
+  iniciar el aviso «DEVICE_DRAFT_KEY_SECRET no está configurada…»,
+  `GET /me/draft-key` responde 503 y la web no guarda borradores. Si está y es
+  débil (< 32 caracteres, de ejemplo, de CI con `NODE_ENV=production` o igual a
+  un `JWT_*`), el arranque falla. Rotarla deja irrecuperables los borradores
+  pendientes (caducan a las 72 h).
 
 ### Límites de producción: timeouts HTTP, de transacción y de la BD (DX-431)
 
