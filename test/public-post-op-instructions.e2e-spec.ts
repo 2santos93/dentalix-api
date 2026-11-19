@@ -22,6 +22,7 @@ import {
   POSTOP_LINK_NOT_FOUND_MESSAGE,
 } from '../src/modules/post-op-instructions/application/use-cases/public-post-op.use-cases';
 import { makePng } from '../src/modules/clinic-settings/__fixtures__/logo-fixtures';
+import { fixedSedeDay } from './support/sede-clock';
 
 // DX-222 en HTTP real: la página pública de indicaciones que abre el paciente
 // desde el email (sin sesión, la clínica sale del host). Muestra el texto
@@ -140,7 +141,11 @@ describe('Indicaciones postoperatorias por enlace público (e2e, DX-222)', () =>
       .expect(201);
     patientId = (patient.body as { id: string }).id;
 
-    const start = new Date(Date.now() + 10 * 60 * 1000);
+    // Se agenda pasado mañana y se trae a ayer por `raw` (sede-clock, DX-449):
+    // «ahora + 10 min» caía en el día siguiente de la sede entre las 23:50 y
+    // la medianoche (≈03:50Z) y entregar las indicaciones de una cita futura
+    // es 422.
+    const start = fixedSedeDay(-2).at;
     const appointment = await as(clinicA)
       .post('/appointments', {
         patientId,
@@ -150,6 +155,14 @@ describe('Indicaciones postoperatorias por enlace público (e2e, DX-222)', () =>
       })
       .expect(201);
     appointmentId = (appointment.body as { id: string }).id;
+    const yesterday = fixedSedeDay(1).at;
+    await raw.appointment.update({
+      where: { id: appointmentId },
+      data: {
+        start: yesterday,
+        end: new Date(yesterday.getTime() + 30 * 60 * 1000),
+      },
+    });
 
     const created = await as(clinicA)
       .post(`/appointments/${appointmentId}/post-op-instructions/deliveries`, {

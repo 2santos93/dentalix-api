@@ -114,8 +114,23 @@ export interface Appointment {
    * haya desactivado después: la cita lo conserva («(inactivo)»).
    */
   chair: ChairSummary | null;
+  /**
+   * DX-562: la serie («cada N semanas») que creó la cita: su id, la posición
+   * de la cita (1..n, por fecha al crearla) y cuántas se crearon («Serie · 3
+   * de 6»). Ausente si la cita no es de una serie. Mover o cancelar la cita
+   * suelta no la saca de la serie.
+   */
+  series?: AppointmentSeriesRef;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/** DX-562: la serie de una cita. */
+export interface AppointmentSeriesRef {
+  id: string;
+  index: number;
+  /** Citas que se crearon con la serie; `null` si la lectura no la trae. */
+  total: number | null;
 }
 
 /**

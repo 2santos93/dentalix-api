@@ -2150,6 +2150,18 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // cambia), en la transacción del guardado.
   'POST /patient-sources': 'patient-acquisition.e2e-spec.ts',
   'PATCH /patient-sources/:id': 'patient-acquisition.e2e-spec.ts',
+  // DX-562: citas en serie. UN evento por operación, escrito en su
+  // transacción: CREATE APPOINTMENT APPOINTMENT_SERIES_CREATED (la serie, sus
+  // citas, sus fechas y el intervalo), UPDATE APPOINTMENT
+  // APPOINTMENT_SERIES_CANCELLED (las citas canceladas y la cancelación de la
+  // primera) y APPOINTMENT_SERIES_MOVED (las citas, sus nuevas fechas y el
+  // movimiento de la pivote). Nunca el motivo ni las notas.
+  'POST /appointments/series':
+    'appointment-series.use-case.spec.ts, appointment-series.int-spec.ts y appointment-series.e2e-spec.ts',
+  'POST /appointments/series/:id/cancel':
+    'appointment-series.int-spec.ts y appointment-series.e2e-spec.ts',
+  'POST /appointments/series/:id/move':
+    'appointment-series.int-spec.ts y appointment-series.e2e-spec.ts',
   // DX-556: prospectos. Alta (CREATE LEAD), edición (UPDATE con los nombres
   // de campo), etapa (UPDATE con la etapa antes y después), nota (UPDATE sin
   // el texto) y conversión (CREATE PATIENT + UPDATE LEAD, LEAD_CONVERTED o
@@ -2602,6 +2614,11 @@ const KNOWN_UNAUDITED: Record<string, string> = {
     'solo comprueba el token (POST por el cuerpo)',
   'POST /locations/:id/holidays/import/preview':
     'vista previa de la importación; no escribe',
+  // DX-562: las vistas previas de la serie (crear y mover) solo calculan.
+  'POST /appointments/series/preview':
+    'vista previa de la serie de citas; no escribe',
+  'POST /appointments/series/:id/move/preview':
+    'vista previa de mover las citas de la serie; no escribe',
   'POST /patient-imports/inspect': 'no escribe nada ni crea lote',
   // DX-205: la vista previa de «Actualizar precios» del catálogo solo calcula.
   'POST /catalog/price-changes/preview':

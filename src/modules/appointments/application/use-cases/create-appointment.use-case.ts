@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
   Inject,
   Injectable,
   NotFoundException,
@@ -53,6 +54,11 @@ import { collectWarnings, type Warnings } from '../appointment-warnings';
 import { ChairAssignmentService } from '../chair-assignment';
 import type { Chair } from '../../../chairs/domain/entities/chair.entity';
 import { resolveAppointmentProviderId } from '../../../chairs/domain/chair-rules';
+import {
+  attemptRule,
+  type SlotRuleCollector,
+  type SlotRuleFailure,
+} from '../slot-rule-failure';
 
 // NOTE: deliberately NO `tenantId`/`status` field — tenant comes from the
 // guarded request context (the repository reads it, never this input), and
@@ -127,6 +133,17 @@ interface PreparedAppointment {
   chair: Chair | null;
   warnings: Warnings;
   blockCheck: Awaited<ReturnType<typeof checkScheduleBlocks>>;
+}
+
+/**
+ * DX-562: lo común a todas las fechas de una serie, ya validado una vez
+ * (tipo, paciente, sede, sillón y profesional): solo cambia la hora.
+ */
+export interface SeriesSlotContext {
+  input: ResolvedAppointmentInput & { providerId: string; locationId: string };
+  chair: Chair | null;
+  /** Duración de cada cita (la de la base: fin explícito o la del tipo). */
+  durationMs: number;
 }
 
 /**
@@ -233,6 +250,60 @@ export class CreateAppointmentUseCase {
   }
 
   /**
+   * DX-562: lo común de una serie, con EXACTAMENTE las reglas de agendar a
+   * mano que no dependen de la hora: tipo activo (y la duración), paciente de
+   * la clínica, sede permitida (la del request o, sin cabecera, la de
+   * escritura de la sesión), sillón y profesional que atiende en ella. Lanza
+   * la misma excepción HTTP que el alta manual.
+   */
+  async prepareSeries(
+    input: CreateAppointmentInput,
+  ): Promise<SeriesSlotContext> {
+    const resolved = await this.resolveEnd(input);
+    const participants = await this.resolveParticipants(resolved, {
+      checkPatient: true,
+    });
+    return {
+      input: {
+        ...resolved,
+        providerId: participants.providerId,
+        locationId: participants.target,
+      },
+      chair: participants.chair,
+      durationMs: resolved.end.getTime() - resolved.start.getTime(),
+    };
+  }
+
+  /**
+   * DX-562: las reglas de agendar que dependen de la hora (pasado, horario y
+   * festivos de la sede, horario del profesional, bloqueos y solapes del
+   * profesional, del paciente y del sillón) para UNA fecha de la serie, sin
+   * escribir y SIN pararse en la primera: devuelve todos los fallos (con la
+   * misma excepción que daría la cita suelta) y los avisos.
+   */
+  async checkSeriesSlot(
+    context: SeriesSlotContext,
+    slot: { start: Date; end: Date },
+  ): Promise<{ failures: SlotRuleFailure[]; warnings: Warnings }> {
+    const failures: SlotRuleFailure[] = [];
+    const collect: SlotRuleCollector = (f) => failures.push(f);
+    try {
+      this.assertFuture(slot);
+    } catch (error) {
+      if (!(error instanceof HttpException)) throw error;
+      collect({ step: 'PAST', error });
+    }
+    const prepared = await this.prepareFor(
+      { ...context.input, start: slot.start, end: slot.end },
+      context.input.locationId,
+      context.chair,
+      { checkPatient: true, checkHoliday: true },
+      collect,
+    );
+    return { failures, warnings: prepared.warnings };
+  }
+
+  /**
    * DX-263: crea una cita importada (el trabajo del lote, con el paciente ya
    * creado), con las mismas reglas que `execute` y el respaldo de las EXCLUDE
    * de la BD. La cita queda ligada a su lote (`importBatchId`).
@@ -328,6 +399,21 @@ export class CreateAppointmentUseCase {
     input: ResolvedAppointmentInput,
     opts: { checkPatient: boolean; checkHoliday: boolean },
   ): Promise<PreparedAppointment> {
+    const { providerId, target, chair } = await this.resolveParticipants(
+      input,
+      opts,
+    );
+    return this.prepareFor({ ...input, providerId }, target, chair, opts);
+  }
+
+  /**
+   * Paciente (si `checkPatient`), sede, sillón y profesional de la cita: lo
+   * que no depende de la hora.
+   */
+  private async resolveParticipants(
+    input: ResolvedAppointmentInput,
+    opts: { checkPatient: boolean },
+  ): Promise<{ providerId: string; target: string; chair: Chair | null }> {
     // `patientId` y `providerId` tienen que resolver a entidades REALES de ESTA
     // clínica, antes de mirar solapes (un id inválido hace que el solape no
     // signifique nada). Ambos repos filtran por tenant vía RLS, así que un
@@ -376,16 +462,27 @@ export class CreateAppointmentUseCase {
     assertAttendsAt(provider, target);
     // DX-161: recepción y asistencia no atienden: no se les agenda.
     assertAttendingRole(provider);
-    return this.prepareFor({ ...input, providerId }, target, chair, opts);
+    return { providerId, target, chair };
   }
 
-  /** El resto de reglas, con el profesional y el sillón ya resueltos. */
+  /**
+   * El resto de reglas, con el profesional y el sillón ya resueltos. Sin
+   * `collect` (agendar una cita) se para en la primera que falla; con él
+   * (DX-562, una fecha de una serie) las mira todas y cada fallo HTTP va a
+   * `collect` con su regla.
+   */
   private async prepareFor(
     input: ResolvedAppointmentInput & { providerId: string },
     target: string,
     chair: Chair | null,
     opts: { checkPatient: boolean; checkHoliday: boolean },
+    collect?: SlotRuleCollector,
   ): Promise<PreparedAppointment> {
+    const attempt = <T>(
+      step: SlotRuleFailure['step'],
+      rule: () => Promise<T>,
+      fallback: T,
+    ): Promise<T> => attemptRule(collect, step, rule, fallback);
     // Horario de atención de la SEDE: la cita tiene que caber completa en un
     // tramo del día. Sede sin horario configurado => sin restricción (ver
     // fitsBusinessHours), así que esto no cambia nada hasta que la clínica lo
@@ -397,92 +494,131 @@ export class CreateAppointmentUseCase {
       input.locationId !== undefined
         ? await this.schedule.findByLocation(input.locationId)
         : await this.schedule.findForCurrentLocation();
-    if (!fitsBusinessHours(input.start, input.end, hours)) {
-      // DX-354: las horas del mensaje, con el formato y el reloj de la sede;
-      // el formato se pide solo si el mensaje lleva horas (día abierto).
-      const source = await this.schedule.formatSourceOf(input.locationId);
-      throw new UnprocessableEntityException(
-        businessHoursErrorMessage(input.start, input.end, hours!, () =>
-          requireLocationFormat(source),
-        ),
-      );
-    }
+    await attempt(
+      'BUSINESS_HOURS',
+      async () => {
+        if (!fitsBusinessHours(input.start, input.end, hours)) {
+          // DX-354: las horas del mensaje, con el formato y el reloj de la
+          // sede; el formato se pide solo si el mensaje lleva horas (día
+          // abierto).
+          const source = await this.schedule.formatSourceOf(input.locationId);
+          throw new UnprocessableEntityException(
+            businessHoursErrorMessage(input.start, input.end, hours!, () =>
+              requireLocationFormat(source),
+            ),
+          );
+        }
+      },
+      undefined,
+    );
 
     // DX-263-bis: un festivo de la sede (DX-316), en su zona, es 409 con su
     // nombre. Misma sede que el horario: la de pendientes o la del request.
     if (opts.checkHoliday) {
-      await assertNotOnHoliday(this.schedule, {
-        locationId: input.locationId,
-        start: input.start,
-        end: input.end,
-      });
+      await attempt(
+        'LOCATION_HOLIDAY',
+        () =>
+          assertNotOnHoliday(this.schedule, {
+            locationId: input.locationId,
+            start: input.start,
+            end: input.end,
+          }),
+        undefined,
+      );
     }
 
     // DX-233: horario del profesional en la sede de la cita (`target`, la
     // misma en la que se escribe; DX-089). Sin horario configurado no cambia
     // nada; fuera de él, aviso (o 409 en modo estricto).
-    const offSchedule = await this.availability.warnOrReject({
-      providerId: input.providerId,
-      locationId: target,
-      start: input.start,
-      end: input.end,
-    });
+    const offSchedule = await attempt(
+      'PROVIDER_OFF_SCHEDULE',
+      () =>
+        this.availability.warnOrReject({
+          providerId: input.providerId,
+          locationId: target,
+          start: input.start,
+          end: input.end,
+        }),
+      null,
+    );
 
     // DX-122: bloqueos de la agenda del profesional o de la sede. Uno que no
     // deja agendar es un 409; uno que sí (almuerzo), un aviso en la respuesta.
     // DX-446: un hueco reservado deja pasar sus tipos, o todos desde la
     // liberación, o a quien puede saltárselo con motivo.
-    const blockCheck = await checkScheduleBlocks(
-      this.blocks,
-      {
-        providerId: input.providerId,
-        start: input.start,
-        end: input.end,
-        locationId: input.locationId,
-      },
-      {
-        appointmentTypeId: input.appointmentTypeId ?? null,
-        now: this.clock(),
-        actorRole: input.actorRole ?? null,
-        overrideReason: input.overrideReason,
-      },
+    const blockCheck = await attempt(
+      'SCHEDULE_BLOCK',
+      () =>
+        checkScheduleBlocks(
+          this.blocks,
+          {
+            providerId: input.providerId,
+            start: input.start,
+            end: input.end,
+            locationId: input.locationId,
+          },
+          {
+            appointmentTypeId: input.appointmentTypeId ?? null,
+            now: this.clock(),
+            actorRole: input.actorRole ?? null,
+            overrideReason: input.overrideReason,
+          },
+        ),
+      { warnings: [], override: null },
     );
     const warnings = collectWarnings(blockCheck.warnings, offSchedule);
 
     // Overlap rule: two half-open intervals [s1,e1) and [s2,e2) overlap iff
     // s1 < e2 AND s2 < e1 — enforced by the repository's findOverlapping
     // query. A CANCELLED appointment never blocks (repo excludes it).
-    const overlapping = await this.repo.findOverlapping(
-      input.providerId,
-      input.start,
-      input.end,
+    await attempt(
+      'PROVIDER_OVERLAP',
+      async () => {
+        const overlapping = await this.repo.findOverlapping(
+          input.providerId,
+          input.start,
+          input.end,
+        );
+        if (overlapping.length > 0) {
+          throw new ConflictException(OVERLAP_MESSAGES.provider);
+        }
+      },
+      undefined,
     );
-    if (overlapping.length > 0) {
-      throw new ConflictException(OVERLAP_MESSAGES.provider);
-    }
 
     // Mismo criterio, otro eje: el PACIENTE tampoco puede estar en dos citas a
     // la vez (aunque sean con profesionales distintos — no puede estar en dos
     // sillones). Antes solo se validaba el solape del profesional.
-    const patientOverlapping = opts.checkPatient
-      ? await this.repo.findOverlappingForPatient(
-          input.patientId,
-          input.start,
-          input.end,
-        )
-      : [];
-    if (patientOverlapping.length > 0) {
-      throw new ConflictException(OVERLAP_MESSAGES.patient);
-    }
+    await attempt(
+      'PATIENT_OVERLAP',
+      async () => {
+        const patientOverlapping = opts.checkPatient
+          ? await this.repo.findOverlappingForPatient(
+              input.patientId,
+              input.start,
+              input.end,
+            )
+          : [];
+        if (patientOverlapping.length > 0) {
+          throw new ConflictException(OVERLAP_MESSAGES.patient);
+        }
+      },
+      undefined,
+    );
 
     // DX-211: tercer eje, el SILLÓN: dos citas no lo ocupan a la vez (aunque
     // sean de profesionales y pacientes distintos).
     if (chair) {
-      await this.requireChairs().assertFree(chair, {
-        locationId: target,
-        start: input.start,
-        end: input.end,
-      });
+      await attempt(
+        'CHAIR_OVERLAP',
+        () =>
+          this.requireChairs().assertFree(chair, {
+            locationId: target,
+            start: input.start,
+            end: input.end,
+          }),
+        undefined,
+      );
     }
     return { input, chair, warnings, blockCheck };
   }

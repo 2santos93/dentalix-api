@@ -211,6 +211,13 @@ function throttlers(
       generateKey: (context, _ip, name) =>
         staffActorRateLimitKey(name, request(context).headers.authorization),
     },
+    {
+      // DX-562: citas en serie, un balde por clínica + usuario para TODAS
+      // sus rutas (el prefijo es la política, no la ruta).
+      ...strict('appointment-series'),
+      generateKey: (context, _ip, name) =>
+        staffActorRateLimitKey(name, request(context).headers.authorization),
+    },
   ];
 }
 

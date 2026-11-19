@@ -241,6 +241,8 @@ model Tenant {
   postOpCheckAttempts                     PostOpCheckAttempt[]
   // DX-556: prospectos, sus notas y los motivos propios.
   leads                                   Lead[]
+  // DX-562: series de citas.
+  appointmentSeries                       AppointmentSeries[]
   leadNotes                               LeadNote[]
   leadReasons                             LeadReason[]
   // DX-172: catálogo «¿Cómo nos conoció?» de la clínica.
@@ -476,6 +478,8 @@ model User {
   leadsConverted                    Lead[]                           @relation("LeadConvertedBy")
   leadNotes                         LeadNote[]
   leadReasons                       LeadReason[]
+  // DX-562: series de citas que creó o canceló.
+  appointmentSeriesCreated          AppointmentSeries[]              @relation("AppointmentSeriesCreatedBy")
   patientAccessLinksCreated         PatientAccessLink[]              @relation("PatientAccessLinkCreatedBy")
   patientAccessLinksRevoked         PatientAccessLink[]              @relation("PatientAccessLinkRevokedBy")
   orthoVisitsAuthored               OrthoVisit[]
@@ -1842,6 +1846,12 @@ model Appointment {
   // del paciente (ONLINE, la marca «Online» de la agenda). Inmutable de hecho:
   // ningún caso de uso la cambia.
   origin                 AppointmentOrigin       @default(STAFF)
+  // DX-562: la serie («cada N semanas») que creó la cita y su posición en
+  // ella (1..n, por fecha al crearla). Las dos o ninguna (CHECK
+  // appointments_series_check); FK compuesta por clínica
+  // (appointments_series_fkey). Mover o cancelar la cita suelta no la saca.
+  seriesId               String?                 @db.Uuid
+  seriesIndex            Int?                    @db.SmallInt
   createdAt              DateTime                @default(now())
   updatedAt              DateTime                @updatedAt
   deletedAt              DateTime?
@@ -1900,6 +1910,8 @@ model Appointment {
   importBatch     PatientImportBatch?           @relation(fields: [tenantId, importBatchId], references: [tenantId, id], onDelete: Restrict, map: "appointments_import_batch_fkey")
   // DX-263: la fila de la hoja de citas que la creó.
   importRows      PatientImportAppointmentRow[]
+  // DX-562: la serie que la creó.
+  series          AppointmentSeries?            @relation(fields: [tenantId, seriesId], references: [tenantId, id], onDelete: Restrict, map: "appointments_series_fkey")
 
   // Destino de la FK compuesta (tenantId, appointmentId) de
   // appointment_confirmations (DX-005): la cita tiene que ser del MISMO tenant.
@@ -1950,7 +1962,34 @@ model Appointment {
   //     WHERE "import_batch_id" IS NOT NULL
   //     -> DX-263: citas de un lote (deshacer, recordatorios) y lado hijo de
   //        la FK compuesta al lote.
+  //   appointments_tenant_series_index_key UNIQUE ("tenantId", "seriesId",
+  //     "seriesIndex") WHERE "seriesId" IS NOT NULL
+  //     -> DX-562: citas de una serie en orden, una por posición, y lado hijo
+  //        de la FK compuesta a la serie.
   @@map("appointments")
+}
+
+/// DX-562: una serie de citas («cada N semanas, N veces o hasta una fecha»).
+/// Sin paciente ni profesional: salen de sus citas (`appointments.seriesId`),
+/// así la serie no entra en la fusión ni en la importación de pacientes.
+/// `occurrences` = las citas que se crearon (1–26). Solo se crea (sin
+/// UPDATE ni DELETE para la app): su estado sale de sus citas.
+model AppointmentSeries {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @db.Uuid
+  intervalWeeks Int      @db.SmallInt
+  occurrences   Int      @db.SmallInt
+  createdById   String   @db.Uuid
+  createdAt     DateTime @default(now())
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  createdBy    User          @relation("AppointmentSeriesCreatedBy", fields: [createdById], references: [id], onDelete: Restrict, map: "appointment_series_created_by_fkey")
+  appointments Appointment[]
+
+  // Destino de la FK compuesta de appointments: la serie es de la MISMA clínica.
+  @@unique([tenantId, id], map: "appointment_series_tenant_id_key")
+  @@index([createdById], map: "appointment_series_created_by_idx")
+  @@map("appointment_series")
 }
 
 // DX-005: respuesta del paciente en el enlace público de confirmación.
@@ -5055,6 +5094,8 @@ enum EmailTemplate {
   // DX-016: código de la reserva online y acuse de la reserva o solicitud.
   ONLINE_BOOKING_CODE       @map("online-booking-code")
   ONLINE_BOOKING_RECEIVED   @map("online-booking-received")
+  // DX-562: aviso único al paciente con todas las fechas de una serie de citas.
+  APPOINTMENT_SERIES        @map("appointment-series")
 }
 
 /// Registro de envíos de email (patrón outbox). NUNCA guarda el destinatario
