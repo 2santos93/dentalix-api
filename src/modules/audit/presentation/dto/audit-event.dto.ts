@@ -243,6 +243,26 @@ export class AuditCancellationDto {
   lateCancellation!: boolean;
 }
 
+/** DX-562: las citas de una serie que tocó una operación. */
+export class AuditAppointmentSeriesDto {
+  @ApiProperty({ format: 'uuid' })
+  seriesId!: string;
+
+  @ApiProperty({ type: [String], format: 'uuid', maxItems: 26 })
+  appointmentIds!: string[];
+
+  @ApiPropertyOptional({
+    type: [String],
+    format: 'date-time',
+    description:
+      'Al crear o mover: el inicio de cada cita, en el orden de `appointmentIds`.',
+  })
+  dates?: string[];
+
+  @ApiPropertyOptional({ minimum: 1, maximum: 12 })
+  intervalWeeks?: number;
+}
+
 /** Un lado del cambio del nº de registro sanitario de una sede (DX-319). */
 export class AuditHealthRegistrationSideDto {
   @ApiProperty({ type: String, nullable: true, maxLength: 64 })
@@ -529,6 +549,13 @@ export class AuditMetadataDto {
       'DX-279: cita cancelada desde la agenda, en su único evento (`reason` APPOINTMENT_CANCELLED; PATIENT_FLOW si estaba en la clínica; COMPLETED_EXIT si estaba completada): quién, código del motivo, minutos de aviso y si fue tardía. Nunca el texto libre del motivo.',
   })
   cancellation?: AuditCancellationDto;
+
+  @ApiPropertyOptional({
+    type: AuditAppointmentSeriesDto,
+    description:
+      'DX-562: serie de citas en UN evento (`reason` APPOINTMENT_SERIES_CREATED, APPOINTMENT_SERIES_CANCELLED o APPOINTMENT_SERIES_MOVED; `resourceId` = la primera cita tocada): la serie, sus citas y, al crear o mover, sus inicios. Al cancelar, `cancellation` es la de la primera cita cancelada (la de menos aviso).',
+  })
+  appointmentSeries?: AuditAppointmentSeriesDto;
 
   @ApiPropertyOptional({
     type: AuditHealthRegistrationChangeDto,

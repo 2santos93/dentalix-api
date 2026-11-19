@@ -30,9 +30,11 @@ import {
   PaymentReportRejectedEmailVars,
   WeeklyDigestEmailVars,
   QuoteFollowUpEmailVars,
+  AppointmentSeriesEmailVars,
 } from '../../domain/email-message';
 import { PRESCRIPTION_COPY_CATALOG } from './catalog/prescription-copy.catalog';
 import { QUOTE_FOLLOW_UP_CATALOG } from './catalog/quote-follow-up.catalog';
+import { APPOINTMENT_SERIES_CATALOG } from './catalog/appointment-series.catalog';
 import { EmailBlock, EmailTable, renderLayout } from './layout';
 import { appointmentReminder } from './appointment-reminder.template';
 
@@ -825,6 +827,49 @@ function quoteFollowUp(
   });
 }
 
+/**
+ * DX-562: el aviso único de una serie de citas, en el idioma del paciente:
+ * dónde, con quién y la lista de fechas (numeradas, una por línea). Sin
+ * botón: cada cita lleva su enlace de confirmación en su recordatorio.
+ */
+function appointmentSeries(
+  vars: AppointmentSeriesEmailVars,
+  brand: EmailBrand | null,
+  locale: EmailLocale,
+): RenderedEmail {
+  if (vars.dateLabels.length < 2 || vars.dateLabels.length > 26) {
+    throw new Error('El aviso de una serie lleva de 2 a 26 fechas');
+  }
+  const t = APPOINTMENT_SERIES_CATALOG[locale];
+  return renderLayout({
+    brand,
+    chrome: t,
+    subject: t.subject(vars.clinicName, vars.patientFirstName),
+    heading: t.heading(vars.recipientFirstName),
+    blocks: [
+      {
+        kind: 'paragraph',
+        text: t.intro({
+          count: vars.dateLabels.length,
+          location: vars.locationName,
+          provider: vars.providerName,
+          patient: vars.patientFirstName,
+        }),
+      },
+      {
+        kind: 'paragraph',
+        lead: t.datesLead,
+        multiline: true,
+        text: vars.dateLabels
+          .map((label, i) => `${i + 1}. ${label}`)
+          .join('\n'),
+      },
+      { kind: 'note', text: t.note },
+    ],
+    action: null,
+  });
+}
+
 type Renderer<T extends EmailTemplateName> = (
   vars: EmailVarsByTemplate[T],
   brand: EmailBrand | null,
@@ -856,6 +901,7 @@ const RENDERERS: { [T in EmailTemplateName]: Renderer<T> } = {
   'mfa-enrollment-code': mfaEnrollmentCode,
   'online-booking-code': onlineBookingCode,
   'online-booking-received': onlineBookingReceived,
+  'appointment-series': appointmentSeries,
 };
 
 /**
