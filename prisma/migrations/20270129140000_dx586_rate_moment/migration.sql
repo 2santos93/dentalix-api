@@ -14,7 +14,7 @@
 --                              MANUAL:<id de manual_exchange_rates>, o dos
 --                              unidas con «+»).
 --    CHECK payments_exchange_rate_moment_check NOT VALID (se valida en
---    20270128140300): van juntas y con la tasa congelada de DX-375, y la
+--    20270129140300): van juntas y con la tasa congelada de DX-375, y la
 --    fecha valor solo con BCV.
 -- 2. Trigger payments_exchange_rate_quoted_at: al congelar (INSERT con
 --    "exchangeRateRef", o UPDATE que la pone) fija "exchangeRateQuotedAt" con
@@ -23,8 +23,8 @@
 --    "exchangeRateRef": sus abonos quedan con las tres NULL, como antes. Abre
 --    la puerta de la fusión de pacientes (DX-266), como las demás guardas.
 -- 3. "manual_exchange_rates"."effectiveFrom" (TIMESTAMPTZ, NULL aquí; el
---    relleno es 20270128140100 y el NOT NULL y el cambio del índice único,
---    20270128140200). Una réplica anterior que inserte sin ella recibe el
+--    relleno es 20270129140100 y el NOT NULL y el cambio del índice único,
+--    20270129140200). Una réplica anterior que inserte sin ella recibe el
 --    inicio del día en la sede principal (trigger
 --    manual_exchange_rates_effective_from), el mismo valor del relleno.
 -- 4. El trigger de «tasa manual ya usada» (DX-375) mira la referencia: con
@@ -37,7 +37,7 @@
 -- ADD COLUMN, ADD CONSTRAINT NOT VALID, CREATE TRIGGER y CREATE OR REPLACE
 -- FUNCTION toman bloqueos breves sin leer las tablas. lock_timeout 5 s: si
 -- una transacción larga los retiene, falla limpia; para reintentar, `npx
--- prisma migrate resolve --rolled-back 20270128140000_dx586_rate_moment` y
+-- prisma migrate resolve --rolled-back 20270129140000_dx586_rate_moment` y
 -- de nuevo el deploy. RLS FORCE no se toca. DX-266: ninguna columna nueva
 -- apunta a "patients": dx_merge_patients no cambia.
 

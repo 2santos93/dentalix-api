@@ -13,7 +13,7 @@
 --
 -- Idempotente: solo toca filas con la columna NULL. Si se corta a mitad, basta
 -- con repetirla (`prisma migrate resolve --rolled-back
--- 20270128140100_dx586_effective_from_backfill` y `deploy`).
+-- 20270129140100_dx586_effective_from_backfill` y `deploy`).
 DO $$
 DECLARE
   t uuid;

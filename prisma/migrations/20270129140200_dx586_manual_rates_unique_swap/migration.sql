@@ -1,5 +1,5 @@
 -- DX-586: cierra el relleno de "effectiveFrom"
--- (20270128140100_dx586_effective_from_backfill) y cambia la unicidad de las
+-- (20270129140100_dx586_effective_from_backfill) y cambia la unicidad de las
 -- tasas manuales: de una por (clínica, día, moneda) a una por (clínica,
 -- moneda, instante desde el que rige). Así una clínica registra varias el
 -- mismo día («desde las 14:30»).
@@ -16,7 +16,7 @@
 -- 20261216090200_dx467_prescription_verification_code_validate).
 --
 -- lock_timeout 5 s; para reintentar, `prisma migrate resolve --rolled-back
--- 20270128140200_dx586_manual_rates_unique_swap` y `deploy`.
+-- 20270129140200_dx586_manual_rates_unique_swap` y `deploy`.
 
 SET LOCAL lock_timeout = '5s';
 

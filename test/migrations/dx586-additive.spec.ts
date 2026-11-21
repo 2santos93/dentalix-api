@@ -19,10 +19,10 @@ const statements = (sql: string) =>
     .map((s) => s.trim())
     .filter((s) => s !== '');
 
-const SCHEMA = '20270128140000_dx586_rate_moment';
-const BACKFILL = '20270128140100_dx586_effective_from_backfill';
-const SWAP = '20270128140200_dx586_manual_rates_unique_swap';
-const VALIDATE = '20270128140300_dx586_rate_moment_validate';
+const SCHEMA = '20270129140000_dx586_rate_moment';
+const BACKFILL = '20270129140100_dx586_effective_from_backfill';
+const SWAP = '20270129140200_dx586_manual_rates_unique_swap';
+const VALIDATE = '20270129140300_dx586_rate_moment_validate';
 
 describe('DX-586: migraciones de la tasa al momento', () => {
   it('el esquema es aditivo: lock_timeout primero, columnas NULL y CHECK NOT VALID', () => {
