@@ -590,7 +590,10 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
       ...(cancel ? await this.cancellationData(tx, id, cancel) : {}),
       ...(clearCancellation ? CLEARED_CANCELLATION : {}),
       // DX-588: sin llegada no hay turno (vuelve a agendada o confirmada).
-      ...(rest.arrivedAt === null ? { turnNumber: null } : {}),
+      // DX-265: ni el origen de la llegada.
+      ...(rest.arrivedAt === null
+        ? { turnNumber: null, arrivalSource: null }
+        : {}),
     };
     // DX-273 (revisión I1): lo que esta cita reserva ANTES del cambio; si
     // deja de reservarlo, una cita en la clínica puede recuperarlo.
@@ -1004,6 +1007,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
                "preArrivalStatus" = NULL,
                "arrivedAt" = NULL,
                "turnNumber" = NULL,
+               "arrivalSource" = NULL,
                "overbooked" = ${overbooked},
                "updatedAt" = timezone('UTC', now())
          WHERE "id" = ${id}::uuid
@@ -1066,6 +1070,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
         }),
         providerName: names.get(a.providerId) ?? null,
         turnNumber: a.turnNumber,
+        arrivalSource: a.arrivalSource,
         urgent: appointmentType?.isUrgent ?? false,
       }));
     });

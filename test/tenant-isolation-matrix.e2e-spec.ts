@@ -4472,6 +4472,17 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       ],
     },
     {
+      spec: 'self-check-in.e2e-spec.ts',
+      checks:
+        'B → 404 al ver o cambiar los ajustes de «Ya llegué» de la sede de A, generar o retirar su QR, y los ajustes y el QR de A siguen igual (DX-265)',
+      routes: [
+        'GET /locations/:locationId/check-in-settings',
+        'PATCH /locations/:locationId/check-in-settings',
+        'POST /locations/:locationId/check-in-settings/qr',
+        'POST /locations/:locationId/check-in-settings/qr/revoke',
+      ],
+    },
+    {
       spec: 'waiting-room.e2e-spec.ts',
       checks:
         'B → 404 al renombrar o revocar la pantalla de sala de espera de A, y la pantalla de A sigue igual (DX-588)',
@@ -5076,6 +5087,17 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
    * `COVERED_ELSEWHERE`).
    */
   const PUBLIC_TOKEN_COVERED_ELSEWHERE: readonly IsolationExemption[] = [
+    {
+      spec: 'self-check-in.e2e-spec.ts',
+      checks:
+        'B → el mismo 404 con el enlace de la cita de A o el QR de la sede de A en su host, igual que uno inventado, y la cita de A sigue sin llegada (DX-265)',
+      routes: [
+        'GET /public/appointment-confirmations/:token/arrival',
+        'POST /public/appointment-confirmations/:token/arrival',
+        'GET /public/check-in/:token',
+        'POST /public/check-in/:token',
+      ],
+    },
     {
       spec: 'waiting-room.e2e-spec.ts',
       checks:

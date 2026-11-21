@@ -1,3 +1,4 @@
+import { SelfCheckInModule } from '../self-check-in/self-check-in.module';
 import { Module } from '@nestjs/common';
 import { OrthodonticsModule } from '../orthodontics/orthodontics.module';
 import { ProviderScheduleModule } from '../provider-schedule/provider-schedule.module';
@@ -78,6 +79,8 @@ import { PrismaAppointmentSeriesRepository } from './infrastructure/repositories
     // DX-562: el aviso único de una serie de citas y su registro de envío.
     EmailModule,
     OutboundMessagesModule,
+    // DX-265: marca «Llegó por su cuenta» y pendientes en «En clínica».
+    SelfCheckInModule,
   ],
   // DX-562: el de las series antes que el de citas (rutas más concretas).
   controllers: [
@@ -137,6 +140,8 @@ import { PrismaAppointmentSeriesRepository } from './infrastructure/repositories
     ListUpcomingAppointmentsUseCase,
     CreateAppointmentUseCase,
     APPOINTMENT_REPOSITORY,
+    // DX-265: «Ya llegué» del paciente por el mismo camino que recepción.
+    UpdateAppointmentUseCase,
   ],
 })
 export class AppointmentsModule {}

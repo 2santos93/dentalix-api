@@ -1,4 +1,8 @@
-import type { ClinicRole, RecallContactChannel } from '@prisma/client';
+import type {
+  AppointmentArrivalSource,
+  ClinicRole,
+  RecallContactChannel,
+} from '@prisma/client';
 import {
   AppointmentOrigin,
   AppointmentStatus,
@@ -132,6 +136,11 @@ export interface UpdateAppointmentRepoInput {
   /** DX-200: a qué vuelve «Deshacer llegada»; null al salir de ARRIVED. */
   preArrivalStatus?: AppointmentStatus | null;
   /**
+   * DX-265: quién marcó la llegada si no fue el personal (null = el personal).
+   * Lo fija el use-case al entrar en ARRIVED; sin llegada se borra con ella.
+   */
+  arrivalSource?: AppointmentArrivalSource | null;
+  /**
    * DX-200: cambiar el estado SOLO si sigue siendo este (condición y cambio en
    * la misma sentencia): si otra persona lo cambió antes, 409 y nada cambia.
    */
@@ -239,6 +248,8 @@ export interface InClinicAppointment extends Appointment {
   providerName: string | null;
   /** DX-588: turno del día en la sede (al marcar «Llegó»). */
   turnNumber: number | null;
+  /** DX-265: la llegada la marcó el paciente (enlace o QR); null = el personal. */
+  arrivalSource: AppointmentArrivalSource | null;
   /** DX-470: el tipo de la cita es de urgencia (aunque se haya desactivado). */
   urgent: boolean;
 }

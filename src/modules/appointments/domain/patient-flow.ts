@@ -153,6 +153,12 @@ export interface TransitionInput {
   statusReason?: string | null;
   /** DX-237: quien hace el cambio es el profesional de la cita. */
   ownAppointment: boolean;
+  /**
+   * DX-265: el propio paciente marca «Ya llegué» (enlace de la cita o QR de
+   * la sede): sin rol, pero con las MISMAS reglas de la llegada (desde
+   * agendada o confirmada y el día de la cita). Solo vale para ARRIVED.
+   */
+  selfCheckIn?: boolean;
 }
 
 /** ¿El cambio saca la cita de COMPLETED? */
@@ -179,7 +185,7 @@ export function checkStatusTransition(input: TransitionInput): TransitionCheck {
     case AppointmentStatus.ARRIVED:
       if (!ARRIVABLE.has(from))
         return conflict(PATIENT_FLOW_MESSAGES.arriveFrom);
-      if (!allowed(role, FRONT_DESK_ROLES)) {
+      if (!input.selfCheckIn && !allowed(role, FRONT_DESK_ROLES)) {
         return forbidden(PATIENT_FLOW_MESSAGES.arriveForbidden);
       }
       if (!input.isToday) return conflict(PATIENT_FLOW_MESSAGES.notToday);

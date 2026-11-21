@@ -372,6 +372,8 @@ export const BANK_RECONCILIATION_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 
 /** DX-588: Ajustes › Pantallas de sala de espera (crear, ajustar y revocar). */
 export const WAITING_ROOM_SCREEN_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+/** DX-265: Ajustes › Llegada de pacientes (ventana de «Ya llegué» y QR de la sede). */
+export const CHECK_IN_SETTINGS_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 // Gastos de la sede y salidas de caja menor (DX-274) — la gestión (lista,
 // detalle, alta, edición, anulación, pagos, soporte, resumen y CSV): solo
 // ADMIN. CAPTURA: recepción también pide la autorización de subida del soporte
