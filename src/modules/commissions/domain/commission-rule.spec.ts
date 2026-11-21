@@ -1,4 +1,5 @@
 import {
+  COMMISSION_DEDUCTIONS_AVAILABLE,
   COMMISSION_RULE_MESSAGES,
   isValidPercent,
   parseRuleTerms,
@@ -65,19 +66,21 @@ describe('regla de honorarios (DX-018)', () => {
     });
   });
 
-  it('los descuentos sin datos de origen no se pueden activar (400 con el porqué)', () => {
-    expect(parseRuleTerms({ ...base, deductLabCost: true })).toEqual({
-      ok: false,
-      message: COMMISSION_RULE_MESSAGES.labCostUnavailable,
+  it('DX-018-bis: guarda los descuentos de laboratorio y pasarela (sin indicarlos, apagados)', () => {
+    const both = parseRuleTerms({
+      ...base,
+      deductLabCost: true,
+      deductCardFee: true,
     });
-    expect(parseRuleTerms({ ...base, deductCardFee: true })).toEqual({
-      ok: false,
-      message: COMMISSION_RULE_MESSAGES.cardFeeUnavailable,
+    expect(both.ok && both.terms.deductLabCost).toBe(true);
+    expect(both.ok && both.terms.deductCardFee).toBe(true);
+    const none = parseRuleTerms(base);
+    expect(none.ok && none.terms.deductLabCost).toBe(false);
+    expect(none.ok && none.terms.deductCardFee).toBe(false);
+    expect(COMMISSION_DEDUCTIONS_AVAILABLE).toEqual({
+      labCost: true,
+      cardFee: true,
     });
-    expect(
-      parseRuleTerms({ ...base, deductLabCost: false, deductCardFee: false })
-        .ok,
-    ).toBe(true);
   });
 
   it('percentFor: el de la categoría si la regla lo tiene; si no, el general', () => {

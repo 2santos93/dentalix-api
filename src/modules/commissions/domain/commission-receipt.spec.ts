@@ -4,6 +4,7 @@ import {
   buildReceiptContent,
   receiptContentHash,
   receiptDocumentModel,
+  deductionsNote,
   settlementDocumentModel,
 } from './commission-receipt';
 import type { SettlementDocumentSource } from './ports/commission-payment-repository.port';
@@ -68,6 +69,8 @@ function source(
     },
     closedAt: new Date('2026-11-02T13:00:00Z'),
     basis: 'COLLECTED',
+    deductLabCost: false,
+    deductCardFee: false,
     lines: [
       {
         id: 'l1',
@@ -81,6 +84,9 @@ function source(
         base: 100,
         percent: 35,
         amount: 35,
+        labCost: 0,
+        cardFee: 0,
+        labCostSkippedCurrencies: [],
         paymentId: 'p1',
       },
       {
@@ -95,6 +101,9 @@ function source(
         base: -14.29,
         percent: 35,
         amount: -5,
+        labCost: 0,
+        cardFee: 0,
+        labCostSkippedCurrencies: [],
         paymentId: 'p1',
       },
       {
@@ -109,6 +118,9 @@ function source(
         base: 2000,
         percent: 30,
         amount: 600,
+        labCost: 0,
+        cardFee: 0,
+        labCostSkippedCurrencies: [],
         paymentId: null,
       },
     ],
@@ -157,6 +169,49 @@ describe('PDF de la liquidación (DX-464)', () => {
     expect(text).toContain('Dra. Andrea Rivas');
     expect(text).not.toMatch(/María|Pérez/);
     expect(text).toMatch(/Página 1 de 1/);
+  });
+
+  it('DX-018-bis: con descuentos, totales de laboratorio y pasarela descontados de la base y su nota', async () => {
+    const base = source();
+    const model = settlementDocumentModel(
+      source({
+        deductLabCost: true,
+        deductCardFee: true,
+        lines: base.lines.map((l) =>
+          l.id === 'l1'
+            ? {
+                ...l,
+                labCost: 30,
+                cardFee: 3.5,
+                labCostSkippedCurrencies: ['VES'],
+              }
+            : l,
+        ),
+      }),
+      NOW,
+    );
+    const usd = model.sections[0];
+    expect(usd.totals.map((t) => t.label)).toEqual([
+      'Devengado',
+      'Ajustes de liquidaciones anteriores',
+      'Laboratorio descontado de la base',
+      'Pasarela descontada de la base',
+      'Deducciones',
+      'Total USD',
+      'Pagado',
+      'Pendiente',
+    ]);
+    expect(model.notes[0]).toBe(
+      deductionsNote({ deductLabCost: true, deductCardFee: true }),
+    );
+    expect(model.notes[1]).toContain(
+      '1 prestación tiene costo de laboratorio en otra moneda',
+    );
+    const text = painted(await renderer.render(model));
+    expect(text).toContain('Laboratorio descontado de la base');
+    expect(settlementDocumentModel(source(), NOW).notes[0]).toBe(
+      'La base no descuenta el costo de laboratorio ni la comisión de la pasarela.',
+    );
   });
 
   it('es determinista: la misma entrada da los mismos bytes', async () => {

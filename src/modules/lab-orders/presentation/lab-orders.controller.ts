@@ -7,6 +7,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   UseGuards,
@@ -34,6 +35,7 @@ import {
 } from '../../auth/presentation/guards/roles.decorator';
 import {
   LAB_ORDER_CHECK_ROLES,
+  LAB_ORDER_COST_ROLES,
   LAB_ORDER_PATCH_ROLES,
   LAB_ORDER_PRINT_ROLES,
   LAB_ORDER_READ_ROLES,
@@ -67,6 +69,7 @@ import {
   LabOrdersQueryDto,
   PatientLabOrdersQueryDto,
   SendLabOrderDto,
+  SetLabOrderCostDto,
   UpdateLabOrderDto,
 } from './dto/lab-order.dto';
 
@@ -82,6 +85,8 @@ export const LAB_ORDER_STEP_FORBIDDEN_MESSAGE =
   'Envían y reciben trabajos de laboratorio el odontólogo, recepción y la administración.';
 export const LAB_ORDER_CHECK_FORBIDDEN_MESSAGE =
   'Solo el odontólogo o la administración marcan un trabajo de laboratorio como revisado.';
+export const LAB_ORDER_COST_FORBIDDEN_MESSAGE =
+  'Solo la administración pone el costo del laboratorio.';
 export const LAB_ORDER_PRINT_FORBIDDEN_MESSAGE =
   'La orden impresa lleva datos clínicos: la imprimen los roles clínicos.';
 
@@ -318,6 +323,37 @@ export class LabOrdersController {
         appointmentId: dto.appointmentId,
         replacesOrderId: dto.replacesOrderId,
       },
+      requireAuditRequestContext(req, this.tenantContext),
+    );
+  }
+
+  // DX-018-bis: auditado en el caso de uso (UPDATE DENTAL_LAB_ORDER_COST_UPDATED,
+  // importe y moneda antes y después).
+  @Put(':id/cost')
+  @Roles(...LAB_ORDER_COST_ROLES)
+  @RolesDeniedMessage(LAB_ORDER_COST_FORBIDDEN_MESSAGE)
+  @ApiParam({ name: 'id', format: 'uuid' })
+  @ApiOperation({
+    summary: 'Pone o quita el costo del laboratorio de la orden (solo ADMIN)',
+    description:
+      'En cualquier estado salvo anulada (también tras «Enviada»: el laboratorio factura al entregar). Con «descontar laboratorio» en la regla de honorarios, el costo en la moneda del plan del ítem se descuenta de la base; en otra moneda no se convierte: se avisa y no se descuenta.',
+  })
+  @ApiOkResponse({ type: LabOrderDto })
+  @ApiBadRequestResponse({
+    description: 'Costo o moneda inválidos, uno sin el otro, o sin cambios',
+  })
+  @ApiNotFoundResponse({ description: 'Orden de otra clínica o inexistente' })
+  @ApiConflictResponse({ description: 'Orden anulada o cambiada a la vez' })
+  @ApiUnprocessableEntityResponse({ description: 'La moneda no existe' })
+  @ApiForbiddenResponse({ description: LAB_ORDER_COST_FORBIDDEN_MESSAGE })
+  setCost(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetLabOrderCostDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<LabOrderView> {
+    return this.orders.setCost(
+      id,
+      { cost: dto.cost, currency: dto.currency },
       requireAuditRequestContext(req, this.tenantContext),
     );
   }

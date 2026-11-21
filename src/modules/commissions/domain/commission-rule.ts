@@ -5,11 +5,9 @@ import type { CommissionBasis, CommissionReleaseMode } from '@prisma/client';
  * producido), cuándo se libera (por prestación o con el plan completo y
  * pagado), % general y % por categoría del catálogo.
  *
- * El costo de laboratorio y la comisión de la pasarela NO se guardan: no hay
- * datos de origen (DX-017 no guarda el costo; los ajustes por medio de pago de
- * DX-516 son al paciente, no la comisión que cobra la pasarela a la clínica).
- * El cálculo los admite (`CommissionDeductions`), pero hoy siempre van
- * apagados: `COMMISSION_DEDUCTIONS_AVAILABLE`.
+ * DX-018-bis: la regla puede descontar antes del % el costo de laboratorio del
+ * ítem (el de sus órdenes de laboratorio, DX-017) y la comisión de la pasarela
+ * del abono (el % del medio de pago; no los ajustes al paciente de DX-516).
  */
 export interface CommissionCategoryPercent {
   category: string;
@@ -21,16 +19,16 @@ export interface CommissionRuleTerms {
   releaseMode: CommissionReleaseMode;
   percent: number;
   categories: CommissionCategoryPercent[];
-  /** Descontar el costo de laboratorio del ítem antes del %. Hoy, siempre false. */
+  /** Descontar el costo de laboratorio del ítem antes del %. */
   deductLabCost: boolean;
-  /** Descontar la comisión de la pasarela del abono antes del %. Hoy, siempre false. */
+  /** Descontar la comisión de la pasarela del abono antes del %. */
   deductCardFee: boolean;
 }
 
-/** Qué descuentos se pueden activar hoy y por qué no (lo enseña la web). */
+/** Qué descuentos se pueden activar (DX-018-bis: los dos tienen datos de origen). */
 export const COMMISSION_DEDUCTIONS_AVAILABLE = {
-  labCost: false,
-  cardFee: false,
+  labCost: true,
+  cardFee: true,
 } as const;
 
 export const COMMISSION_RULE_CATEGORIES_MAX = 50;
@@ -42,10 +40,6 @@ export const COMMISSION_RULE_MESSAGES = {
   categoryName: `La categoría tiene que tener entre 1 y ${COMMISSION_CATEGORY_MAX_LENGTH} caracteres.`,
   categoryDuplicated: 'Hay una categoría repetida en la regla.',
   categoriesMax: `Como mucho ${COMMISSION_RULE_CATEGORIES_MAX} categorías con porcentaje propio.`,
-  labCostUnavailable:
-    'Descontar el costo de laboratorio aún no está disponible: las órdenes de laboratorio no guardan su costo.',
-  cardFeeUnavailable:
-    'Descontar la comisión de la pasarela aún no está disponible: los medios de pago no guardan el porcentaje que cobra la pasarela.',
 } as const;
 
 /** 0–100 con hasta 2 decimales (la columna es DECIMAL(5,2)). */
@@ -82,18 +76,6 @@ export function parseRuleTerms(input: RuleTermsInput): ParsedRuleTerms {
   if (!isValidPercent(input.percent)) {
     return { ok: false, message: COMMISSION_RULE_MESSAGES.percent };
   }
-  if (
-    input.deductLabCost === true &&
-    !COMMISSION_DEDUCTIONS_AVAILABLE.labCost
-  ) {
-    return { ok: false, message: COMMISSION_RULE_MESSAGES.labCostUnavailable };
-  }
-  if (
-    input.deductCardFee === true &&
-    !COMMISSION_DEDUCTIONS_AVAILABLE.cardFee
-  ) {
-    return { ok: false, message: COMMISSION_RULE_MESSAGES.cardFeeUnavailable };
-  }
   const raw = input.categories ?? [];
   if (raw.length > COMMISSION_RULE_CATEGORIES_MAX) {
     return { ok: false, message: COMMISSION_RULE_MESSAGES.categoriesMax };
@@ -129,8 +111,8 @@ export function parseRuleTerms(input: RuleTermsInput): ParsedRuleTerms {
       releaseMode: input.releaseMode,
       percent: input.percent,
       categories,
-      deductLabCost: false,
-      deductCardFee: false,
+      deductLabCost: input.deductLabCost === true,
+      deductCardFee: input.deductCardFee === true,
     },
   };
 }

@@ -14,6 +14,7 @@ import { configAuditEvent } from '../../audit/domain/config-audit';
 import { writeAuditEvent } from '../../audit/infrastructure/prisma-audit-event.repository';
 import { readFinancialLock } from '../../financial-lock/infrastructure/financial-lock-tx';
 import {
+  labCostOf,
   totalsByCurrency,
   type CandidateAllocation,
   type CandidateItem,
@@ -79,6 +80,8 @@ function ruleForAudit(terms: CommissionRuleTerms, active: boolean) {
     releaseMode: terms.releaseMode,
     percent: terms.percent,
     categories: terms.categories.map((c) => `${c.category}: ${c.percent}`),
+    deductLabCost: terms.deductLabCost,
+    deductCardFee: terms.deductCardFee,
     active,
   };
 }
@@ -106,6 +109,13 @@ interface AllocationRow {
   paidAt: Date;
   paymentAmount: Prisma.Decimal;
   paymentCurrency: string;
+  gatewayFeePercent: Prisma.Decimal | null;
+}
+
+interface LabCostRow {
+  itemId: string;
+  cost: Prisma.Decimal;
+  currency: string;
 }
 
 interface PlanReleaseRow {
@@ -136,7 +146,13 @@ interface SettledRow {
   percent: Prisma.Decimal;
   settledBase: Prisma.Decimal;
   settledAmount: Prisma.Decimal;
-  currentBase: Prisma.Decimal;
+  settledGross: Prisma.Decimal;
+  settledLabCost: Prisma.Decimal;
+  settledCardFee: Prisma.Decimal;
+  originalGross: Prisma.Decimal;
+  originalLabCost: Prisma.Decimal;
+  cardFeePercent: Prisma.Decimal | null;
+  currentGross: Prisma.Decimal;
 }
 
 /**
@@ -225,9 +241,12 @@ class PrismaCommissionReader implements CommissionReader {
     if (terms.basis === 'COLLECTED') {
       const allocationRows = await tx.$queryRaw<AllocationRow[]>`
         SELECT a."treatmentPlanItemId" AS "itemId", a."paymentId", a."amount",
-               py."paidAt", py."amount" AS "paymentAmount", py."currency" AS "paymentCurrency"
+               py."paidAt", py."amount" AS "paymentAmount", py."currency" AS "paymentCurrency",
+               pm."gatewayFeePercent"
           FROM "payment_allocations" a
           JOIN "payments" py ON py."tenantId" = a."tenantId" AND py."id" = a."paymentId"
+          LEFT JOIN "payment_methods" pm
+            ON pm."tenantId" = py."tenantId" AND pm."id" = py."paymentMethodId"
          WHERE a."tenantId" = ${tenantId}::uuid
            AND a."treatmentPlanItemId" = ANY(${pending.map((r) => r.itemId)}::uuid[])
            AND a."amount" > 0
@@ -246,30 +265,61 @@ class PrismaCommissionReader implements CommissionReader {
           paidAt: row.paidAt,
           paymentAmount: dec(row.paymentAmount),
           paymentCurrency: row.paymentCurrency,
-          // Los medios de pago no guardan la comisión de la pasarela.
-          cardFeePercent: null,
+          // DX-018-bis: el % de la pasarela del medio, hoy (se congela al cerrar).
+          cardFeePercent: decOrNull(row.gatewayFeePercent),
         });
         allocations.set(row.itemId, list);
       }
     }
-    return pending.map((r) => ({
-      itemId: r.itemId,
-      planId: r.planId,
-      patientId: r.patientId,
-      locationId: r.locationId,
-      timeZone: zoneOf(r.locationId),
-      catalogCode: r.code,
-      catalogLabel: r.label,
-      category: r.category,
-      toothNumber: r.toothNumber,
-      currency: r.currency,
-      net: dec(r.net),
-      completedAt: r.completedAt,
-      producedPending: !r.producedSettled && !r.collectedSettled,
-      allocations: allocations.get(r.itemId) ?? [],
-      // Las órdenes de laboratorio (DX-017) no guardan su costo.
-      labCost: null,
-    }));
+    const labCosts = terms.deductLabCost
+      ? await this.labCosts(pending)
+      : new Map<string, { amount: number; currency: string }[]>();
+    return pending.map((r) => {
+      const lab = labCostOf(r.currency, labCosts.get(r.itemId) ?? []);
+      return {
+        itemId: r.itemId,
+        planId: r.planId,
+        patientId: r.patientId,
+        locationId: r.locationId,
+        timeZone: zoneOf(r.locationId),
+        catalogCode: r.code,
+        catalogLabel: r.label,
+        category: r.category,
+        toothNumber: r.toothNumber,
+        currency: r.currency,
+        net: dec(r.net),
+        completedAt: r.completedAt,
+        producedPending: !r.producedSettled && !r.collectedSettled,
+        allocations: allocations.get(r.itemId) ?? [],
+        labCost: lab.labCost,
+        labCostSkippedCurrencies: lab.skippedCurrencies,
+      };
+    });
+  }
+
+  /**
+   * DX-018-bis: los costos de las órdenes de laboratorio vivas (no anuladas)
+   * ligadas a cada ítem. Por (paciente, ítem): el índice
+   * dental_lab_orders_plan_item_idx.
+   */
+  private async labCosts(
+    items: readonly Pick<CandidateRow, 'itemId' | 'patientId'>[],
+  ): Promise<Map<string, { amount: number; currency: string }[]>> {
+    const rows = await this.tx.$queryRaw<LabCostRow[]>`
+      SELECT o."treatmentPlanItemId" AS "itemId", o."cost", o."costCurrency" AS "currency"
+        FROM unnest(${items.map((i) => i.patientId)}::uuid[], ${items.map((i) => i.itemId)}::uuid[]) AS k("patientId", "itemId")
+        JOIN "dental_lab_orders" o
+          ON o."tenantId" = ${this.tenantId}::uuid
+         AND o."patientId" = k."patientId" AND o."treatmentPlanItemId" = k."itemId"
+       WHERE o."cancelledAt" IS NULL AND o."cost" IS NOT NULL
+       ORDER BY o."number"`;
+    const out = new Map<string, { amount: number; currency: string }[]>();
+    for (const row of rows) {
+      const list = out.get(row.itemId) ?? [];
+      list.push({ amount: dec(row.cost), currency: row.currency });
+      out.set(row.itemId, list);
+    }
+    return out;
   }
 
   async planRelease(planIds: readonly string[]): Promise<PlanReleaseInfo[]> {
@@ -320,19 +370,28 @@ class PrismaCommissionReader implements CommissionReader {
                l."paymentCurrency", l."currency", l."percent",
                l."base" + COALESCE(adj."base", 0) AS "settledBase",
                l."amount" + COALESCE(adj."amount", 0) AS "settledAmount",
+               COALESCE(l."grossBase", l."base") + COALESCE(adj."gross", 0) AS "settledGross",
+               l."labCostDeducted" + COALESCE(adj."labCost", 0) AS "settledLabCost",
+               l."cardFeeDeducted" + COALESCE(adj."cardFee", 0) AS "settledCardFee",
+               COALESCE(l."grossBase", l."base") AS "originalGross",
+               l."labCostDeducted" AS "originalLabCost",
+               l."cardFeePercent",
                CASE
                  WHEN i."status" <> 'DONE' OR i."deletedAt" IS NOT NULL
                       OR p."deletedAt" IS NOT NULL
                       OR i."performedById" IS DISTINCT FROM ${userId}::uuid THEN 0
                  WHEN l."paymentId" IS NULL THEN i."price" - i."discount"
                  ELSE COALESCE(cur."amount", 0)
-               END AS "currentBase"
+               END AS "currentGross"
           FROM "commission_settlement_lines" l
           JOIN "treatment_plan_items" i
             ON i."tenantId" = l."tenantId" AND i."id" = l."treatmentPlanItemId"
           JOIN "treatment_plans" p ON p."tenantId" = i."tenantId" AND p."id" = i."planId"
           LEFT JOIN LATERAL (
-            SELECT sum(x."base") AS "base", sum(x."amount") AS "amount"
+            SELECT sum(x."base") AS "base", sum(x."amount") AS "amount",
+                   sum(COALESCE(x."grossBase", x."base")) AS "gross",
+                   sum(x."labCostDeducted") AS "labCost",
+                   sum(x."cardFeeDeducted") AS "cardFee"
               FROM "commission_settlement_lines" x
              WHERE x."tenantId" = l."tenantId" AND x."adjustsLineId" = l."id"
           ) adj ON true
@@ -348,7 +407,9 @@ class PrismaCommissionReader implements CommissionReader {
            AND l."userId" = ${userId}::uuid
            AND l."kind" = 'ACCRUAL'
       ) s
-      WHERE s."settledBase" <> s."currentBase"
+      -- DX-018-bis: solo lo que cambió de base BRUTA; los descuentos quedan
+      -- congelados (cambiar el costo o el % después no ajusta lo liquidado).
+      WHERE s."settledGross" <> s."currentGross"
       ORDER BY s."lineId"`;
     return rows.map((r) => ({
       lineId: r.lineId,
@@ -369,7 +430,13 @@ class PrismaCommissionReader implements CommissionReader {
       percent: dec(r.percent),
       settledBase: dec(r.settledBase),
       settledAmount: dec(r.settledAmount),
-      currentBase: dec(r.currentBase),
+      settledGross: dec(r.settledGross),
+      settledLabCost: dec(r.settledLabCost),
+      settledCardFee: dec(r.settledCardFee),
+      originalGross: dec(r.originalGross),
+      originalLabCost: dec(r.originalLabCost),
+      cardFeePercent: decOrNull(r.cardFeePercent),
+      currentGross: dec(r.currentGross),
     }));
   }
 
@@ -447,8 +514,8 @@ function ruleRecordOf(
         category: c.category,
         percent: dec(c.percent),
       })),
-      deductLabCost: false,
-      deductCardFee: false,
+      deductLabCost: row.deductLabCost,
+      deductCardFee: row.deductCardFee,
     },
   };
 }
@@ -616,6 +683,8 @@ export class PrismaCommissionRepository implements CommissionRepository {
         basis: terms.basis,
         releaseMode: terms.releaseMode,
         percent: new Prisma.Decimal(terms.percent),
+        deductLabCost: terms.deductLabCost,
+        deductCardFee: terms.deductCardFee,
         active,
         updatedById: actor,
       };
@@ -721,6 +790,8 @@ export class PrismaCommissionRepository implements CommissionRepository {
               category: c.category,
               percent: c.percent,
             })),
+            deductLabCost: settlement.terms.deductLabCost,
+            deductCardFee: settlement.terms.deductCardFee,
             lockDateBefore:
               lockBefore.lockDate === null ? null : asDate(lockBefore.lockDate),
             lockDateAfter: asDate(lockDateAfter),
@@ -761,6 +832,14 @@ export class PrismaCommissionRepository implements CommissionRepository {
             base: money(line.base),
             percent: new Prisma.Decimal(line.percent),
             amount: money(line.amount),
+            grossBase: money(line.grossBase),
+            labCostDeducted: money(line.labCostDeducted),
+            cardFeePercent:
+              line.cardFeePercent === null
+                ? null
+                : new Prisma.Decimal(line.cardFeePercent),
+            cardFeeDeducted: money(line.cardFeeDeducted),
+            labCostSkippedCurrencies: line.labCostSkippedCurrencies,
           })),
         });
       }
@@ -863,6 +942,11 @@ export class PrismaCommissionRepository implements CommissionRepository {
           base: Prisma.Decimal;
           percent: Prisma.Decimal;
           amount: Prisma.Decimal;
+          grossBase: Prisma.Decimal;
+          labCostDeducted: Prisma.Decimal;
+          cardFeePercent: Prisma.Decimal | null;
+          cardFeeDeducted: Prisma.Decimal;
+          labCostSkippedCurrencies: string[];
           paidInPaymentId: string | null;
         }[]
       >`
@@ -872,6 +956,8 @@ export class PrismaCommissionRepository implements CommissionRepository {
                l."catalogLabel", l."category", l."toothNumber", l."completedAt",
                l."paymentId", l."paidAt", l."paymentAmount", l."paymentCurrency",
                l."releasedAt", l."currency", l."base", l."percent", l."amount",
+               COALESCE(l."grossBase", l."base") AS "grossBase", l."labCostDeducted",
+               l."cardFeePercent", l."cardFeeDeducted", l."labCostSkippedCurrencies",
                (SELECT cpl."paymentId" FROM "commission_payment_lines" cpl
                  WHERE cpl."tenantId" = l."tenantId" AND cpl."lineId" = l."id"
                    AND cpl."voidedAt" IS NULL) AS "paidInPaymentId"
@@ -913,6 +999,13 @@ export class PrismaCommissionRepository implements CommissionRepository {
           base: dec(l.base),
           percent: dec(l.percent),
           amount: dec(l.amount),
+          deductions: {
+            grossBase: dec(l.grossBase),
+            labCost: dec(l.labCostDeducted),
+            cardFeePercent: decOrNull(l.cardFeePercent),
+            cardFee: dec(l.cardFeeDeducted),
+            labCostSkippedCurrencies: l.labCostSkippedCurrencies,
+          },
           paidInPaymentId: l.paidInPaymentId,
         })),
       };
@@ -954,6 +1047,8 @@ export class PrismaCommissionRepository implements CommissionRepository {
         basis: r.basis,
         releaseMode: r.releaseMode,
         percent: dec(r.percent),
+        deductLabCost: r.deductLabCost,
+        deductCardFee: r.deductCardFee,
         closedAt: r.closedAt,
         closedBy: {
           userId: r.closedById,
