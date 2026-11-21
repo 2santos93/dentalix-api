@@ -15,6 +15,14 @@ import {
 } from '../../domain/ports/manual-exchange-rate-repository.port';
 import type { ManualExchangeRate } from '../../domain/entities/manual-exchange-rate.entity';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
+import {
+  NO_CLINIC_CURRENCIES,
+  type ClinicCurrencies,
+} from '../../domain/clinic-currencies';
+import type {
+  ClinicCurrenciesRepository,
+  HeaderLocation,
+} from '../../domain/ports/clinic-currencies-repository.port';
 
 const NO_TENANT = 'sin-tenant';
 
@@ -214,5 +222,78 @@ export function makeManualRates(
     isKnownCurrency: (code) => Promise.resolve(currencies.has(code)),
     referenceTimeZone: () =>
       Promise.resolve(options.zones?.[tenantOf(ctx)] ?? 'UTC'),
+  };
+}
+
+/**
+ * DX-584: monedas de cada clínica en memoria, por tenant del contexto (como
+ * la fila de `tenants`), con el catálogo, las monedas de sus sedes y la sede
+ * del menú. `set` valida dentro (como el repositorio, con la fila bloqueada)
+ * y guarda los eventos que escribiría en la transacción.
+ */
+export function makeClinicCurrencies(
+  initial: Record<string, Partial<ClinicCurrencies>> = {},
+  ctx: TenantContextService = new TenantContextService(),
+  options: {
+    catalog?: readonly string[];
+    locationCurrencies?: Record<string, readonly string[]>;
+    headerLocations?: Record<string, HeaderLocation | null>;
+  } = {},
+): ClinicCurrenciesRepository & {
+  currenciesOf(tenantId: string): ClinicCurrencies;
+  events: { before: ClinicCurrencies; after: ClinicCurrencies }[];
+  reads(): number;
+} {
+  const store = new Map<string, ClinicCurrencies>(
+    Object.entries(initial).map(([tenant, value]) => [
+      tenant,
+      { ...NO_CLINIC_CURRENCIES, ...value },
+    ]),
+  );
+  const catalog = new Set(
+    options.catalog ?? ['USD', 'EUR', 'VES', 'GBP', 'MXN'],
+  );
+  const events: { before: ClinicCurrencies; after: ClinicCurrencies }[] = [];
+  let reads = 0;
+  const current = (tenant: string): ClinicCurrencies =>
+    store.get(tenant) ?? { ...NO_CLINIC_CURRENCIES, acceptedCurrencies: [] };
+  return {
+    events,
+    reads: () => reads,
+    currenciesOf: current,
+    get: () => {
+      reads += 1;
+      return Promise.resolve({ ...current(tenantOf(ctx)) });
+    },
+    set: (next) => {
+      const tenant = tenantOf(ctx);
+      const before = current(tenant);
+      let after: ClinicCurrencies;
+      try {
+        after = next({ ...before });
+      } catch (error) {
+        return Promise.reject(
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      }
+      store.set(tenant, after);
+      if (JSON.stringify(before) !== JSON.stringify(after)) {
+        events.push({ before, after });
+      }
+      return Promise.resolve({ before, after });
+    },
+    knownCurrencies: (codes) =>
+      Promise.resolve(new Set(codes.filter((c) => catalog.has(c)))),
+    locationCurrencies: () =>
+      Promise.resolve([
+        ...(options.locationCurrencies?.[tenantOf(ctx)] ?? ['USD']),
+      ]),
+    headerLocation: () => {
+      const tenant = tenantOf(ctx);
+      const found = options.headerLocations?.[tenant];
+      return Promise.resolve(
+        found === undefined ? { timeZone: 'UTC', currency: 'USD' } : found,
+      );
+    },
   };
 }

@@ -133,12 +133,18 @@ export class ExchangeSettingsController {
       'día); cualquiera de los dos campos puede ir solo. Si cambia, evento ' +
       'CLINIC_SETTINGS con reason EXCHANGE_RATE_MAX_AGE y el antes y el ' +
       'después, en la misma transacción, y los abonos aplazados «sin tasa» ' +
-      'se intentan ya. Solo ADMIN (403 al resto).',
+      'se intentan ya. DX-584: `acceptedCurrencies`, `rateReferenceCurrency` ' +
+      'y `showRateInHeader` (cada uno opcional; se valida el resultado: ' +
+      'monedas del catálogo, sin repetidas, de 0 a 8, y la de referencia ' +
+      'entre las aceptadas o la de alguna sede). Si cambian, evento ' +
+      'CLINIC_SETTINGS con reason CLINIC_CURRENCIES y el antes y el después, ' +
+      'en la misma transacción. Las monedas se guardan antes que la fuente y ' +
+      'el plazo: un 400 de monedas no cambia nada. Solo ADMIN (403 al resto).',
   })
   @ApiOkResponse({ type: ExchangeRateSettingsDto })
   @ApiBadRequestResponse({
     description:
-      'Fuente que no es AUTOMATIC ni MANUAL, plazo que no es un entero de 0 a 30, o ninguno de los dos campos',
+      'Fuente que no es AUTOMATIC ni MANUAL, plazo que no es un entero de 0 a 30, ningún campo, o (DX-584) una moneda que no está en la lista, repetida, más de 8, o una moneda de referencia que no es aceptada ni de ninguna sede',
   })
   updateClinicSettings(
     @Body() dto: UpdateExchangeRateSettingsDto,
@@ -150,6 +156,10 @@ export class ExchangeSettingsController {
       {
         source: dto.source,
         manualRateMaxAgeDays: dto.manualRateMaxAgeDays,
+        // DX-584: monedas de la clínica y tasa en el menú.
+        acceptedCurrencies: dto.acceptedCurrencies,
+        rateReferenceCurrency: dto.rateReferenceCurrency,
+        showRateInHeader: dto.showRateInHeader,
       },
       ctx,
     );

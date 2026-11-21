@@ -4,7 +4,10 @@ import type { AuditRequestContext } from '../../../audit/domain/audit-request-co
 import { EXCHANGE_RATE_SOURCE_MESSAGE } from '../../domain/exchange-rate-source';
 import { MANUAL_RATE_MAX_AGE_MESSAGE } from '../../domain/manual-rate-fallback';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
-import { makeSettings } from '../__fixtures__/in-memory-exchange-settings';
+import {
+  makeClinicCurrencies,
+  makeSettings,
+} from '../__fixtures__/in-memory-exchange-settings';
 import { ExchangeSourceChangeHooks } from '../exchange-source-change-hooks';
 import {
   GetExchangeRateSettingsUseCase,
@@ -26,6 +29,7 @@ describe('Fuente de la tasa de la clínica (DX-374)', () => {
   };
   const tenantContext = new TenantContextService();
   let settings: ReturnType<typeof makeSettings>;
+  let currencies: ReturnType<typeof makeClinicCurrencies>;
   let now: Date;
   let hooks: ExchangeSourceChangeHooks;
   const update = () =>
@@ -34,6 +38,7 @@ describe('Fuente de la tasa de la clínica (DX-374)', () => {
       audit as unknown as RecordAuditEventUseCase,
       () => now,
       hooks,
+      currencies,
     );
   const inClinic = <T>(fn: () => Promise<T>) => tenantContext.run(TENANT, fn);
 
@@ -43,17 +48,25 @@ describe('Fuente de la tasa de la clínica (DX-374)', () => {
     settings = makeSettings({}, tenantContext, {
       zones: { [TENANT]: 'America/Caracas' },
     });
+    currencies = makeClinicCurrencies({}, tenantContext, {
+      locationCurrencies: { [TENANT]: ['VES'] },
+    });
     audit.record.mockReset();
   });
 
   it('una clínica sin cambiar nada está en AUTOMATIC, sin día de inicio, con la moneda base', async () => {
     await expect(
-      inClinic(() => new GetExchangeRateSettingsUseCase(settings).execute()),
+      inClinic(() =>
+        new GetExchangeRateSettingsUseCase(settings, currencies).execute(),
+      ),
     ).resolves.toEqual({
       source: 'AUTOMATIC',
       manualSince: null,
       manualRateMaxAgeDays: 3,
       baseCurrency: 'USD',
+      acceptedCurrencies: [],
+      rateReferenceCurrency: null,
+      showRateInHeader: null,
     });
   });
 
@@ -65,6 +78,9 @@ describe('Fuente de la tasa de la clínica (DX-374)', () => {
       manualSince: '2026-10-29',
       manualRateMaxAgeDays: 3,
       baseCurrency: 'USD',
+      acceptedCurrencies: [],
+      rateReferenceCurrency: null,
+      showRateInHeader: null,
     });
     expect(settings.settingsOf(TENANT)).toEqual({
       source: 'MANUAL',
@@ -175,7 +191,9 @@ describe('Fuente de la tasa de la clínica (DX-374)', () => {
   describe('plazo de la última tasa registrada (DX-384)', () => {
     it('3 días por defecto', async () => {
       await expect(
-        inClinic(() => new GetExchangeRateSettingsUseCase(settings).execute()),
+        inClinic(() =>
+          new GetExchangeRateSettingsUseCase(settings, currencies).execute(),
+        ),
       ).resolves.toMatchObject({ manualRateMaxAgeDays: 3 });
     });
 
@@ -250,6 +268,141 @@ describe('Fuente de la tasa de la clínica (DX-374)', () => {
     it('un cambio solo del plazo no deja el evento de la fuente (el del plazo lo escribe el repositorio en la transacción)', async () => {
       await inClinic(() => update().execute({ manualRateMaxAgeDays: 5 }, ctx));
       expect(audit.record).not.toHaveBeenCalled();
+    });
+  });
+
+  // DX-584: monedas de la clínica y tasa en el menú.
+  describe('monedas de la clínica (DX-584)', () => {
+    it('se cambian solas, sin tocar la fuente, y devuelven los ajustes enteros', async () => {
+      await expect(
+        inClinic(() =>
+          update().execute(
+            {
+              acceptedCurrencies: ['usd', 'VES'],
+              rateReferenceCurrency: 'VES',
+              showRateInHeader: true,
+            },
+            ctx,
+          ),
+        ),
+      ).resolves.toEqual({
+        source: 'AUTOMATIC',
+        manualSince: null,
+        manualRateMaxAgeDays: 3,
+        baseCurrency: 'USD',
+        acceptedCurrencies: ['USD', 'VES'],
+        rateReferenceCurrency: 'VES',
+        showRateInHeader: true,
+      });
+      expect(currencies.events).toEqual([
+        {
+          before: {
+            acceptedCurrencies: [],
+            rateReferenceCurrency: null,
+            showRateInHeader: null,
+          },
+          after: {
+            acceptedCurrencies: ['USD', 'VES'],
+            rateReferenceCurrency: 'VES',
+            showRateInHeader: true,
+          },
+        },
+      ]);
+      // El evento de la fuente (DX-374) no sale: la fuente no cambió.
+      expect(audit.record).not.toHaveBeenCalled();
+    });
+
+    it('GET las devuelve', async () => {
+      await inClinic(() =>
+        update().execute({ acceptedCurrencies: ['EUR'] }, ctx),
+      );
+      await expect(
+        inClinic(() =>
+          new GetExchangeRateSettingsUseCase(settings, currencies).execute(),
+        ),
+      ).resolves.toMatchObject({
+        acceptedCurrencies: ['EUR'],
+        rateReferenceCurrency: null,
+        showRateInHeader: null,
+      });
+    });
+
+    it('un 400 de monedas no cambia nada, tampoco la fuente que venía en el mismo PUT', async () => {
+      await expect(
+        inClinic(() =>
+          update().execute(
+            {
+              source: 'MANUAL',
+              acceptedCurrencies: ['USD'],
+              rateReferenceCurrency: 'EUR',
+            },
+            ctx,
+          ),
+        ),
+      ).rejects.toThrow(
+        new BadRequestException(
+          'La moneda de referencia (EUR) tiene que ser una de las monedas aceptadas o la moneda de alguna sede.',
+        ),
+      );
+      expect(settings.settingsOf(TENANT).source).toBe('AUTOMATIC');
+      expect(currencies.currenciesOf(TENANT).acceptedCurrencies).toEqual([]);
+      expect(currencies.events).toEqual([]);
+    });
+
+    it('la moneda de una sede vale como referencia aunque no se acepte', async () => {
+      await expect(
+        inClinic(() =>
+          update().execute(
+            { acceptedCurrencies: ['USD'], rateReferenceCurrency: 'VES' },
+            ctx,
+          ),
+        ),
+      ).resolves.toMatchObject({ rateReferenceCurrency: 'VES' });
+    });
+
+    it('moneda fuera del catálogo o repetida: 400', async () => {
+      await expect(
+        inClinic(() =>
+          update().execute({ acceptedCurrencies: ['USD', 'XYZ'] }, ctx),
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      await expect(
+        inClinic(() =>
+          update().execute({ acceptedCurrencies: ['USD', 'USD'] }, ctx),
+        ),
+      ).rejects.toThrow('USD aparece más de una vez en las monedas aceptadas.');
+    });
+
+    it('fuente y monedas en el mismo PUT: cambian las dos', async () => {
+      await expect(
+        inClinic(() =>
+          update().execute(
+            { source: 'MANUAL', acceptedCurrencies: ['USD', 'VES'] },
+            ctx,
+          ),
+        ),
+      ).resolves.toMatchObject({
+        source: 'MANUAL',
+        acceptedCurrencies: ['USD', 'VES'],
+      });
+      expect(audit.record).toHaveBeenCalledTimes(1);
+      expect(currencies.events).toHaveLength(1);
+    });
+
+    it('guardar lo mismo no deja evento', async () => {
+      await inClinic(() =>
+        update().execute({ acceptedCurrencies: ['USD'] }, ctx),
+      );
+      await inClinic(() =>
+        update().execute({ acceptedCurrencies: ['USD'] }, ctx),
+      );
+      expect(currencies.events).toHaveLength(1);
+    });
+
+    it('sin ningún campo: 400 con el mensaje que nombra las tres cosas', async () => {
+      await expect(inClinic(() => update().execute({}, ctx))).rejects.toThrow(
+        'Indica qué quieres cambiar: la fuente de la tasa, el plazo de la última tasa registrada o las monedas de la clínica.',
+      );
     });
   });
 });

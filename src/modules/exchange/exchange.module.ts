@@ -34,6 +34,11 @@ import {
 import { CLINIC_CURRENCY_TEXTS_REPOSITORY } from './domain/ports/clinic-currency-texts-repository.port';
 import { PrismaClinicCurrencyTextsRepository } from './infrastructure/repositories/prisma-clinic-currency-texts.repository';
 import { ExchangeSourceChangeHooks } from './application/exchange-source-change-hooks';
+import { CLINIC_CURRENCIES_REPOSITORY } from './domain/ports/clinic-currencies-repository.port';
+import { PrismaClinicCurrenciesRepository } from './infrastructure/repositories/prisma-clinic-currencies.repository';
+import { AcceptedCurrenciesGate } from './application/accepted-currencies-gate';
+import { GetExchangeHeaderUseCase } from './application/use-cases/get-exchange-header.use-case';
+import { ExchangeHeaderController } from './presentation/exchange-header.controller';
 import { ConfigService } from '@nestjs/config';
 import {
   loadProviderRatesLimits,
@@ -60,6 +65,8 @@ import { PrismaProviderRatesBudget } from './infrastructure/repositories/prisma-
     ExchangeController,
     ExchangeSettingsController,
     ClinicCurrencyTextsController,
+    // DX-584: la tasa del menú (cualquier miembro).
+    ExchangeHeaderController,
   ],
   providers: [
     // GetRatesForDateUseCase must be registered explicitly as a provider (not
@@ -82,6 +89,13 @@ import { PrismaProviderRatesBudget } from './infrastructure/repositories/prisma-
       provide: CLINIC_CURRENCY_TEXTS_REPOSITORY,
       useClass: PrismaClinicCurrencyTextsRepository,
     },
+    // DX-584: monedas de la clínica, el control del cobro y la tasa del menú.
+    {
+      provide: CLINIC_CURRENCIES_REPOSITORY,
+      useClass: PrismaClinicCurrenciesRepository,
+    },
+    AcceptedCurrenciesGate,
+    GetExchangeHeaderUseCase,
     { provide: EXCHANGE_RATE_CLOCK, useValue: () => new Date() },
     // SEC-054: caché negativa, single-flight y presupuestos de las llamadas
     // al proveedor (una instancia por proceso: compartida por todas las
@@ -131,6 +145,8 @@ import { PrismaProviderRatesBudget } from './infrastructure/repositories/prisma-
     ExchangeSourceChangeHooks,
     ProviderRatesCallerScope,
     GetExchangeRateSettingsUseCase,
+    // DX-584: el alta de abonos solo admite las monedas de la clínica.
+    AcceptedCurrenciesGate,
   ],
 })
 export class ExchangeModule {}

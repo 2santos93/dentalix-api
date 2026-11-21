@@ -5,6 +5,9 @@ import { PaymentMethodGate } from '../payment-method-gate';
 import { CashChangePreparer } from '../cash-change-preparer';
 import type { PaymentMethodRepository } from '../../../payment-methods/domain/ports/payment-method-repository.port';
 import { MissingExchangeRateError } from '../../../exchange/domain/missing-exchange-rate.error';
+import { AcceptedCurrenciesGate } from '../../../exchange/application/accepted-currencies-gate';
+import { makeClinicCurrencies } from '../../../exchange/application/__fixtures__/in-memory-exchange-settings';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
   BadRequestException,
   ConflictException,
@@ -181,8 +184,30 @@ const MOBILE_MEDIUM = {
   updatedAt: new Date(0),
 } as const;
 
+const ACCEPTING_TENANT = '58458458-4584-4584-8584-584584584584';
+
+/** DX-584: una clínica que acepta `accepted` (vacía = cualquiera). */
+function acceptedGate(accepted: string[]) {
+  const ctx = new TenantContextService();
+  const gate = new AcceptedCurrenciesGate(
+    makeClinicCurrencies(
+      { [ACCEPTING_TENANT]: { acceptedCurrencies: accepted } },
+      ctx,
+    ),
+    ctx,
+  );
+  return {
+    gate,
+    inClinic: <T>(fn: () => Promise<T>) => ctx.run(ACCEPTING_TENANT, fn),
+  };
+}
+
 describe('RecordPaymentUseCase', () => {
-  function makeUseCase(now: Date = RECORD_NOW) {
+  function makeUseCase(
+    now: Date = RECORD_NOW,
+    /** DX-584: la puerta de monedas aceptadas (sin ella, como antes). */
+    accepted?: AcceptedCurrenciesGate,
+  ) {
     const repo = new InMemoryPaymentRepository();
     const fakeGetPlan = new FakeGetTreatmentPlanUseCase();
     const receiptBalance = new FakeReceiptPlanBalance();
@@ -212,7 +237,9 @@ describe('RecordPaymentUseCase', () => {
         makeWhitelist(),
         referenceCurrencyDigitsCatalog(),
         convert as unknown as ConvertAmountUseCase,
+        accepted,
       ),
+      accepted,
     );
     return { repo, fakeGetPlan, uc, receiptBalance, convert };
   }
@@ -1028,6 +1055,90 @@ describe('RecordPaymentUseCase', () => {
           tendered: 50,
         }),
       ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('DX-584: monedas que acepta la clínica', () => {
+    const BODY = {
+      amount: 45,
+      currency: 'VES',
+      paidAt: '2026-10-30',
+      method: 'CASH' as const,
+    };
+
+    it('con lista, un abono en otra moneda da 400 CURRENCY_NOT_ACCEPTED y no se registra', async () => {
+      const { gate, inClinic } = acceptedGate(['USD']);
+      const { repo, fakeGetPlan, uc } = makeUseCase(RECORD_NOW, gate);
+      fakeGetPlan.plan = makePlan({ id: 'plan-1', currency: 'USD' });
+      const error = await inClinic(() =>
+        uc.execute('plan-1', { ...BODY, currency: 'ves' }),
+      ).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect((error as BadRequestException).getResponse()).toMatchObject({
+        code: 'CURRENCY_NOT_ACCEPTED',
+        currency: 'VES',
+        message:
+          'Esta clínica no acepta pagos en VES. Cambia las monedas en Ajustes.',
+      });
+      expect(repo.lastCreateInput).toBeNull();
+    });
+
+    it('con lista, una moneda aceptada se registra', async () => {
+      const { gate, inClinic } = acceptedGate(['USD', 'VES']);
+      const { fakeGetPlan, uc } = makeUseCase(RECORD_NOW, gate);
+      fakeGetPlan.plan = makePlan({ id: 'plan-1', currency: 'VES' });
+      await expect(
+        inClinic(() => uc.execute('plan-1', BODY)),
+      ).resolves.toMatchObject({ currency: 'VES' });
+    });
+
+    it('lista vacía: cualquier moneda, como antes', async () => {
+      const { gate, inClinic } = acceptedGate([]);
+      const { fakeGetPlan, uc } = makeUseCase(RECORD_NOW, gate);
+      fakeGetPlan.plan = makePlan({ id: 'plan-1', currency: 'VES' });
+      await expect(
+        inClinic(() => uc.execute('plan-1', BODY)),
+      ).resolves.toMatchObject({ currency: 'VES' });
+    });
+
+    it('anyCurrency (confirmar un pago reportado por enlace) no mira la lista', async () => {
+      const { gate, inClinic } = acceptedGate(['USD']);
+      const { fakeGetPlan, uc } = makeUseCase(RECORD_NOW, gate);
+      fakeGetPlan.plan = makePlan({ id: 'plan-1', currency: 'VES' });
+      await expect(
+        inClinic(() =>
+          uc.execute('plan-1', BODY, undefined, undefined, {
+            anyCurrency: true,
+          }),
+        ),
+      ).resolves.toMatchObject({ currency: 'VES' });
+    });
+
+    it('una línea del vuelto en una moneda no aceptada: 400 y no se registra', async () => {
+      const { gate, inClinic } = acceptedGate(['USD']);
+      const { repo, fakeGetPlan, uc, convert } = makeUseCase(RECORD_NOW, gate);
+      fakeGetPlan.plan = makePlan({ id: 'plan-1', currency: 'USD' });
+      convert.perBase = { VES: 36.5 };
+      const error = await inClinic(() =>
+        uc.execute('plan-1', {
+          ...BODY,
+          currency: 'USD',
+          tendered: 50,
+          change: [
+            {
+              paymentMethodId: MOBILE_MEDIUM.id,
+              currency: 'VES',
+              amount: 182.5,
+              reference: '0412-5551234',
+            },
+          ],
+        }),
+      ).catch((e: unknown) => e);
+      expect((error as BadRequestException).getResponse()).toMatchObject({
+        code: 'CURRENCY_NOT_ACCEPTED',
+        currency: 'VES',
+      });
+      expect(repo.lastCreateInput).toBeNull();
     });
   });
 });

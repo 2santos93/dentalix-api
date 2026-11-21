@@ -19,20 +19,39 @@ import {
 } from '../../domain/manual-rate-fallback';
 import { EXCHANGE_RATE_CLOCK } from './manual-exchange-rates.use-cases';
 import { ExchangeSourceChangeHooks } from '../exchange-source-change-hooks';
+import {
+  applyClinicCurrenciesPatch,
+  hasClinicCurrenciesPatch,
+  patchCurrencyCodes,
+  type ClinicCurrencies,
+  type ClinicCurrenciesPatch,
+} from '../../domain/clinic-currencies';
+import {
+  CLINIC_CURRENCIES_REPOSITORY,
+  type ClinicCurrenciesRepository,
+} from '../../domain/ports/clinic-currencies-repository.port';
 
 export const EXCHANGE_SETTINGS_EMPTY_MESSAGE =
-  'Indica la fuente de la tasa, el plazo de la última tasa registrada o los dos.';
+  'Indica qué quieres cambiar: la fuente de la tasa, el plazo de la última tasa registrada o las monedas de la clínica.';
 
-export interface ExchangeRateSettings extends ClinicExchangeSettings {
+export interface ExchangeRateSettings
+  extends ClinicExchangeSettings, ClinicCurrencies {
   /** Moneda base de todas las tasas (unidades de cada moneda por 1 de ella). */
   baseCurrency: string;
 }
 
-const withBase = (settings: ClinicExchangeSettings): ExchangeRateSettings => ({
+const withBase = (
+  settings: ClinicExchangeSettings,
+  currencies: ClinicCurrencies,
+): ExchangeRateSettings => ({
   source: settings.source,
   manualSince: settings.manualSince,
   manualRateMaxAgeDays: settings.manualRateMaxAgeDays,
   baseCurrency: BASE_CURRENCY,
+  // DX-584: monedas de la clínica y tasa en el menú.
+  acceptedCurrencies: currencies.acceptedCurrencies,
+  rateReferenceCurrency: currencies.rateReferenceCurrency,
+  showRateInHeader: currencies.showRateInHeader,
 });
 
 @Injectable()
@@ -40,10 +59,16 @@ export class GetExchangeRateSettingsUseCase {
   constructor(
     @Inject(CLINIC_EXCHANGE_SETTINGS_REPOSITORY)
     private readonly settings: ClinicExchangeSettingsRepository,
+    @Inject(CLINIC_CURRENCIES_REPOSITORY)
+    private readonly currencies: ClinicCurrenciesRepository,
   ) {}
 
   async execute(): Promise<ExchangeRateSettings> {
-    return withBase(await this.settings.get());
+    const [settings, currencies] = await Promise.all([
+      this.settings.get(),
+      this.currencies.get(),
+    ]);
+    return withBase(settings, currencies);
   }
 }
 
@@ -71,6 +96,13 @@ export class GetExchangeRateSettingsUseCase {
  * día sin tasa. Cualquiera de los dos campos puede ir solo; al menos uno. El
  * evento del plazo (antes y después) lo escribe el repositorio en la misma
  * transacción; si cambia, los abonos aplazados «sin tasa» se intentan ya.
+ *
+ * DX-584: también las monedas de la clínica (`acceptedCurrencies`,
+ * `rateReferenceCurrency`, `showRateInHeader`), cada una opcional. Se valida
+ * el RESULTADO con la fila bloqueada (catálogo, sin repetidas, 0..8 y la
+ * referencia entre las aceptadas o la de alguna sede) ANTES de tocar la
+ * fuente o el plazo: un 400 no deja nada a medias. Evento CLINIC_SETTINGS
+ * CLINIC_CURRENCIES con el antes y el después, en la transacción del cambio.
  */
 @Injectable()
 export class UpdateExchangeRateSettingsUseCase {
@@ -81,14 +113,25 @@ export class UpdateExchangeRateSettingsUseCase {
     @Inject(EXCHANGE_RATE_CLOCK)
     private readonly now: () => Date,
     private readonly hooks: ExchangeSourceChangeHooks,
+    @Inject(CLINIC_CURRENCIES_REPOSITORY)
+    private readonly currencies: ClinicCurrenciesRepository,
   ) {}
 
   async execute(
-    input: { source?: ExchangeRateSource; manualRateMaxAgeDays?: number },
+    input: {
+      source?: ExchangeRateSource;
+      manualRateMaxAgeDays?: number;
+    } & ClinicCurrenciesPatch,
     ctx: AuditRequestContext,
   ): Promise<ExchangeRateSettings> {
     const { source, manualRateMaxAgeDays: maxAge } = input;
-    if (source === undefined && maxAge === undefined) {
+    const currenciesPatch: ClinicCurrenciesPatch = {
+      acceptedCurrencies: input.acceptedCurrencies,
+      rateReferenceCurrency: input.rateReferenceCurrency,
+      showRateInHeader: input.showRateInHeader,
+    };
+    const withCurrencies = hasClinicCurrenciesPatch(currenciesPatch);
+    if (source === undefined && maxAge === undefined && !withCurrencies) {
       throw new BadRequestException(EXCHANGE_SETTINGS_EMPTY_MESSAGE);
     }
     if (source !== undefined && !EXCHANGE_RATE_SOURCES.includes(source)) {
@@ -96,6 +139,13 @@ export class UpdateExchangeRateSettingsUseCase {
     }
     if (maxAge !== undefined && !isValidManualRateMaxAge(maxAge)) {
       throw new BadRequestException(MANUAL_RATE_MAX_AGE_MESSAGE);
+    }
+    // DX-584: las monedas primero (pueden dar 400 sin haber tocado nada).
+    const currencies = withCurrencies
+      ? (await this.updateCurrencies(currenciesPatch, ctx)).after
+      : await this.currencies.get();
+    if (source === undefined && maxAge === undefined) {
+      return withBase(await this.settings.get(), currencies);
     }
     // Solo hace falta la zona al elegir MANUAL: una clínica sin sedes puede
     // seguir guardando AUTOMATIC.
@@ -162,6 +212,24 @@ export class UpdateExchangeRateSettingsUseCase {
       // tasa se intentan ya.
       await this.hooks.afterRatesChange();
     }
-    return withBase(after);
+    return withBase(after, currencies);
+  }
+
+  private async updateCurrencies(
+    patch: ClinicCurrenciesPatch,
+    ctx: AuditRequestContext,
+  ): Promise<{ before: ClinicCurrencies; after: ClinicCurrencies }> {
+    const [known, locationCurrencies] = await Promise.all([
+      this.currencies.knownCurrencies(patchCurrencyCodes(patch)),
+      this.currencies.locationCurrencies(),
+    ]);
+    return this.currencies.set((before) => {
+      const result = applyClinicCurrenciesPatch(before, patch, {
+        isKnown: (code) => known.has(code),
+        locationCurrencies,
+      });
+      if (!result.ok) throw new BadRequestException(result.message);
+      return result.value;
+    }, ctx);
   }
 }
