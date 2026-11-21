@@ -344,7 +344,8 @@ export class PaymentsController {
       'Id que no es UUID. ' +
       'DX-377: el medio pide referencia y no llegó, o el medio no es de la clínica o está desactivado. ' +
       'DX-075: `paidAt` como día civil posterior a hoy en la sede («La fecha del abono no puede ser posterior a hoy en la sede.»). ' +
-      'DX-054: `paidAt` como instante a más de 24 h en el futuro («La fecha del abono no puede estar más de 24 horas en el futuro.»).',
+      'DX-054: `paidAt` como instante a más de 24 h en el futuro («La fecha del abono no puede estar más de 24 horas en el futuro.»). ' +
+      'DX-584: `code: CURRENCY_NOT_ACCEPTED` (con `currency`) si la clínica tiene monedas aceptadas y el abono o una línea del vuelto va en otra.',
   })
   @ApiUnprocessableEntityResponse({
     description:
@@ -458,7 +459,8 @@ export class PaymentsController {
       'Menos de 2 o más de 5 líneas, una línea sin medio, un medio de otra clínica o desactivado, ' +
       'una referencia que falta, o dos líneas con el mismo medio y referencia. ' +
       'DX-075: `paidAt` como día civil posterior a hoy en la sede. ' +
-      'DX-054: `paidAt` como instante a más de 24 h en el futuro.',
+      'DX-054: `paidAt` como instante a más de 24 h en el futuro. ' +
+      'DX-584: `code: CURRENCY_NOT_ACCEPTED` (con `currency`) si la clínica tiene monedas aceptadas y una línea va en otra; no se registra ninguna.',
   })
   @ApiNotFoundResponse({
     description: 'El plan no existe o es de otra clínica',

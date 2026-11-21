@@ -166,6 +166,8 @@ export class RecordSplitPaymentUseCase {
       }
       currencies.push(await this.recordPayment.validCurrency(line));
     }
+    // DX-584: todas las líneas en monedas que acepta la clínica.
+    await this.recordPayment.assertAcceptedCurrencies(currencies);
     const paidAt = await this.recordPayment.checkedPaidAt(input.paidAt);
 
     const plan = await this.getTreatmentPlan.execute(treatmentPlanId);

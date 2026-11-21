@@ -1,7 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { PaymentAdjustmentLineDto } from './payment-adjustment-line.dto';
 import { PaymentMethod } from '@prisma/client';
-import { EXCHANGE_RATE_SOURCES } from '../../../exchange/domain/exchange-rate-source';
+import {
+  EXCHANGE_RATE_SOURCES,
+  type ExchangeRateSource,
+} from '../../../exchange/domain/exchange-rate-source';
 import {
   PAYMENT_EXCHANGE_RATE_STATUSES,
   type PaymentExchangeRateStatus,
@@ -20,7 +23,7 @@ export class PaymentChangeRateDto {
   toPerBase!: number;
 
   @ApiProperty({ enum: EXCHANGE_RATE_SOURCES, enumName: 'ExchangeRateSource' })
-  source!: 'AUTOMATIC' | 'MANUAL';
+  source!: ExchangeRateSource;
 
   @ApiProperty({ example: '2026-11-19', description: 'Día civil de la tasa.' })
   date!: string;

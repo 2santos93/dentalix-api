@@ -51,6 +51,24 @@ export class UnsupportedCurrencyRateError extends ExchangeRateUnavailableError {
 }
 
 /**
+ * DX-585: la clínica usa la tasa del BCV y no hay tasa del BCV guardada que
+ * rija ese día (el BCV no la publicó aún o no se pudo consultar). Es «sin
+ * tasa», como las otras dos: el abono la toma cuando llegue (barrido de
+ * reintentos, DX-380).
+ */
+export class MissingBcvRateError extends ExchangeRateUnavailableError {
+  constructor(currency: string, date: string) {
+    super(
+      currency,
+      date,
+      'EXCHANGE_RATE_BCV_MISSING',
+      `No hay tasa del BCV de ${currency} para el día ${date}: aún no se publicó o no se pudo consultar. Se toma sola en cuanto llegue.`,
+    );
+    this.name = 'MissingBcvRateError';
+  }
+}
+
+/**
  * ¿Es «sin tasa» de una moneda? La tasa manual que falta (DX-374) o la que el
  * proveedor no trae. Cualquier otro error es un fallo real y quien llama lo
  * propaga.

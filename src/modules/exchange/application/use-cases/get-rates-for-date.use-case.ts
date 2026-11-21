@@ -41,6 +41,15 @@ import {
 } from '../provider-rates-gate';
 import { ProviderRatesCallerScope } from '../provider-rates-caller-scope';
 import { EXCHANGE_RATE_CLOCK } from './manual-exchange-rates.use-cases';
+import {
+  BCV_CURRENCIES,
+  bcvOldestValueDate,
+  bcvRatesPerUsd,
+} from '../../domain/bcv-rate';
+import {
+  BCV_RATE_REPOSITORY,
+  type BcvRateRepository,
+} from '../../domain/ports/bcv-rate-repository.port';
 
 /**
  * Un día civil YYYY-MM-DD que EXISTE (`2026-02-30` y `2026-13-01` no; BE-049).
@@ -147,6 +156,21 @@ export interface RatesForDate {
    * (`memoized({ manualBackup: true })`).
    */
   backup?: { manualSince: string };
+  /**
+   * DX-585: solo con fuente BCV. La tasa del BCV que rige ese día (la de
+   * fecha valor <= el día más reciente, como mucho `BCV_MAX_AGE_DAYS` atrás)
+   * y de la que salen VES y EUR; `null` si no hay ninguna (VES y EUR quedan
+   * «sin tasa»).
+   */
+  bcv?: BcvRateInfo | null;
+}
+
+/** DX-585: de qué publicación del BCV salen VES y EUR. */
+export interface BcvRateInfo {
+  /** «Fecha Valor» de la tasa (AAAA-MM-DD), nunca posterior al día pedido. */
+  valueDate: string;
+  /** Cuándo se consultó (ISO 8601). */
+  fetchedAt: string;
 }
 
 function toRatesRecord(
@@ -240,6 +264,9 @@ export class GetRatesForDateUseCase {
     private readonly now: () => Date = () => new Date(),
     @Optional()
     private readonly callerScope: ProviderRatesCallerScope = new ProviderRatesCallerScope(),
+    @Optional()
+    @Inject(BCV_RATE_REPOSITORY)
+    private readonly bcv: BcvRateRepository | null = null,
   ) {}
 
   /** La lectura de quien convierte por dentro (saldos, abonos, barridos). */
@@ -389,6 +416,9 @@ export class GetRatesForDateUseCase {
         currencies,
       );
     }
+    if (settings?.source === 'BCV') {
+      return this.bcvRates(date, beforeProviderCall, currencies);
+    }
     if (manualBackup && settings?.source === 'MANUAL' && settings.manualSince) {
       const backup = await this.backupRates(date, settings.manualSince);
       if (backup) return backup;
@@ -443,6 +473,47 @@ export class GetRatesForDateUseCase {
       }
     }
     return { base: 'USD', source: 'MANUAL', rates: exact, rateDate: date };
+  }
+
+  /**
+   * DX-585: con fuente BCV, VES y EUR salen de la tasa del BCV que rige ese
+   * día (`bcv_rate_snapshots`: fecha valor <= el día, la más reciente y no
+   * más de `BCV_MAX_AGE_DAYS` atrás); el resto de monedas, del proveedor,
+   * como AUTOMATIC (caché, ventana y presupuestos SEC-054). Si solo se piden
+   * monedas del BCV (o USD), no se llama al proveedor. Sin tasa del BCV, VES
+   * y EUR no aparecen («sin tasa»): nunca se toman del proveedor.
+   */
+  private async bcvRates(
+    date: string,
+    beforeProviderCall?: BeforeProviderCall,
+    currencies?: readonly string[],
+  ): Promise<RatesForDate> {
+    const wanted = currencies?.filter((c) => c !== BASE_CURRENCY);
+    const needsProvider =
+      wanted === undefined || wanted.some((c) => !BCV_CURRENCIES.includes(c));
+    const [snapshot, provider] = await Promise.all([
+      this.bcv?.inForce(date, bcvOldestValueDate(date)) ?? null,
+      needsProvider
+        ? this.cachedOrFetched(date, this.callerInContext(), beforeProviderCall)
+        : Promise.resolve({} as Record<string, number>),
+    ]);
+    const rates: Record<string, number> = {};
+    for (const [currency, rate] of Object.entries(provider)) {
+      if (!BCV_CURRENCIES.includes(currency)) rates[currency] = rate;
+    }
+    if (snapshot) Object.assign(rates, bcvRatesPerUsd(snapshot));
+    return {
+      base: 'USD',
+      source: 'BCV',
+      rates,
+      rateDate: date,
+      bcv: snapshot
+        ? {
+            valueDate: snapshot.valueDate,
+            fetchedAt: snapshot.fetchedAt.toISOString(),
+          }
+        : null,
+    };
   }
 
   /**
