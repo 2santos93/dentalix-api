@@ -222,6 +222,7 @@ describe('País de la sede: cualquier código de la lista (DX-312, e2e)', () => 
     docsApp.setGlobalPrefix('api/v1');
     setupSwagger(docsApp);
     await docsApp.init();
+    await docsApp.listen(0, '127.0.0.1');
     try {
       const doc = (
         await request(docsApp.getHttpServer()).get('/docs-json').expect(200)
