@@ -7,6 +7,7 @@ import {
   CreatePaymentMethodUseCase,
   ListPaymentMethodsUseCase,
   UpdatePaymentAdjustmentUseCase,
+  SetPaymentMethodGatewayFeeUseCase,
   UpdatePaymentMethodUseCase,
 } from './application/payment-methods.use-cases';
 import { PAYMENT_METHOD_REPOSITORY } from './domain/ports/payment-method-repository.port';
@@ -34,6 +35,7 @@ import { PrismaPaymentMethodInstructionRepository } from './infrastructure/prism
     UpdatePaymentMethodUseCase,
     CreatePaymentAdjustmentUseCase,
     UpdatePaymentAdjustmentUseCase,
+    SetPaymentMethodGatewayFeeUseCase,
     ListPaymentMethodInstructionsUseCase,
     SavePaymentMethodInstructionsUseCase,
     RemovePaymentMethodInstructionsUseCase,

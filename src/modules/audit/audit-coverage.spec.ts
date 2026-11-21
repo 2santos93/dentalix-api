@@ -2669,6 +2669,15 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
     'payment-method-adjustments.e2e-spec.ts',
   'PATCH /payment-methods/:id/adjustments/:adjustmentId':
     'payment-method-adjustments.e2e-spec.ts',
+  // DX-018-bis: datos de origen de los descuentos de honorarios (solo ADMIN).
+  // El % de la pasarela del medio (UPDATE PAYMENT_METHOD,
+  // PAYMENT_METHOD_GATEWAY_FEE_UPDATED, antes y después; sin evento si no
+  // cambia) y el costo de la orden de laboratorio (UPDATE DENTAL_LAB_ORDER,
+  // DENTAL_LAB_ORDER_COST_UPDATED, importe y moneda antes y después).
+  'PUT /payment-methods/:id/gateway-fee':
+    'payment-methods.use-cases.spec.ts y commission-deductions.e2e-spec.ts',
+  'PUT /lab-orders/:id/cost':
+    'lab-orders.use-cases.spec.ts y commission-deductions.e2e-spec.ts',
   'POST /payers': 'config-audit.e2e-spec.ts',
   'PATCH /payers/:id': 'config-audit.e2e-spec.ts',
   // DX-559: plantillas de plan (TREATMENT_PLAN_TEMPLATE con

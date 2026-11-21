@@ -47,6 +47,9 @@ import {
 } from '../domain/payment-method-rules';
 import { UNKNOWN_CURRENCY_MESSAGE } from '../../../shared/money/currency-messages';
 
+export const GATEWAY_FEE_PERCENT_MESSAGE =
+  'La comisión de la pasarela tiene que ser un porcentaje mayor que 0 y como mucho 100, con hasta 2 decimales.';
+
 export interface PaymentMethodInput {
   name: string;
   kind: PaymentMethodKind;
@@ -144,6 +147,31 @@ export class UpdatePaymentMethodUseCase {
       }
     }
     const updated = await this.repo.update(id, data, userId);
+    if (!updated) throw new NotFoundException(PAYMENT_METHOD_NOT_FOUND_MESSAGE);
+    return updated;
+  }
+}
+
+/**
+ * DX-018-bis: el % que la pasarela cobra a la clínica por el medio (solo
+ * ADMIN, la ruta). 0 < p ≤ 100 con hasta 2 decimales; null lo quita.
+ */
+@Injectable()
+export class SetPaymentMethodGatewayFeeUseCase {
+  constructor(
+    @Inject(PAYMENT_METHOD_REPOSITORY)
+    private readonly repo: PaymentMethodRepository,
+  ) {}
+
+  async execute(
+    id: string,
+    percent: number | null,
+    audit: AuditRequestContext,
+  ): Promise<ClinicPaymentMethodEntity> {
+    if (percent !== null && !isValidAdjustmentPercent(percent)) {
+      throw new BadRequestException(GATEWAY_FEE_PERCENT_MESSAGE);
+    }
+    const updated = await this.repo.setGatewayFee(id, percent, audit);
     if (!updated) throw new NotFoundException(PAYMENT_METHOD_NOT_FOUND_MESSAGE);
     return updated;
   }

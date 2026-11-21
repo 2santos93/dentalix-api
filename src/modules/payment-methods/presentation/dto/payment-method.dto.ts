@@ -122,6 +122,15 @@ export class PaymentMethodDto {
   allowInPaymentLink!: boolean;
 
   @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 3.5,
+    description:
+      'DX-018-bis: % que la pasarela cobra a la clínica por cada cobro con este medio (null = ninguno). Los honorarios pueden descontarlo.',
+  })
+  gatewayFeePercent!: number | null;
+
+  @ApiProperty({
     enum: PaymentMethod,
     enumName: 'PaymentMethod',
     nullable: true,
@@ -257,3 +266,20 @@ export class CreatePaymentAdjustmentDto {
 export class UpdatePaymentAdjustmentDto extends PartialType(
   CreatePaymentAdjustmentDto,
 ) {}
+
+/** DX-018-bis: PUT /payment-methods/:id/gateway-fee (solo ADMIN). */
+export class SetPaymentMethodGatewayFeeDto {
+  @ApiProperty({
+    type: Number,
+    nullable: true,
+    example: 3.5,
+    description:
+      'Mayor que 0 y como mucho 100, con hasta 2 decimales; null la quita.',
+  })
+  @ValidateIf((_, value) => value !== null)
+  @IsNumber(
+    { allowNaN: false, allowInfinity: false },
+    { message: 'La comisión de la pasarela tiene que ser un número.' },
+  )
+  percent!: number | null;
+}

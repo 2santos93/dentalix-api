@@ -82,6 +82,7 @@ function medium(
     requiresReference: false,
     proofPolicy: 'NONE',
     allowInPaymentLink: false,
+    gatewayFeePercent: null,
     adjustments: [],
     legacyMethod: null,
     createdAt: METHOD_AT,

@@ -1,4 +1,8 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import {
   Prisma,
   type DentalLab,
@@ -111,6 +115,8 @@ function mapOrder(row: DentalLabOrder): LabOrderRecord {
     cancelledAt: row.cancelledAt,
     cancelledById: row.cancelledById,
     cancelReason: row.cancelReason,
+    cost: row.cost === null ? null : amountText(row.cost.toNumber(), 2),
+    costCurrency: row.costCurrency,
     createdById: row.createdById,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -157,7 +163,13 @@ const ORDER_INCLUDE = {
     select: { id: true, userId: true, user: { select: { fullName: true } } },
   },
   treatmentPlanItem: {
-    select: { id: true, planId: true, toothNumber: true, catalogItemId: true },
+    select: {
+      id: true,
+      planId: true,
+      toothNumber: true,
+      catalogItemId: true,
+      plan: { select: { currency: true } },
+    },
   },
   appointment: { select: { id: true, start: true } },
   replacesOrder: { select: { id: true, number: true, locationId: true } },
@@ -572,6 +584,14 @@ export class PrismaLabRepository implements LabRepository {
       );
       return count === 1;
     } catch (error) {
+      // DX-018-bis: moneda del costo que no existe.
+      if (
+        isForeignKeyViolation(error, 'dental_lab_orders_cost_currency_fkey')
+      ) {
+        throw new UnprocessableEntityException(
+          LAB_MESSAGES.costCurrencyUnknown,
+        );
+      }
       // La guarda de la BD (orden anulada o enviada que otro cambió a la vez):
       // 409 genérico, sin el texto de la orden.
       if (
@@ -681,8 +701,13 @@ export class PrismaLabRepository implements LabRepository {
                   toothNumber: row.treatmentPlanItem.toothNumber,
                   procedureName:
                     procedure.get(row.treatmentPlanItem.catalogItemId) ?? '',
+                  planCurrency: row.treatmentPlanItem.plan.currency,
                 }
               : null,
+            cost:
+              record.cost !== null && record.costCurrency !== null
+                ? { amount: record.cost, currency: record.costCurrency }
+                : null,
             appointment: row.appointment
               ? { id: row.appointment.id, start: row.appointment.start }
               : null,

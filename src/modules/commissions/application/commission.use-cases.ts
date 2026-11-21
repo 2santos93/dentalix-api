@@ -291,6 +291,13 @@ export class CommissionUseCases {
       base: l.base,
       percent: l.percent,
       amount: l.amount,
+      deductions: {
+        grossBase: l.grossBase,
+        labCost: l.labCostDeducted,
+        cardFeePercent: l.cardFeePercent,
+        cardFee: l.cardFeeDeducted,
+        labCostSkippedCurrencies: l.labCostSkippedCurrencies,
+      },
       paidInPaymentId: null,
     }));
   }

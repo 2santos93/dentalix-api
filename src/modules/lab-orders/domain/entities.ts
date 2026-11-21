@@ -52,9 +52,19 @@ export interface LabOrderRecord {
   cancelledAt: Date | null;
   cancelledById: string | null;
   cancelReason: string | null;
+  /** DX-018-bis: costo del trabajo (decimal en texto, '180.00') y su moneda; los dos o ninguno. */
+  cost: string | null;
+  costCurrency: string | null;
   createdById: string;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/** DX-018-bis: lo que cobra el laboratorio por la orden (solo ADMIN lo ve). */
+export interface LabOrderCost {
+  /** Decimal en texto ('180.00'). */
+  amount: string;
+  currency: string;
 }
 
 export interface PersonRef {
@@ -98,7 +108,11 @@ export interface LabOrderView {
     planId: string;
     toothNumber: string;
     procedureName: string;
+    /** DX-018-bis: moneda del plan (el costo en otra no se descuenta de los honorarios). */
+    planCurrency: string;
   } | null;
+  /** DX-018-bis: costo del trabajo; null sin costo o para quien no es ADMIN. */
+  cost: LabOrderCost | null;
   appointment: { id: string; start: Date } | null;
   replacesOrder: { id: string; number: number } | null;
   replacedBy: { id: string; number: number }[];

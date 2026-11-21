@@ -598,6 +598,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /lab-orders/:id/receive': LAB_HANDLERS,
   'POST /lab-orders/:id/check': PRESCRIBERS,
   'POST /lab-orders/:id/cancel': PRESCRIBERS,
+  // DX-018-bis: el costo del laboratorio (dinero de la clínica).
+  'PUT /lab-orders/:id/cost': ADMIN_ONLY,
   'GET /lab-orders/:id/print': CLINICAL,
 
   // --- Control postoperatorio (DX-566) ---------------------------------------
@@ -843,6 +845,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-516: ajustes por medio de pago, solo ADMIN.
   'POST /payment-methods/:id/adjustments': ADMIN_ONLY,
   'PATCH /payment-methods/:id/adjustments/:adjustmentId': ADMIN_ONLY,
+  // DX-018-bis: % que la pasarela cobra a la clínica.
+  'PUT /payment-methods/:id/gateway-fee': ADMIN_ONLY,
   // DX-569: datos para pagar de cada medio (leer quien cobra, escribir ADMIN).
   'GET /payment-methods/:id/instructions': BILLING,
   'PUT /payment-methods/:id/instructions': ADMIN_ONLY,

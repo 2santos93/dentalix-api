@@ -39,6 +39,11 @@ export interface ClinicPaymentMethodEntity {
    * además está activo y tiene datos para pagar en la sede del enlace.
    */
   allowInPaymentLink: boolean;
+  /**
+   * DX-018-bis: % que la pasarela cobra a la CLÍNICA por cada cobro con este
+   * medio (null = ninguno). Los honorarios pueden descontarlo de la base.
+   */
+  gatewayFeePercent: number | null;
   /** Medio inicial equivalente a este método antiguo; `null` si es propio. */
   legacyMethod: PaymentMethod | null;
   /**
