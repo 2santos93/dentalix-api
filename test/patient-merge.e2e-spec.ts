@@ -266,7 +266,7 @@ describe('Pacientes duplicados y fusión (e2e, DX-266)', () => {
     await raw.$disconnect();
   });
 
-  it('solo ADMIN: los demás roles reciben 403 en español en las cuatro rutas', async () => {
+  it('solo ADMIN: los demás roles reciben 403 en español en las seis rutas', async () => {
     for (const role of [
       ClinicRole.DENTIST,
       ClinicRole.ASSISTANT,
@@ -288,6 +288,17 @@ describe('Pacientes duplicados y fusión (e2e, DX-266)', () => {
           keptId: ids.luisA,
           absorbedId: ids.luisB,
         }),
+        // DX-266-bis
+        as(
+          api().get(
+            `/api/v1/patient-duplicates/merge-leftovers?keptId=${ids.luisA}`,
+          ),
+          token,
+        ),
+        as(
+          api().post('/api/v1/patient-duplicates/merge-leftovers'),
+          token,
+        ).send({ absorbedId: ids.luisB }),
       ];
       for (const call of calls) {
         const res = await call.expect(403);
@@ -498,6 +509,126 @@ describe('Pacientes duplicados y fusión (e2e, DX-266)', () => {
     );
   });
 
+  it('DX-266-bis: lo que llega tarde al absorbido se ve en el conservado y «Volver a pasar» lo mueve una vez, con auditoría; repetirlo no hace nada', async () => {
+    const leftovers = async () =>
+      (
+        await as(
+          api().get(
+            `/api/v1/patient-duplicates/merge-leftovers?keptId=${ids.luisA}`,
+          ),
+        ).expect(200)
+      ).body as {
+        items: {
+          absorbedPatientId: string;
+          tables: { table: string; count: number }[];
+          categories: { category: string; count: number }[];
+          total: number;
+        }[];
+      };
+    // Recién fusionado: nada pendiente.
+    expect((await leftovers()).items).toEqual([]);
+
+    // La ventana: una cita que validó a Luis B antes de la fusión y se
+    // confirmó después (la FK no mira deletedAt).
+    const late = await raw.appointment.create({
+      data: {
+        tenantId: clinic.tenantId,
+        locationId: principalId,
+        patientId: ids.luisB,
+        providerId: clinic.adminUserId,
+        start: new Date('2026-08-03T14:00:00.000Z'),
+        end: new Date('2026-08-03T14:30:00.000Z'),
+        status: 'SCHEDULED',
+      },
+    });
+    const { items } = await leftovers();
+    expect(items).toEqual([
+      expect.objectContaining({
+        absorbedPatientId: ids.luisB,
+        tables: [{ table: 'appointments', count: 1 }],
+        categories: [{ category: 'appointments', count: 1 }],
+        total: 1,
+      }),
+    ]);
+
+    const moved = await as(
+      api().post('/api/v1/patient-duplicates/merge-leftovers'),
+    )
+      .send({ absorbedId: ids.luisB })
+      .expect(201);
+    expect(moved.body).toMatchObject({
+      patientId: ids.luisA,
+      absorbedPatientId: ids.luisB,
+      moved: [{ table: 'appointments', count: 1 }],
+    });
+    expect(
+      (await raw.appointment.findUniqueOrThrow({ where: { id: late.id } }))
+        .patientId,
+    ).toBe(ids.luisA);
+    expect((await leftovers()).items).toEqual([]);
+    // El absorbido sigue retirado con su fecha de fusión.
+    const absorbed = await raw.patient.findUniqueOrThrow({
+      where: { id: ids.luisB },
+      select: { deletedAt: true, mergedIntoId: true },
+    });
+    expect(absorbed.mergedIntoId).toBe(ids.luisA);
+    expect(absorbed.deletedAt).not.toBeNull();
+
+    const audited = () =>
+      raw.auditEvent.findMany({
+        where: {
+          tenantId: clinic.tenantId,
+          metadata: {
+            path: ['reason'],
+            equals: 'PATIENT_MERGE_LEFTOVERS_MOVED',
+          },
+        },
+        select: { patientId: true, action: true, metadata: true },
+      });
+    const events = await audited();
+    expect(events.map((e) => e.patientId).sort()).toEqual(
+      [ids.luisA, ids.luisB].sort(),
+    );
+    expect(events.find((e) => e.patientId === ids.luisA)).toMatchObject({
+      action: 'UPDATE',
+      metadata: {
+        patientMerge: {
+          role: 'KEPT',
+          otherPatientId: ids.luisB,
+          moved: { appointments: 1 },
+          resolved: {},
+        },
+      },
+    });
+
+    // Idempotente: otra vez, nada que mover y nada nuevo en la auditoría.
+    const again = await as(
+      api().post('/api/v1/patient-duplicates/merge-leftovers'),
+    )
+      .send({ absorbedId: ids.luisB })
+      .expect(201);
+    expect(again.body).toMatchObject({ moved: [], resolved: [] });
+    expect(await audited()).toHaveLength(2);
+
+    // Sobre un paciente que no está fusionado: 409 en español.
+    const notMerged = await as(
+      api().post('/api/v1/patient-duplicates/merge-leftovers'),
+    )
+      .send({ absorbedId: ids.luisA })
+      .expect(409);
+    expect(notMerged.body).toMatchObject({
+      code: 'MERGE_PATIENT_NOT_MERGED',
+      message:
+        'Este paciente no está fusionado con otro: no hay nada que volver a pasar.',
+    });
+    // Y la lista de un absorbido (no vivo) da 404.
+    await as(
+      api().get(
+        `/api/v1/patient-duplicates/merge-leftovers?keptId=${ids.luisB}`,
+      ),
+    ).expect(404);
+  });
+
   it('buscar el documento antiguo del absorbido lleva al conservado', async () => {
     await as(api().post('/api/v1/patient-duplicates/merge'))
       .send({
@@ -564,6 +695,8 @@ describe('Pacientes duplicados y fusión (e2e, DX-266)', () => {
   // ISOLATION_COVERS: GET /patient-duplicates/merge-preview ?absorbedId
   // ISOLATION_COVERS: POST /patient-duplicates/merge body.keptId
   // ISOLATION_COVERS: POST /patient-duplicates/merge body.absorbedId
+  // ISOLATION_COVERS: GET /patient-duplicates/merge-leftovers ?keptId
+  // ISOLATION_COVERS: POST /patient-duplicates/merge-leftovers body.absorbedId
   it('nunca entre clínicas: B no ve parejas de A ni puede descartar, previsualizar ni fusionar con pacientes de A (404) y nada de A cambia', async () => {
     const before = await raw.patient.findMany({
       where: { tenantId: clinic.tenantId },
@@ -596,6 +729,18 @@ describe('Pacientes duplicados y fusión (e2e, DX-266)', () => {
         .send({ keptId, absorbedId })
         .expect(404);
     }
+    // DX-266-bis: lo que quedó en un fusionado de A, tampoco.
+    const leftovers = await asB(
+      api().get(
+        `/api/v1/patient-duplicates/merge-leftovers?keptId=${ids.luisA}`,
+      ),
+    ).expect(404);
+    expect((leftovers.body as { message: string }).message).toBe(
+      'Paciente no encontrado',
+    );
+    await asB(api().post('/api/v1/patient-duplicates/merge-leftovers'))
+      .send({ absorbedId: ids.luisB })
+      .expect(404);
     // Y A tampoco alcanza al de B.
     await as(api().post('/api/v1/patient-duplicates/merge'))
       .send({ keptId: ids.pedro, absorbedId: ids.otherPatient })

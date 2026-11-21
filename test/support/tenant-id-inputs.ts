@@ -329,6 +329,12 @@ export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
     'patient-merge.e2e-spec.ts',
   'POST /patient-duplicates/merge body.keptId': 'patient-merge.e2e-spec.ts',
   'POST /patient-duplicates/merge body.absorbedId': 'patient-merge.e2e-spec.ts',
+  // DX-266-bis: «B pide o vuelve a pasar lo que quedó con un paciente de A →
+  // 404 en español y nada de A cambia».
+  'GET /patient-duplicates/merge-leftovers ?keptId':
+    'patient-merge.e2e-spec.ts',
+  'POST /patient-duplicates/merge-leftovers body.absorbedId':
+    'patient-merge.e2e-spec.ts',
   // DX-379 (B): «B aplica "Actualizar precios" a su plan con un ítem de A →
   // 404 en español y nada cambia» (lleva Idempotency-Key: fuera de la matriz).
   'POST /patients/:patientId/treatment-plans/:planId/reprice/apply body.itemIds[]':

@@ -31,6 +31,14 @@ describe('errores de la fusión (DX-266)', () => {
     expect(inactive.getResponse()).toMatchObject({
       code: 'MERGE_PATIENT_INACTIVE',
     });
+    // DX-266-bis: volver a pasar lo tardío de un paciente no fusionado.
+    const notMerged = mergeHttpError('DX266_NOT_MERGED');
+    expect(notMerged).toBeInstanceOf(ConflictException);
+    expect(notMerged.getResponse()).toMatchObject({
+      code: 'MERGE_PATIENT_NOT_MERGED',
+      message:
+        'Este paciente no está fusionado con otro: no hay nada que volver a pasar.',
+    });
     for (const code of MERGE_BLOCKER_CODES) {
       const error = mergeHttpError(code);
       expect(error).toBeInstanceOf(ConflictException);
