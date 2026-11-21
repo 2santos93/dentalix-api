@@ -131,6 +131,9 @@ model Tenant {
   /// DX-584: mostrar la tasa en el menú. NULL = automático (si hay alguna
   /// moneda aceptada distinta de la de referencia); true/false = forzado.
   showRateInHeader                        Boolean?
+  /// DX-586: última vez que alguien de la clínica pidió «Actualizar tasa»
+  /// (POST /exchange/refresh). Una cada 5 minutos por clínica. Hora de la BD.
+  exchangeRateRefreshedAt                 DateTime?                        @db.Timestamptz(3)
   /// DX-019: datos fiscales y de contacto de la clínica (Ajustes › Datos de
   /// la clínica, solo ADMIN, PATCH /clinic/settings, auditado). Texto libre,
   /// sin formato por país; NULL = sin dato. CHECK de longitud y una línea.
@@ -3043,8 +3046,9 @@ model BcvRateSnapshot {
 
 /// DX-374: tasa de cambio que la clínica fija para un día civil y una moneda,
 /// en unidades de `currency` por 1 USD (la misma base que
-/// `exchange_rate_snapshots`). Una por (clínica, día, moneda) y no se
-/// sobrescribe: la app solo tiene SELECT e INSERT. RLS FORCE por tenant; la FK
+/// `exchange_rate_snapshots`). DX-586: varias por (clínica, día, moneda), cada
+/// una desde su `effectiveFrom`; no se sobrescribe: la app solo tiene SELECT e
+/// INSERT (y UPDATE de `rate`, DX-375). RLS FORCE por tenant; la FK
 /// compuesta al autor exige que sea miembro de la MISMA clínica, como la
 /// atribución de DX-050.
 model ManualExchangeRate {
@@ -3056,6 +3060,11 @@ model ManualExchangeRate {
   currency              String
   /// Unidades de `currency` por 1 USD. CHECK > 0; hasta 8 decimales.
   rate                  Decimal  @db.Decimal(18, 8)
+  /// DX-586: desde qué instante del día `date` rige (varias tasas por día).
+  /// Las anteriores a DX-586: el inicio del día en la sede principal. Si una
+  /// réplica anterior no la manda, la pone el trigger
+  /// manual_exchange_rates_effective_from.
+  effectiveFrom         DateTime @db.Timestamptz(3)
   createdById           String   @db.Uuid
   createdByMembershipId String   @db.Uuid
   createdAt             DateTime @default(dbgenerated("timezone('UTC'::text, now())"))
@@ -3064,9 +3073,11 @@ model ManualExchangeRate {
   currencyRef Currency         @relation(fields: [currency], references: [code], onDelete: Restrict, map: "manual_exchange_rates_currency_fkey")
   createdBy   ClinicMembership @relation(fields: [tenantId, createdByMembershipId, createdById], references: [tenantId, id, userId], onDelete: Restrict, map: "manual_exchange_rates_created_by_fkey")
 
-  /// Una tasa por clínica, día y moneda. También sirve la lectura por
-  /// (clínica, día) y la lista de las últimas (recorrido hacia atrás).
-  @@unique([tenantId, date, currency], map: "manual_exchange_rates_tenant_date_currency_key")
+  /// DX-586: una tasa por clínica, moneda e instante desde el que rige (antes,
+  /// una por día y moneda). El índice del día sirve la lectura por (clínica,
+  /// día) y la lista de las últimas (recorrido hacia atrás).
+  @@unique([tenantId, currency, effectiveFrom], map: "manual_exchange_rates_tenant_currency_effective_key")
+  @@index([tenantId, date, currency, effectiveFrom], map: "manual_exchange_rates_tenant_date_currency_idx")
   @@index([tenantId, createdByMembershipId, createdById], map: "manual_exchange_rates_created_by_idx")
   @@map("manual_exchange_rates")
 }
@@ -3571,6 +3582,18 @@ model Payment {
   exchangeRateTo           Decimal?            @db.Decimal(18, 8)
   exchangeRateSource       ExchangeRateSource?
   exchangeRateDate         DateTime?           @db.Date
+  // DX-586: QUÉ tasa y CUÁNDO. `exchangeRateQuotedAt` es el instante en que
+  // se cotizó (lo pone la BD, trigger payments_exchange_rate_quoted_at, al
+  // congelar: al registrar o en el barrido); `exchangeRateValueDate`, la
+  // fecha valor del BCV (solo con fuente BCV), y `exchangeRateRef`, la
+  // referencia estable a la tasa usada (`BCV:<fecha valor>`,
+  // `AUTOMATIC:<día>`, `MANUAL:<id de manual_exchange_rates>`; con dos
+  // monedas que no son USD, las dos unidas con «+»). NULL en los abonos
+  // anteriores y en los que no convierten (CHECK
+  // payments_exchange_rate_moment_check).
+  exchangeRateQuotedAt     DateTime?           @db.Timestamptz(3)
+  exchangeRateValueDate    DateTime?           @db.Date
+  exchangeRateRef          String?
   // DX-377: el medio de pago del catálogo de la clínica (FK compuesta) y la
   // referencia que dio el pagador: tal cual (`reference`) y normalizada para
   // comparar (`referenceNormalized`: sin espacios y en mayúsculas). `method`

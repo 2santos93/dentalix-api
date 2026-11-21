@@ -124,6 +124,8 @@ describe('anular un cargo compara en la moneda del plan (DX-382, int)', () => {
         date: TODAY,
         currency: 'GBP',
         rate: 4000,
+        // DX-586: desde el inicio del día (el abono va antes del «ahora»).
+        effectiveFrom: `${TODAY}T00:00:00-04:00`,
       }).expect(201);
     }
     const vesVersion = await policyVersion(clinic, location, {

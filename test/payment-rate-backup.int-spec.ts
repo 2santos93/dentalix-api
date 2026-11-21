@@ -180,6 +180,7 @@ function registerRate(
       date,
       currency,
       rate,
+      effectiveFrom: new Date(`${date}T00:00:00Z`),
       createdById: clinic.userId,
     });
     return saved.id;

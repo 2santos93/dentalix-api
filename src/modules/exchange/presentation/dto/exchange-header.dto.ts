@@ -105,3 +105,35 @@ export class ExchangeHeaderDto {
   })
   updatedAt!: string;
 }
+
+/** DX-586: qué pasó al consultar la fuente de la tasa («Actualizar tasa»). */
+export class ExchangeRefreshOutcomeDto {
+  @ApiProperty({ description: 'La tasa se consultó y quedó guardada.' })
+  ok!: boolean;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    enum: [
+      'EXCHANGE_RATE_UNAVAILABLE',
+      'EXCHANGE_RATE_BUDGET_EXCEEDED',
+      'EXCHANGE_RATE_BCV_REJECTED',
+    ],
+    description:
+      'Sin `ok`: la fuente no dio la tasa, el presupuesto del proveedor está agotado (SEC-054) o la tasa del BCV no pasó la cordura. null con `ok`.',
+  })
+  code!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description: 'Sin `ok`: el mensaje en español para la persona.',
+  })
+  message!: string | null;
+}
+
+/** DX-586: POST /exchange/refresh: el indicador recalculado y el resultado. */
+export class ExchangeRefreshDto extends ExchangeHeaderDto {
+  @ApiProperty({ type: ExchangeRefreshOutcomeDto })
+  refresh!: ExchangeRefreshOutcomeDto;
+}

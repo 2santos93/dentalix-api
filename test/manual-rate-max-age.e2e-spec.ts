@@ -255,6 +255,9 @@ describe('Tasa manual de respaldo hasta N días (e2e, DX-384)', () => {
     ).resolves.toEqual({
       base: 'USD',
       source: 'MANUAL',
+      // DX-586: las manuales que rigen y la lista del día.
+      manualRates: expect.any(Array) as unknown,
+      manualDay: expect.any(Array) as unknown,
       rates: { EUR: 4000 },
       rateDate: FRIDAY,
     });
@@ -266,6 +269,9 @@ describe('Tasa manual de respaldo hasta N días (e2e, DX-384)', () => {
     ).resolves.toEqual({
       base: 'USD',
       source: 'MANUAL',
+      // DX-586: las manuales que rigen y la lista del día.
+      manualRates: expect.any(Array) as unknown,
+      manualDay: expect.any(Array) as unknown,
       rates: {},
       rateDate: SATURDAY,
     });
@@ -288,6 +294,9 @@ describe('Tasa manual de respaldo hasta N días (e2e, DX-384)', () => {
     ).resolves.toEqual({
       base: 'USD',
       source: 'MANUAL',
+      // DX-586: las manuales que rigen y la lista del día.
+      manualRates: expect.any(Array) as unknown,
+      manualDay: expect.any(Array) as unknown,
       rates: {},
       rateDate: SATURDAY,
     });

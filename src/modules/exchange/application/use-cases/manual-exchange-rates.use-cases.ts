@@ -10,6 +10,7 @@ import { decimalPlaces } from '../../../../shared/validation/bounded-decimal';
 import {
   civilDateIn,
   parseCivilDate,
+  zonedStartOfDay,
   PERIOD_DAY_MAX,
   PERIOD_DAY_MIN,
 } from '../../../../shared/time/civil-day';
@@ -21,6 +22,9 @@ import {
   MANUAL_RATE_CURRENCY_MESSAGE,
   MANUAL_RATE_DATE_MESSAGE,
   MANUAL_RATE_DUPLICATE_MESSAGE,
+  MANUAL_RATE_EFFECTIVE_FROM_DAY_MESSAGE,
+  MANUAL_RATE_EFFECTIVE_FROM_FUTURE_MESSAGE,
+  MANUAL_RATE_EFFECTIVE_FROM_MESSAGE,
   MANUAL_RATE_FUTURE_DATE_MESSAGE,
   MANUAL_RATE_IN_USE_MESSAGE,
   MANUAL_RATE_NOT_FOUND_MESSAGE,
@@ -44,6 +48,24 @@ export interface RegisterManualExchangeRateInput {
   date: string;
   currency: string;
   rate: number;
+  /**
+   * DX-586: desde qué instante del día rige (ISO 8601 con zona). Sin él:
+   * ahora si `date` es hoy en la sede; el inicio de ese día si es anterior.
+   */
+  effectiveFrom?: string;
+}
+
+// Un instante sin `Z` ni desfase lo leería `new Date` en la zona del servidor.
+const EXPLICIT_OFFSET = /(Z|[+-]\d{2}:?\d{2})$/i;
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/;
+
+/** DX-586: el instante `effectiveFrom` del alta, o `null` si no vale. */
+function parseEffectiveFrom(value: unknown): Date | null {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  if (!ISO_INSTANT.test(text) || !EXPLICIT_OFFSET.test(text)) return null;
+  const instant = new Date(text);
+  return Number.isNaN(instant.getTime()) ? null : instant;
 }
 
 function isValidRate(rate: unknown): rate is number {
@@ -118,16 +140,26 @@ export class RegisterManualExchangeRateUseCase {
     }
     // «Hoy» en la zona de la sede de referencia: un día que aún no ha llegado
     // allí no tiene tasa que registrar.
-    const today = civilDateIn(this.now(), await this.repo.referenceTimeZone());
+    const now = this.now();
+    const timeZone = await this.repo.referenceTimeZone();
+    const today = civilDateIn(now, timeZone);
     if (date > today) {
       throw badRequest(MANUAL_RATE_FUTURE_DATE_MESSAGE, 'date');
     }
+    const effectiveFrom = await this.effectiveFrom(
+      input,
+      { date, currency },
+      today,
+      now,
+      timeZone,
+    );
     let saved: ManualExchangeRate;
     try {
       saved = await this.repo.create({
         date,
         currency,
         rate: input.rate,
+        effectiveFrom,
         createdById: actorUserId,
       });
     } catch (error) {
@@ -148,6 +180,45 @@ export class RegisterManualExchangeRateUseCase {
     // siguiente, sin esperar a su reintento escalonado.
     await this.hooks.afterRatesChange();
     return saved;
+  }
+
+  /**
+   * DX-586: desde cuándo rige la tasa. La pedida tiene que ser un instante
+   * con zona, no futuro y del mismo día civil `date` en la sede de
+   * referencia. Sin ella: ahora si es hoy y ya hay otra de esa moneda hoy (la
+   * nueva rige desde ya); si es la primera del día de esa moneda (o un día
+   * anterior), desde el inicio del día: así una clínica que registra una
+   * tasa al día sigue cubriendo el día entero, como antes de DX-586.
+   */
+  private async effectiveFrom(
+    input: RegisterManualExchangeRateInput,
+    rate: { date: string; currency: string },
+    today: string,
+    now: Date,
+    timeZone: string,
+  ): Promise<Date> {
+    const { date } = rate;
+    if (input.effectiveFrom === undefined || input.effectiveFrom === null) {
+      if (date !== today) return zonedStartOfDay(date, timeZone);
+      const sameDay = await this.repo.listDay(date);
+      return sameDay.some((r) => r.currency === rate.currency)
+        ? now
+        : zonedStartOfDay(date, timeZone);
+    }
+    const instant = parseEffectiveFrom(input.effectiveFrom);
+    if (!instant) {
+      throw badRequest(MANUAL_RATE_EFFECTIVE_FROM_MESSAGE, 'effectiveFrom');
+    }
+    if (instant.getTime() > now.getTime()) {
+      throw badRequest(
+        MANUAL_RATE_EFFECTIVE_FROM_FUTURE_MESSAGE,
+        'effectiveFrom',
+      );
+    }
+    if (civilDateIn(instant, timeZone) !== date) {
+      throw badRequest(MANUAL_RATE_EFFECTIVE_FROM_DAY_MESSAGE, 'effectiveFrom');
+    }
+    return instant;
   }
 }
 

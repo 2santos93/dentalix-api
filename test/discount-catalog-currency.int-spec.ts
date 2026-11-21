@@ -158,6 +158,9 @@ async function manualRate(day: string, rate: string): Promise<string> {
     data: {
       tenantId: s.tenantId,
       date: new Date(`${day}T00:00:00Z`),
+
+      effectiveFrom: new Date(`${day}T00:00:00Z`),
+
       currency: 'VES',
       rate: new Prisma.Decimal(rate),
       createdById: s.userId,
