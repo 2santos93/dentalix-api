@@ -47,7 +47,7 @@ function rendered(run: () => unknown, fmt: RegionalFormat): string {
   }
   throw new Error('no lanzó');
 }
-const ES_CO = regionalFormat({ locale: 'es-VE', hourCycle: 'h23' });
+const ES_VE = regionalFormat({ locale: 'es-VE', hourCycle: 'h23' });
 const EN_US = regionalFormat({ locale: 'en-US', hourCycle: 'h12' });
 
 const csvBytes = (text: string, encoding: BufferEncoding = 'utf8') =>
@@ -216,10 +216,10 @@ describe('TableBuilder / toTable', () => {
       ['a', 'b'],
       ...Array.from({ length: 10_001 }, (_, i) => [`x${i}`, 'y']),
     ];
-    expect(rendered(() => toTable(rows(many)), ES_CO)).toBe(
-      TOO_MANY_ROWS_MESSAGE(ES_CO),
+    expect(rendered(() => toTable(rows(many)), ES_VE)).toBe(
+      TOO_MANY_ROWS_MESSAGE(ES_VE),
     );
-    expect(TOO_MANY_ROWS_MESSAGE(ES_CO)).toContain('más de 10.000 filas');
+    expect(TOO_MANY_ROWS_MESSAGE(ES_VE)).toContain('más de 10.000 filas');
     const exact = [
       ['a', 'b'],
       ...Array.from({ length: 10_000 }, (_, i) => [`x${i}`, 'y']),
@@ -229,7 +229,7 @@ describe('TableBuilder / toTable', () => {
       { length: MAX_PHYSICAL_ROWS + 1 },
       () => [] as string[],
     );
-    expect(rendered(() => toTable(rows(blanks)), ES_CO)).toMatch(
+    expect(rendered(() => toTable(rows(blanks)), ES_VE)).toMatch(
       /más de 50\.000 filas \(contando las vacías\)/,
     );
   });
@@ -490,7 +490,7 @@ describe('readImportFile', () => {
     );
     const err = await readImportFile(book, 'x.xlsx').catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ImportFileError);
-    expect((err as ImportFileError).render(() => ES_CO)).toMatch(
+    expect((err as ImportFileError).render(() => ES_VE)).toMatch(
       /filas \(contando las vacías\)|no tiene cabecera/,
     );
   });
@@ -631,13 +631,16 @@ describe('XLSX: topes de estructura y event loop (revisión 2026-10-23, B1)', ()
     expect(m.maxPerTurn).toBeLessThanOrEqual(MAX_SEARCHES_PER_TURN);
   }
 
-  async function expectRejectedYielding(book: Buffer, message: RegExp) {
+  async function expectRejectedYielding(
+    book: Buffer,
+    message: RegExp,
+    read: (book: Buffer) => Promise<unknown> = (b) =>
+      readImportFile(b, 'x.xlsx'),
+  ) {
     expect(book.length).toBeLessThan(200 * 1024);
-    const { outcome, maxPerTurn, total } = await watchTurns(() =>
-      readImportFile(book, 'x.xlsx'),
-    );
+    const { outcome, maxPerTurn, total } = await watchTurns(() => read(book));
     expect(outcome).toBeInstanceOf(ImportFileError);
-    expect((outcome as ImportFileError).render(() => ES_CO)).toMatch(message);
+    expect((outcome as ImportFileError).render(() => ES_VE)).toMatch(message);
     expectYieldsTheThread({ maxPerTurn, total });
   }
 
@@ -678,14 +681,13 @@ describe('XLSX: topes de estructura y event loop (revisión 2026-10-23, B1)', ()
       expect((styles as ImportFileError).render(() => EN_US)).toContain(
         'más de 64,000 estilos',
       );
-      const strings = await readImportFile(
+      // DX-107-bis: el corte con un tope inyectado (1 M de <si> pasaba de
+      // 60 s en CI); el mensaje sigue diciendo el tope de producción.
+      const strings = await collect(
         rawBook(sheetWith(''), [
-          part(
-            'xl/sharedStrings.xml',
-            `<sst>${'<si/>'.repeat(1_000_001)}</sst>`,
-          ),
+          part('xl/sharedStrings.xml', `<sst>${'<si/>'.repeat(1_001)}</sst>`),
         ]),
-        'x.xlsx',
+        { maxSharedStrings: 1_000 },
       ).catch((error: unknown) => error as ImportFileError);
       expect(strings).toBeInstanceOf(ImportFileError);
       expect((strings as ImportFileError).render(() => EN_US)).toContain(
@@ -703,12 +705,17 @@ describe('XLSX: topes de estructura y event loop (revisión 2026-10-23, B1)', ()
     });
   });
 
-  it('sharedStrings con 5,5 M de <si/>: 400 sin bloquear el hilo', async () => {
+  it('sharedStrings con 5,5 veces el tope de <si/>: 400 sin bloquear el hilo', async () => {
+    // DX-107-bis: con el tope de producción (1 M) el lector recorría 1 M de
+    // <si> antes de cortar y en un runner cargado pasaba de 60 s. Mismo
+    // mecanismo con un tope inyectado menor, que solo puede bajar.
+    const max = 150_000;
     await expectRejectedYielding(
       rawBook(sheetWith(''), [
-        part('xl/sharedStrings.xml', `<sst>${'<si/>'.repeat(5_500_000)}</sst>`),
+        part('xl/sharedStrings.xml', `<sst>${'<si/>'.repeat(max * 5.5)}</sst>`),
       ]),
       /cadenas de texto/,
+      (book) => collect(book, { maxSharedStrings: max }),
     );
   });
 
@@ -767,7 +774,7 @@ describe('XLSX: topes de estructura y event loop (revisión 2026-10-23, B1)', ()
       collect(book, { maxXmlSteps }),
     );
     expect(outcome).toBeInstanceOf(ImportFileError);
-    expect((outcome as ImportFileError).render(() => ES_CO)).toMatch(
+    expect((outcome as ImportFileError).render(() => ES_VE)).toMatch(
       /demasiado complej/,
     );
     expectYieldsTheThread({ maxPerTurn, total });

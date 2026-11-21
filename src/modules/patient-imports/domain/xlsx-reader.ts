@@ -425,6 +425,7 @@ function runsText(xml: string, p: string, budget: XmlBudget): string {
 async function sharedStrings(
   xml: string | null,
   budget: XmlBudget,
+  max = MAX_SHARED_STRINGS,
 ): Promise<string[]> {
   if (!xml) return [];
   const p = prefixOf(xml, 'sst');
@@ -433,7 +434,7 @@ async function sharedStrings(
     xml,
     `${p}si`,
     budget,
-    MAX_SHARED_STRINGS,
+    max,
     TOO_MANY_STRINGS_MESSAGE,
   )) {
     out.push(si.body === '' ? '' : runsText(si.body, p, budget));
@@ -564,6 +565,13 @@ async function firstSheetPath(
  */
 export interface ReadXlsxOptions {
   maxXmlSteps?: number;
+  /**
+   * DX-107-bis: un tope de cadenas compartidas MENOR que `MAX_SHARED_STRINGS`
+   * para probar el corte y el reparto del hilo sin recorrer 1 M de `<si>`
+   * (en una CI cargada pasaba de 60 s). Solo baja; el mensaje sigue diciendo
+   * el tope de producción.
+   */
+  maxSharedStrings?: number;
 }
 
 /**
@@ -602,6 +610,10 @@ export async function readXlsx(
   const strings = await sharedStrings(
     await inflater.part('xl/sharedStrings.xml'),
     budget,
+    Math.min(
+      options.maxSharedStrings ?? MAX_SHARED_STRINGS,
+      MAX_SHARED_STRINGS,
+    ),
   );
   const dates = await dateStyles(await inflater.part('xl/styles.xml'), budget);
   return sheetRecords(sheetXml, strings, dates, date1904, budget);
