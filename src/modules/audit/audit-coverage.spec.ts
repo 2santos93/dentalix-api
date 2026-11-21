@@ -2539,6 +2539,10 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // dejan CLINIC_CURRENCIES con configChange antes/después, en la transacción.
   'PUT /exchange/settings':
     'exchange-rate-settings.use-cases.spec.ts, exchange-rate-source.e2e-spec.ts y clinic-currencies.e2e-spec.ts',
+  // DX-586: «Actualizar tasa»: CLINIC_SETTINGS con reason
+  // EXCHANGE_RATE_REFRESH (resourceId = la clínica), tras consultar.
+  'POST /exchange/refresh':
+    'refresh-exchange-rate.use-case.spec.ts y exchange-rate-moment.e2e-spec.ts',
   // DX-274: VIEW si se abre en el navegador, EXPORT si se descarga (la acción
   // depende de la query, que el decorador no lee).
   'GET /expenses/:id/attachment/url':

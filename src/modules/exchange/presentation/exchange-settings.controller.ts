@@ -169,7 +169,7 @@ export class ExchangeSettingsController {
   @ApiOperation({
     summary: 'Últimas tasas de cambio manuales de la clínica (DX-374)',
     description:
-      'Del día más reciente al más antiguo y, dentro del día, por moneda.',
+      'Del día más reciente al más antiguo y, dentro del día, por moneda y (DX-586) de la más reciente a la más antigua (`effectiveFrom`).',
   })
   @ApiOkResponse({ type: [ManualExchangeRateDto] })
   manualRates(
@@ -194,14 +194,16 @@ export class ExchangeSettingsController {
       '`manualSince` sirve, con MANUAL, de tasa de respaldo a los abonos de ' +
       'ese día que siguen sin tasa si el proveedor no tiene la de ese día ' +
       '(GET /payments/rate-backlog/day dice cuántos); nunca cambia una tasa ' +
-      'ya congelada. Una ' +
-      'tasa ya registrada para ese día y moneda no se sobrescribe: si ningún ' +
+      'ya congelada. DX-586: puede haber varias el mismo día y moneda, cada ' +
+      'una desde su `effectiveFrom` (por defecto, ahora); un abono usa la de ' +
+      'mayor `effectiveFrom` ≤ su instante. Una tasa ya registrada para esa ' +
+      'moneda desde ese mismo instante no se sobrescribe (409): si ningún ' +
       'abono la usó, se corrige con PUT /exchange/manual-rates/:id.',
   })
   @ApiCreatedResponse({ type: ManualExchangeRateDto })
   @ApiBadRequestResponse({
     description:
-      'Tasa que no es > 0 con hasta 8 decimales, moneda fuera de la lista o USD, o fecha inválida o futura en la zona de la sede',
+      'Tasa que no es > 0 con hasta 8 decimales, moneda fuera de la lista o USD, fecha inválida o futura en la zona de la sede, o (DX-586) `effectiveFrom` sin zona, futuro o de otro día',
   })
   @ApiConflictResponse({ description: MANUAL_RATE_DUPLICATE_MESSAGE })
   @ApiForbiddenResponse({ description: MANUAL_RATE_NOT_A_MEMBER_MESSAGE })
@@ -210,7 +212,12 @@ export class ExchangeSettingsController {
     @Req() req: AuthenticatedRequest,
   ): Promise<ManualExchangeRate> {
     const created = await this.registerManualRate.execute(
-      { date: dto.date, currency: dto.currency, rate: dto.rate },
+      {
+        date: dto.date,
+        currency: dto.currency,
+        rate: dto.rate,
+        effectiveFrom: dto.effectiveFrom,
+      },
       req.user.sub,
     );
     // DX-381: moneda, día y tasa, sin el autor (metadata cerrada).

@@ -155,6 +155,9 @@ export function overrideFrozenRate(
     source: 'MANUAL',
     date: paidOn,
     quotedOn: paidOn,
+    // DX-586: no sale de ninguna tasa registrada: la fijó recepción.
+    ref: `OVERRIDE:${paidOn}`,
+    valueDate: null,
   };
 }
 
@@ -234,6 +237,21 @@ export function normalizePaidAt(value: string | Date): Date | CivilPaidDay {
     return { civilDate: instant.toISOString().slice(0, 10) };
   }
   return instant;
+}
+
+/**
+ * DX-586: el instante para el que se cotiza la tasa de un abono. Con hora
+ * (`paidAt` instante), esa hora, nunca después de ahora: un abono de las
+ * 10:00 usa la tasa manual que regía a las 10:00 aunque se registre más
+ * tarde. Solo con el día: `undefined` = ahora (hoy, la vigente; un día
+ * pasado, la última de ese día).
+ */
+export function rateInstant(
+  paidAt: Date | CivilPaidDay,
+  now: Date,
+): Date | undefined {
+  if (!(paidAt instanceof Date)) return undefined;
+  return paidAt.getTime() < now.getTime() ? paidAt : now;
 }
 
 export function isFinitePositive(value: unknown): value is number {
@@ -512,6 +530,7 @@ export class RecordPaymentUseCase {
             currency,
             targetCurrency: plan.currency,
             paidOn,
+            asOf: rateInstant(paidAt, this.now()),
           })
         : overrideFrozenRate(currency, plan.currency, rateOverride, paidOn);
     const converted = await paymentBaseAmount(
@@ -533,6 +552,7 @@ export class RecordPaymentUseCase {
     currency: string;
     targetCurrency: string;
     paidOn: string;
+    asOf?: Date;
   }): Promise<FrozenExchangeRate | null> {
     try {
       return await freezePaymentRate(this.convertAmount, payment);

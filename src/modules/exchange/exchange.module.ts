@@ -54,6 +54,10 @@ import { BcvOfficialRateProvider } from './infrastructure/providers/bcv-rate.pro
 import { PrismaBcvRateRepository } from './infrastructure/repositories/prisma-bcv-rate.repository';
 import { RefreshBcvRateUseCase } from './application/use-cases/refresh-bcv-rate.use-case';
 import { BcvRateJobs } from './application/jobs/bcv-rate.jobs';
+import { RefreshExchangeRateUseCase } from './application/use-cases/refresh-exchange-rate.use-case';
+import { EXCHANGE_REFRESH_COOLDOWN } from './domain/ports/exchange-refresh-cooldown.port';
+import { PrismaExchangeRefreshCooldown } from './infrastructure/repositories/prisma-exchange-refresh-cooldown';
+import { ExchangeRefreshController } from './presentation/exchange-refresh.controller';
 
 // ConfigModule (ConfigService, used by OpenExchangeRatesProvider) and
 // PrismaModule (PrismaService, used by PrismaExchangeRateRepository) are both
@@ -73,6 +77,8 @@ import { BcvRateJobs } from './application/jobs/bcv-rate.jobs';
     ClinicCurrencyTextsController,
     // DX-584: la tasa del menú (cualquier miembro).
     ExchangeHeaderController,
+    // DX-586: «Actualizar tasa» (quien cobra).
+    ExchangeRefreshController,
   ],
   providers: [
     // GetRatesForDateUseCase must be registered explicitly as a provider (not
@@ -138,6 +144,12 @@ import { BcvRateJobs } from './application/jobs/bcv-rate.jobs';
     { provide: BCV_RATE_PROVIDER, useClass: BcvOfficialRateProvider },
     { provide: BCV_RATE_REPOSITORY, useClass: PrismaBcvRateRepository },
     RefreshBcvRateUseCase,
+    // DX-586: «Actualizar tasa», una vez cada 5 min por clínica.
+    RefreshExchangeRateUseCase,
+    {
+      provide: EXCHANGE_REFRESH_COOLDOWN,
+      useClass: PrismaExchangeRefreshCooldown,
+    },
     BcvRateJobs,
   ],
   // Exported so other modules (PaymentsModule -> RecordPayment/GetPlanBalance/

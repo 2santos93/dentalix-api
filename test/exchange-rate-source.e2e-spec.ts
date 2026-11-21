@@ -341,6 +341,9 @@ describe('Tasa de cambio por clínica (e2e, DX-374)', () => {
     await expect(rates(manual, TODAY)).resolves.toEqual({
       base: 'USD',
       source: 'MANUAL',
+      // DX-586: las manuales que rigen y la lista del día.
+      manualRates: expect.any(Array) as unknown,
+      manualDay: expect.any(Array) as unknown,
       rates: {},
       rateDate: TODAY,
     });
@@ -402,11 +405,14 @@ describe('Tasa de cambio por clínica (e2e, DX-374)', () => {
     expect(JSON.stringify(created[0].metadata)).not.toContain('Dr. Owner');
   });
 
-  it('una tasa ya registrada para ese día y moneda no se sobrescribe: 409 en español', async () => {
+  it('una tasa ya registrada para esa moneda desde esa hora no se sobrescribe: 409 en español', async () => {
+    // DX-586: la primera del día rige desde su inicio (en la sede, Caracas);
+    // otra desde la misma hora choca. Otra hora del día sería otra tasa.
     const res = await register({
       date: TODAY,
       currency: 'VES',
       rate: 41,
+      effectiveFrom: `${TODAY}T00:00:00-04:00`,
     }).expect(409);
     expect(res.body).toMatchObject({
       code: 'MANUAL_EXCHANGE_RATE_TAKEN',
@@ -428,6 +434,9 @@ describe('Tasa de cambio por clínica (e2e, DX-374)', () => {
     await expect(rates(manual, TODAY)).resolves.toEqual({
       base: 'USD',
       source: 'MANUAL',
+      // DX-586: las manuales que rigen y la lista del día.
+      manualRates: expect.any(Array) as unknown,
+      manualDay: expect.any(Array) as unknown,
       rates: { VES: 40.12345678 },
       rateDate: TODAY,
     });

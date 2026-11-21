@@ -16,6 +16,7 @@ import { BCV_CURRENCIES } from '../../domain/bcv-rate';
 import { AMOUNT_NON_NEGATIVE_MESSAGE } from '../../../../shared/money/currency-messages';
 import {
   convertWithQuote,
+  quoteRef,
   type ExchangeRateQuote,
 } from '../../domain/exchange-rate-quote';
 
@@ -44,6 +45,11 @@ export interface QuoteInput {
   from: string;
   to: string;
   date: string;
+  /**
+   * DX-586: el instante para el que se cotiza (con tasa manual, la de mayor
+   * `effectiveFrom` ≤ él dentro del día). Por defecto, ahora.
+   */
+  asOf?: Date;
 }
 
 /** Lo que necesita quien convierte: `ConvertAmountUseCase` o su versión memoizada. */
@@ -113,17 +119,17 @@ export class ConvertAmountUseCase implements AmountConverter {
     ratesFor: RatesLookup,
   ): Promise<ExchangeRateQuote> {
     if (!isValidRateDate(input.date)) throw invalidRateDate();
-    const { from, to, date } = input;
+    const { from, to, date, asOf } = input;
     // DX-384: las dos monedas, para que con tasa manual la del día pueda ser
     // la última registrada dentro del plazo de la clínica.
     const currencies = [from, to];
-    let read = await ratesFor(date, { currencies });
+    let read = await ratesFor(date, { currencies, asOf });
     // DX-402: la tasa de respaldo solo vale si cubre las dos monedas; si no,
     // la cotización entera sale del camino automático (una sola fuente).
     const covered = (currency: string) =>
       currency === BASE_CURRENCY || read.rates[currency] !== undefined;
     if (read.backup && !(covered(from) && covered(to))) {
-      read = await ratesFor(date, { noBackup: true, currencies });
+      read = await ratesFor(date, { noBackup: true, currencies, asOf });
     }
     const { rates, source, backup, rateDate } = read;
     // DX-374: con tasa manual, una moneda ausente es la tasa que la clínica
@@ -145,6 +151,20 @@ export class ConvertAmountUseCase implements AmountConverter {
     };
     const fromPerBase = perBase(from);
     const toPerBase = perBase(to);
+    // DX-586: qué tasa exactamente (la referencia que congela el abono).
+    const bcvValueDate =
+      source === 'BCV' && read.bcv ? read.bcv.valueDate : null;
+    const usesBcv = (c: string) =>
+      bcvValueDate !== null && BCV_CURRENCIES.includes(c);
+    const manualIds = new Map(
+      (read.manualRates ?? []).map((m) => [m.currency, m.id]),
+    );
+    const ref = quoteRef(currencies, source, rateDate, (c) => {
+      if (usesBcv(c)) return `BCV:${bcvValueDate}`;
+      const manualId = manualIds.get(c);
+      if (manualId) return `MANUAL:${manualId}`;
+      return `AUTOMATIC:${rateDate}`;
+    });
     return {
       from,
       to,
@@ -153,6 +173,8 @@ export class ConvertAmountUseCase implements AmountConverter {
       source,
       fromPerBase,
       toPerBase,
+      ref,
+      valueDate: currencies.some(usesBcv) ? bcvValueDate : null,
       ...(backup ? { backup } : {}),
     };
   }

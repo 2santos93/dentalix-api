@@ -80,11 +80,18 @@ function toRateColumn(rate: number): number {
  * DX-375: la tasa que congela un abono de `currency` a `targetCurrency` el día
  * `paidOn`, con la fuente de la clínica del contexto. `null` si no hay que
  * congelar nada (misma moneda) o si no hay tasa ese día («sin tasa»);
- * cualquier otro fallo se propaga.
+ * cualquier otro fallo se propaga. DX-586: `asOf` es el instante del abono
+ * (con tasa manual, la de mayor `effectiveFrom` ≤ él de su día; por defecto
+ * ahora), y la tasa lleva su referencia y su fecha valor.
  */
 export async function freezePaymentRate(
   convert: AmountConverter,
-  payment: { currency: string; targetCurrency: string; paidOn: string },
+  payment: {
+    currency: string;
+    targetCurrency: string;
+    paidOn: string;
+    asOf?: Date;
+  },
 ): Promise<FrozenExchangeRate | null> {
   if (payment.currency === payment.targetCurrency) return null;
   try {
@@ -92,6 +99,7 @@ export async function freezePaymentRate(
       from: payment.currency,
       to: payment.targetCurrency,
       date: payment.paidOn,
+      ...(payment.asOf ? { asOf: payment.asOf } : {}),
     });
     // Lo que guardan las columnas (Decimal(18,8)): la base y el recibo, que
     // salen de esta tasa en memoria, dan la misma cifra que las lecturas
@@ -110,6 +118,9 @@ export async function freezePaymentRate(
       date: quote.rateDate,
       quotedOn: payment.paidOn,
       ...(quote.backup ? { backup: quote.backup } : {}),
+      ...(quote.ref
+        ? { ref: quote.ref, valueDate: quote.valueDate ?? null }
+        : {}),
     };
   } catch (error) {
     if (isNoRateError(error)) return null;

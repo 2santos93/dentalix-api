@@ -357,6 +357,9 @@ export const EXCHANGE_RATE_READ_ROLES: ClinicRole[] = [
   ClinicRole.RECEPTION,
 ];
 export const EXCHANGE_RATE_SETTINGS_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+// DX-586: «Actualizar tasa» del menú: quien cobra (los mismos roles que
+// registran abonos, PAYMENT_ROLES).
+export const EXCHANGE_RATE_REFRESH_ROLES: ClinicRole[] = PAYMENT_ROLES;
 // Importación de pacientes desde CSV/XLSX (DX-107) — todas las rutas
 // (plantilla, validar, confirmar, ver, informe, historial, deshacer): solo
 // gestión. Escribe miles de fichas de golpe y el informe lleva datos de

@@ -463,6 +463,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /exchange/convert': EVERY_ROLE,
   // DX-584: la tasa del menú, para cualquier miembro (todos cobran).
   'GET /exchange/header': EVERY_ROLE,
+  // DX-586: «Actualizar tasa», quien cobra (como registrar abonos).
+  'POST /exchange/refresh': orPermission(BILLING, 'PAYMENT_REGISTER'),
   'GET /exchange/settings': ADMIN_ONLY,
   'PUT /exchange/settings': ADMIN_ONLY,
   // DX-517: texto propio de cada moneda de la clínica, solo ADMIN.

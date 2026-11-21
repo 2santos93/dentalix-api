@@ -327,6 +327,9 @@ describe('Fuente BCV (DX-585, int)', () => {
         source: 'BCV',
         fromPerBase: 918.7662,
         toPerBase: 1,
+        // DX-586: la del viernes (su fecha valor), la que congela el abono.
+        ref: `BCV:${FRIDAY}`,
+        valueDate: FRIDAY,
       });
       // La columna de la tasa congelada admite la fuente nueva.
       const [{ ok }] = await raw.$queryRaw<{ ok: boolean }[]>`

@@ -14,4 +14,11 @@ export const BCV_RATE_PROVIDER = Symbol('BCV_RATE_PROVIDER');
  */
 export interface BcvRateProvider {
   fetchLatest(): Promise<BcvRateSnapshot>;
+  /**
+   * DX-586 (arranque en frío): solo el respaldo (dolarapi), que da la tasa
+   * vigente con su `fechaActualizacion`. Lo usa la consulta cuando la página
+   * oficial ya publica una fecha valor futura y no hay tasa guardada que
+   * cubra hoy. Opcional: sin él no hay arranque en frío.
+   */
+  fetchFallback?(): Promise<BcvRateSnapshot>;
 }
