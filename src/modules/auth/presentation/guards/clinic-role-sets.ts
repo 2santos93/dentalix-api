@@ -625,6 +625,8 @@ export const LAB_ORDER_CHECK_ROLES: ClinicRole[] = [
   ClinicRole.DENTIST,
   ClinicRole.ADMIN,
 ];
+/** DX-018-bis: el costo del laboratorio (dinero de la clínica): solo ADMIN. */
+export const LAB_ORDER_COST_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 export const LAB_ORDER_PRINT_ROLES: ClinicRole[] = [...CLINICAL_ROLES];
 
 // «Honorarios de odontólogos» (DX-018): datos financieros. ADMIN (con todas

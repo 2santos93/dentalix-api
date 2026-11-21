@@ -106,14 +106,22 @@ function wholeOrDefault(
   return Math.min(max, Math.max(min, value));
 }
 
-/** Color, material e instrucciones son datos de salud: recepción no los ve. */
+/**
+ * Color, material e instrucciones son datos de salud: recepción no los ve.
+ * DX-018-bis: el costo del laboratorio solo lo ve ADMIN (como el precio de
+ * referencia del servicio).
+ */
 export function redactForRole(
   view: LabOrderView,
   role: ClinicRole | null,
 ): LabOrderView {
-  if (role !== ClinicRole.RECEPTION) return view;
+  const costed =
+    role === ClinicRole.ADMIN || view.cost === null
+      ? view
+      : { ...view, cost: null };
+  if (role !== ClinicRole.RECEPTION) return costed;
   return {
-    ...view,
+    ...costed,
     shade: null,
     material: null,
     instructions: null,
@@ -285,7 +293,8 @@ export class LabOrderUseCases {
     await this.record(ctx, order.patientId, orderId, 'PRINT', {
       reason: 'DENTAL_LAB_ORDER_PRINTED',
     });
-    return { order, ...headers, printedAt: now };
+    // DX-018-bis: la prescripción va al laboratorio: sin el costo.
+    return { order: { ...order, cost: null }, ...headers, printedAt: now };
   }
 
   // -- Escrituras
@@ -447,6 +456,44 @@ export class LabOrderUseCases {
         ...dueOnChange(current.dueOn, write.dueOn),
       });
     }
+    return redactForRole(await this.view(orderId), ctx.actor.role);
+  }
+
+  /**
+   * DX-018-bis: el costo del trabajo (lo que cobra el laboratorio), solo
+   * ADMIN (la ruta). En cualquier estado salvo anulada: el laboratorio suele
+   * facturar al entregar. `null` lo quita. Auditado con el importe y la
+   * moneda antes y después (configuración económica, no dato de salud).
+   */
+  async setCost(
+    orderId: string,
+    input: { cost: string | null; currency: string | null },
+    ctx: AuditRequestContext,
+  ): Promise<LabOrderView> {
+    const current = await this.writable(orderId);
+    if (current.cancelledAt !== null) {
+      throw new ConflictException(LAB_MESSAGES.costCancelled);
+    }
+    const cost = input.cost === null ? null : normalizedCost(input.cost);
+    const currency =
+      input.currency === null ? null : input.currency.trim().toUpperCase();
+    if ((cost === null) !== (currency === null)) {
+      throw new BadRequestException(LAB_MESSAGES.costPair);
+    }
+    if (cost === current.cost && currency === current.costCurrency) {
+      throw new BadRequestException(LAB_MESSAGES.costUnchanged);
+    }
+    await this.write(current, { cost, costCurrency: currency });
+    await this.record(ctx, current.patientId, orderId, 'UPDATE', {
+      reason: 'DENTAL_LAB_ORDER_COST_UPDATED',
+      changedFields: ['cost'],
+      // DX-360: antes y después como valores de configuración (importe en
+      // texto y moneda); nunca datos clínicos.
+      configChange: {
+        before: { cost: current.cost, costCurrency: current.costCurrency },
+        after: { cost, costCurrency: currency },
+      },
+    });
     return redactForRole(await this.view(orderId), ctx.actor.role);
   }
 
@@ -762,6 +809,12 @@ function changedOf(current: LabOrderRecord, write: LabOrderWrite): string[] {
       write[k] !== undefined &&
       JSON.stringify(write[k]) !== JSON.stringify(current[k]),
   );
+}
+
+/** '180' → '180.00' (la DTO ya validó ≥ 0 con hasta 2 decimales). */
+function normalizedCost(value: string): string {
+  const [whole, fraction = ''] = value.trim().split('.');
+  return `${whole.replace(/^0+(?=\d)/, '')}.${fraction.padEnd(2, '0')}`;
 }
 
 function dueOnChange(

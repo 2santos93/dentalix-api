@@ -35,6 +35,7 @@ const medium = (
   requiresReference: false,
   proofPolicy: 'NONE',
   allowInPaymentLink: false,
+  gatewayFeePercent: null,
   legacyMethod: 'CASH',
   adjustments: [],
   createdAt: new Date(0),

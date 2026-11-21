@@ -175,6 +175,7 @@ function accrual(
   amount: number,
 ): CommissionLineDraft {
   const at = new Date(`${addCivilDays(PERIOD.from, 2)}T15:00:00.000Z`);
+  const base = Math.round((amount / 0.35) * 100) / 100;
   return {
     kind: 'ACCRUAL',
     adjustsLineId: null,
@@ -193,9 +194,14 @@ function accrual(
     paymentCurrency: null,
     releasedAt: at,
     currency,
-    base: Math.round((amount / 0.35) * 100) / 100,
+    base,
     percent: 35,
     amount,
+    grossBase: base,
+    labCostDeducted: 0,
+    cardFeePercent: null,
+    cardFeeDeducted: 0,
+    labCostSkippedCurrencies: [],
   };
 }
 

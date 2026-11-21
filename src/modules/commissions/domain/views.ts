@@ -53,6 +53,20 @@ export interface CommissionRulesView {
   deductionsAvailable: DeductionsAvailability;
 }
 
+/**
+ * DX-018-bis: los descuentos de una línea: base = grossBase − labCost −
+ * cardFee. Sin descuentos (o en las líneas anteriores), grossBase = base.
+ */
+export interface CommissionLineDeductionsView {
+  grossBase: number;
+  labCost: number;
+  /** El % de la pasarela aplicado; null si no se descontó. */
+  cardFeePercent: number | null;
+  cardFee: number;
+  /** Costos de laboratorio en otra moneda que la del plan: no se convierten ni se descuentan. */
+  labCostSkippedCurrencies: string[];
+}
+
 /** Una línea de la liquidación (vista previa o congelada). */
 export interface CommissionLineView {
   /** null en la vista previa (aún no existe). */
@@ -82,6 +96,7 @@ export interface CommissionLineView {
   base: number;
   percent: number;
   amount: number;
+  deductions: CommissionLineDeductionsView;
   /** DX-464: el pago (vivo) de la liquidación que cubre la línea; null en la vista previa o pendiente. */
   paidInPaymentId: string | null;
 }
@@ -109,6 +124,9 @@ export interface CommissionSettlementSummary {
   basis: CommissionBasis;
   releaseMode: CommissionReleaseMode;
   percent: number;
+  /** DX-018-bis: los descuentos de la regla al cerrar. */
+  deductLabCost: boolean;
+  deductCardFee: boolean;
   closedAt: Date;
   closedBy: { userId: string; name: string | null };
   lockDateBefore: string | null;
