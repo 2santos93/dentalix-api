@@ -673,6 +673,10 @@ export const AUDIT_ORIGINS = [
   'PUBLIC_LINK',
   // DX-016: la página pública de reserva online (sin sesión).
   'ONLINE_BOOKING',
+  // DX-265: «Ya llegué» del paciente desde el enlace de su cita o con el QR
+  // de la sede.
+  'PATIENT_LINK',
+  'SEDE_QR',
 ] as const;
 export type AuditOrigin = (typeof AUDIT_ORIGINS)[number];
 

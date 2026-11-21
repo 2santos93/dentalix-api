@@ -4,7 +4,12 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { AppointmentStatus, ClinicRole, TriageFlag } from '@prisma/client';
+import {
+  AppointmentArrivalSource,
+  AppointmentStatus,
+  ClinicRole,
+  TriageFlag,
+} from '@prisma/client';
 import { APPOINTMENT_REPOSITORY } from '../../domain/ports/appointment-repository.port';
 import type {
   AppointmentRepository,
@@ -64,6 +69,11 @@ export interface InClinicItem {
   readyForCheckoutAt: Date | null;
   /** DX-588: turno del día en la sede (al marcar «Llegó»). */
   turnNumber: number | null;
+  /**
+   * DX-265: la llegada la marcó el paciente («Ya llegué»: enlace de la cita
+   * o QR de la sede); null = el personal.
+   */
+  arrivalSource: AppointmentArrivalSource | null;
   /** Minutos en el grupo actual: esperando, en el sillón o por cobrar. */
   minutesInStatus: number;
   /** Minutos que esperó (o lleva esperando) desde la llegada hasta el sillón. */
@@ -132,6 +142,7 @@ function toItem(
     seatedAt: a.seatedAt,
     readyForCheckoutAt: a.readyForCheckoutAt,
     turnNumber: a.turnNumber,
+    arrivalSource: a.arrivalSource,
     minutesInStatus: minutesSince(enteredAt(a), now),
     waitedMinutes: minutesSince(arrived, a.seatedAt ?? now),
     punctuality: arrivalPunctuality(a.start, arrived),

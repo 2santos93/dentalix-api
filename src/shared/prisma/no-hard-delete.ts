@@ -32,6 +32,11 @@ const HARD_DELETE_ALLOWLIST: ReadonlySet<string> = new Set<string>([
   // compuesto). Editar la plantilla las sustituye en la misma transacción y
   // el cambio queda en audit_events.
   'clinicalNoteTemplatePrompt',
+  // DX-265: contador de fallos de identificación con el QR de llegada de una
+  // sede (por SHA-256 de sede + IP, sin datos de pacientes ni la IP). Un
+  // acierto borra la fila de su cliente: dato efímero, sin nada que lo
+  // referencie (la migración solo concede DELETE en esta tabla).
+  'locationCheckInAttempt',
   // DX-559: las líneas de una plantilla de plan son configuración, sin datos
   // de pacientes y sin nada que las referencie (el plan guarda sus propios
   // ítems, que no apuntan a la plantilla). Editar la plantilla las sustituye

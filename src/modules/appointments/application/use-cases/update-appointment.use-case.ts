@@ -11,8 +11,15 @@ import {
   SCHEDULE_BLOCKED_RACE_MESSAGE,
   ScheduleBlockedRaceError,
 } from '../../../schedule-blocks/domain/schedule-block-rules';
-import { AppointmentStatus, CancellationReasonCode } from '@prisma/client';
-import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import {
+  AppointmentArrivalSource,
+  AppointmentStatus,
+  CancellationReasonCode,
+} from '@prisma/client';
+import type {
+  AuditRequestContext,
+  AuditRequestMeta,
+} from '../../../audit/domain/audit-request-context';
 import { APPOINTMENT_REPOSITORY } from '../../domain/ports/appointment-repository.port';
 import type {
   AppointmentRepository,
@@ -103,6 +110,7 @@ export type UpdateAppointmentInput = Omit<
   | 'seatedAt'
   | 'readyForCheckoutAt'
   | 'preArrivalStatus'
+  | 'arrivalSource'
   | 'expectStatus'
   | 'completedExit'
   | 'audit'
@@ -204,6 +212,19 @@ const WAITLIST_STATUSES: ReadonlySet<AppointmentStatus> = new Set([
  */
 export type AppointmentAuditContext = AuditRequestContext;
 
+/**
+ * DX-265: el propio paciente marca «Ya llegué» (sin usuario ni rol): desde el
+ * enlace de su cita o con el QR de la sede, con los datos de la petición
+ * pública para la auditoría. El tenant sale del host.
+ */
+export interface SelfCheckInContext {
+  source: AppointmentArrivalSource;
+  request: AuditRequestMeta | null;
+}
+
+/** DX-265: `reason` del evento de auditoría de la llegada marcada por el paciente. */
+export const SELF_CHECK_IN_AUDIT_REASON = 'PATIENT_SELF_CHECK_IN';
+
 @Injectable()
 export class UpdateAppointmentUseCase {
   constructor(
@@ -243,6 +264,30 @@ export class UpdateAppointmentUseCase {
     auditContext?: AppointmentAuditContext,
   ): Promise<AppointmentWriteResult> {
     return this.apply(id, patch, auditContext, false);
+  }
+
+  /**
+   * DX-265 «Ya llegué»: el paciente marca su llegada (enlace de la cita o QR
+   * de la sede). El MISMO camino que «Llegó» de recepción — la máquina del
+   * flujo (desde agendada o confirmada y el día de la cita en la zona de su
+   * sede), el cambio condicionado al estado leído, el turno del día de la
+   * sede en la misma transacción y la limpieza de «confirmación pendiente» —
+   * salvo el rol (no hay usuario) y el origen, que queda en la cita
+   * (`arrivalSource`) y en el evento de auditoría (actor paciente, origen
+   * PATIENT_LINK o SEDE_QR, reason PATIENT_SELF_CHECK_IN). La ventana de la
+   * sede la mira quien llama.
+   */
+  async arriveByPatient(
+    id: string,
+    selfCheckIn: SelfCheckInContext,
+  ): Promise<AppointmentWriteResult> {
+    return this.apply(
+      id,
+      { status: AppointmentStatus.ARRIVED },
+      undefined,
+      false,
+      selfCheckIn,
+    );
   }
 
   /**
@@ -435,6 +480,7 @@ export class UpdateAppointmentUseCase {
     input: UpdateAppointmentInput,
     auditContext: AppointmentAuditContext | undefined,
     fromOpening: boolean,
+    selfCheckIn?: SelfCheckInContext,
   ): Promise<AppointmentWriteResult> {
     const {
       statusReason,
@@ -508,7 +554,13 @@ export class UpdateAppointmentUseCase {
       (isInClinic(existing.status) || isInClinic(nextStatus));
     const flowPatch =
       nextStatus !== null
-        ? await this.checkFlow(existing, nextStatus, auditContext, statusReason)
+        ? await this.checkFlow(
+            existing,
+            nextStatus,
+            auditContext,
+            statusReason,
+            selfCheckIn,
+          )
         : {};
     // DX-279: cancelar exige origen y motivo; salir de CANCELLED o NO_SHOW
     // borra sus datos (coherente con la CHECK de la tabla).
@@ -735,6 +787,9 @@ export class UpdateAppointmentUseCase {
         auditContext,
       );
     }
+    if (flowChange && selfCheckIn) {
+      await this.recordSelfCheckIn(updated, existing.status, selfCheckIn);
+    }
     // El movimiento a un hueco ya deja su evento (la marca se apaga con él).
     if (changesWantsEarlier && !fromOpening && auditContext) {
       await this.recordWantsEarlier(updated, auditContext);
@@ -873,6 +928,7 @@ export class UpdateAppointmentUseCase {
     to: AppointmentStatus,
     auditContext: AppointmentAuditContext | undefined,
     statusReason?: string | null,
+    selfCheckIn?: SelfCheckInContext,
   ): Promise<Partial<UpdateAppointmentRepoInput>> {
     const from = existing.status;
     const isToday =
@@ -885,6 +941,9 @@ export class UpdateAppointmentUseCase {
       arrived: existing.arrivedAt !== null,
       statusReason,
       ownAppointment: existing.providerId === auditContext?.actor.userId,
+      // DX-265: solo la llegada admite al paciente sin rol.
+      selfCheckIn:
+        selfCheckIn !== undefined && to === AppointmentStatus.ARRIVED,
     });
     if (!verdict.ok) {
       if (verdict.kind === 'FORBIDDEN')
@@ -920,6 +979,10 @@ export class UpdateAppointmentUseCase {
       ...(isInClinic(to) ? { [FLOW_TIMESTAMP_FIELD[to]]: now } : {}),
       // La vuelta de «Deshacer llegada» solo existe mientras está en espera.
       preArrivalStatus: to === AppointmentStatus.ARRIVED ? from : null,
+      // DX-265: quién marcó la llegada (null = el personal).
+      ...(to === AppointmentStatus.ARRIVED
+        ? { arrivalSource: selfCheckIn?.source ?? null }
+        : {}),
     };
   }
 
@@ -1045,6 +1108,36 @@ export class UpdateAppointmentUseCase {
         // B2 (DX-279): la salida del flujo a «Cancelada» lleva aquí su
         // cancelación, sin un segundo evento.
         ...cancellationAuditMetadata(appointment),
+      },
+    });
+  }
+
+  /**
+   * DX-265: `audit_event` de la llegada marcada por el paciente: UPDATE de la
+   * cita sin usuario (el paciente), con el origen y el cambio de estado. Ni
+   * el token, ni el documento, ni la fecha de nacimiento. La sede es la de la
+   * cita; la IP la trunca el escritor único.
+   */
+  private recordSelfCheckIn(
+    appointment: Appointment,
+    from: AppointmentStatus,
+    ctx: SelfCheckInContext,
+  ): Promise<void> {
+    return this.audit.record({
+      tenantId: appointment.tenantId,
+      locationId: appointment.locationId,
+      actor: { kind: 'patient' },
+      action: 'UPDATE',
+      resourceType: 'APPOINTMENT',
+      resourceId: appointment.id,
+      patient: { kind: 'patient', id: appointment.patientId },
+      requestId: ctx.request?.requestId ?? null,
+      ip: ctx.request?.ip ?? null,
+      userAgent: ctx.request?.userAgent ?? null,
+      metadata: {
+        origin: ctx.source,
+        reason: SELF_CHECK_IN_AUDIT_REASON,
+        status: { from, to: appointment.status },
       },
     });
   }

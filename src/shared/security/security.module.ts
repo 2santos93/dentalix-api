@@ -147,6 +147,8 @@ function throttlers(
     },
     // DX-588: el tablero de la pantalla de sala de espera, por IP y por token.
     strict('waiting-room'),
+    // DX-265: el QR de llegada de la sede, por IP.
+    strict('check-in'),
     {
       ...strict('waiting-room-token'),
       generateKey: (context, _ip, name) =>

@@ -58,6 +58,7 @@ const LOW_LIMITS: RateLimitConfig = {
   'bank-statement': { limit: 2, ttlMs: 60_000 },
   'waiting-room': { limit: 4, ttlMs: 60_000 },
   'waiting-room-token': { limit: 2, ttlMs: 60_000 },
+  'check-in': { limit: 3, ttlMs: 60_000 },
 };
 
 // JWT con `sub` pero sin firma válida: JwtAuthGuard lo rechaza (401), pero el
@@ -281,6 +282,23 @@ describe('Rate limiting (e2e)', () => {
       // …pero otro token (misma IP) sigue pasando hasta el tope por IP (4).
       expect((await view('X'.repeat(43))).status).not.toBe(429);
       expectTooMany(await view('Y'.repeat(43)));
+    });
+
+    it('public/check-in/:token (DX-265): 429 por IP, un balde por ruta', async () => {
+      const identify = (token: string) =>
+        request(app.getHttpServer())
+          .post(`/api/v1/public/check-in/${token}`)
+          .send({ documentNumber: 'V-12345678', birthDate: '1990-01-01' });
+      // Por IP: 3 y la cuarta es 429, cambie o no el token…
+      for (let i = 0; i < LOW_LIMITS['check-in'].limit; i++) {
+        expect((await identify(`${'C'.repeat(42)}${i}`)).status).not.toBe(429);
+      }
+      expectTooMany(await identify('D'.repeat(43)));
+      // …y ver la sede del QR tiene su propio balde.
+      const view = await request(app.getHttpServer()).get(
+        `/api/v1/public/check-in/${'D'.repeat(43)}`,
+      );
+      expect(view.status).not.toBe(429);
     });
 
     it('public/patient-access/:token/verify (DX-101): 429 por token y por IP (balde por ruta)', async () => {

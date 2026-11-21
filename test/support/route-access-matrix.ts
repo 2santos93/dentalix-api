@@ -202,6 +202,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // DX-464: el enlace de conformidad del profesional (recibo de honorarios).
   // DX-588: el tablero del televisor de la sala de espera.
   'GET /public/waiting-room/:token': PUBLIC_TENANT,
+  // DX-265: «Ya llegué» desde el enlace de la cita y con el QR de la sede.
+  'GET /public/appointment-confirmations/:token/arrival': PUBLIC_TENANT,
+  'POST /public/appointment-confirmations/:token/arrival': PUBLIC_TENANT,
+  'GET /public/check-in/:token': PUBLIC_TENANT,
+  'POST /public/check-in/:token': PUBLIC_TENANT,
   'GET /public/commission-receipts/:token': PUBLIC_TENANT,
   'POST /public/commission-receipts/:token/opened': PUBLIC_TENANT,
   'POST /public/commission-receipts/:token/sign': PUBLIC_TENANT,
@@ -881,6 +886,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /waiting-room-screens': ADMIN_ONLY,
   'PATCH /waiting-room-screens/:id': ADMIN_ONLY,
   'POST /waiting-room-screens/:id/revoke': ADMIN_ONLY,
+  // DX-265: Ajustes › Llegada de pacientes.
+  'GET /locations/:locationId/check-in-settings': ADMIN_ONLY,
+  'PATCH /locations/:locationId/check-in-settings': ADMIN_ONLY,
+  'POST /locations/:locationId/check-in-settings/qr': ADMIN_ONLY,
+  'POST /locations/:locationId/check-in-settings/qr/revoke': ADMIN_ONLY,
   // DX-542: equipos biomédicos por sede y su hoja de vida, solo ADMIN.
   'GET /equipment': ADMIN_ONLY,
   'POST /equipment': ADMIN_ONLY,

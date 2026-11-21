@@ -59,6 +59,17 @@ import {
   type MedicalAlertFlags,
 } from '../../medical-history/domain/medical-alert-flags';
 import { OpeningsDto, OpeningsQueryDto } from './dto/openings.dto';
+import { CheckInPendingService } from '../../self-check-in/application/check-in-pending.service';
+import {
+  CHECK_IN_REPOSITORY,
+  type CheckInRepository,
+} from '../../self-check-in/domain/ports/check-in-repository.port';
+import {
+  DEFAULT_CHECK_IN_SETTINGS,
+  isLateArrival,
+  orderPending,
+  type CheckInPending,
+} from '../../self-check-in/domain/check-in-rules';
 import { InClinicQueryDto, InClinicViewDto } from './dto/in-clinic.dto';
 import {
   NO_ORTHO_BALANCE,
@@ -170,6 +181,10 @@ export class AppointmentsController {
     private readonly reservedOverrides: ReservedOverrideRepository,
     // DX-470: «Atender sin cita».
     private readonly createWalkIn: CreateWalkInUseCase,
+    // DX-265: pendientes de quien llegó por su cuenta.
+    private readonly checkInPendingItems: CheckInPendingService,
+    @Inject(CHECK_IN_REPOSITORY)
+    private readonly checkInSettings: CheckInRepository,
   ) {}
 
   /** Quién escribe, para los `audit_event` de los casos de uso (DX-121/122). */
@@ -488,6 +503,7 @@ export class AppointmentsController {
       InClinicItem & {
         medicalAlerts: MedicalAlertFlags;
         orthoBalance: OrthoBalanceFlag;
+        checkInPending: CheckInPending[];
       }
     >
   > {
@@ -510,11 +526,14 @@ export class AppointmentsController {
     });
     // DX-285: la misma marca de ortodoncia que la tarjeta de la agenda.
     const ortho = await this.orthoBalanceFlags.forPatients(panelPatients);
+    // DX-265: los pendientes de quien llegó por su cuenta y sigue esperando.
+    const checkInPending = await this.selfCheckInPending(view);
     const withAlerts = (items: InClinicItem[]) =>
       items.map((i) => ({
         ...i,
         medicalAlerts: medical.get(i.patientId) ?? NO_ANAMNESIS_FLAGS,
         orthoBalance: ortho.get(i.patientId) ?? NO_ORTHO_BALANCE,
+        checkInPending: checkInPending.get(i.appointmentId) ?? [],
       }));
     return {
       ...view,
@@ -522,6 +541,38 @@ export class AppointmentsController {
       inChair: withAlerts(view.inChair),
       readyForCheckout: withAlerts(view.readyForCheckout),
     };
+  }
+
+  /**
+   * DX-265: qué tiene pendiente cada paciente que marcó «Ya llegué» y sigue en
+   * la sala de espera (anamnesis, consentimiento, datos y retraso), por cita.
+   * Lo mismo que mandó a la página a «Pase por recepción». Sin llegadas del
+   * paciente, ninguna consulta.
+   */
+  private async selfCheckInPending(
+    view: InClinicView,
+  ): Promise<Map<string, CheckInPending[]>> {
+    const out = new Map<string, CheckInPending[]>();
+    const selfArrived = view.waiting.filter((i) => i.arrivalSource !== null);
+    if (selfArrived.length === 0) return out;
+    const [pending, settings] = await Promise.all([
+      this.checkInPendingItems.forPatients(
+        selfArrived.map((i) => i.patientId),
+        { date: view.date, timeZone: view.timeZone },
+        view.now,
+      ),
+      this.checkInSettings.findSettings(view.locationId),
+    ]);
+    const lateMinutes =
+      settings?.lateMinutes ?? DEFAULT_CHECK_IN_SETTINGS.lateMinutes;
+    for (const i of selfArrived) {
+      const items: CheckInPending[] = [...(pending.get(i.patientId) ?? [])];
+      if (i.arrivedAt && isLateArrival(i.start, i.arrivedAt, lateMinutes)) {
+        items.push('LATE');
+      }
+      out.set(i.appointmentId, orderPending(items));
+    }
+    return out;
   }
 
   @Get(':id/cancellation-preview')
