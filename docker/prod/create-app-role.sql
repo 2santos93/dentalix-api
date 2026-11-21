@@ -212,7 +212,8 @@ BEGIN
     'post_op_checks',
     'location_quote_follow_up_settings', 'location_recall_settings', 'session_alerts',
     'leads', 'lead_reasons',
-    'bank_accounts', 'bank_reconciliation_matches'
+    'bank_accounts', 'bank_reconciliation_matches',
+    'waiting_room_screens', 'location_turn_counters'
   ] LOOP
     IF pg_catalog.to_regclass('public.' || t) IS NOT NULL THEN
       EXECUTE pg_catalog.format('REVOKE DELETE, TRUNCATE ON TABLE public.%I FROM dentalix_app', t);

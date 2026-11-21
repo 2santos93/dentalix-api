@@ -482,6 +482,7 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
       .map((r) => ({
         ...this.toEntity(r),
         providerName: this.providerNames.get(r.providerId) ?? null,
+        turnNumber: null,
         urgent:
           r.appointmentTypeId !== null &&
           this.urgentTypeIds.has(r.appointmentTypeId),

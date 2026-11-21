@@ -200,6 +200,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /public/patient-access/me/plans/:planId/accept': PUBLIC_TENANT,
   'POST /public/patient-access/me/logout': PUBLIC_TENANT,
   // DX-464: el enlace de conformidad del profesional (recibo de honorarios).
+  // DX-588: el tablero del televisor de la sala de espera.
+  'GET /public/waiting-room/:token': PUBLIC_TENANT,
   'GET /public/commission-receipts/:token': PUBLIC_TENANT,
   'POST /public/commission-receipts/:token/opened': PUBLIC_TENANT,
   'POST /public/commission-receipts/:token/sign': PUBLIC_TENANT,
@@ -870,6 +872,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'GET /chairs/:id/upcoming-appointments': ADMIN_ONLY,
   'POST /chairs/:id/deactivate': ADMIN_ONLY,
   'POST /chairs/:id/reactivate': ADMIN_ONLY,
+  // DX-588: pantallas de sala de espera por sede, solo ADMIN.
+  'GET /waiting-room-screens': ADMIN_ONLY,
+  'POST /waiting-room-screens': ADMIN_ONLY,
+  'PATCH /waiting-room-screens/:id': ADMIN_ONLY,
+  'POST /waiting-room-screens/:id/revoke': ADMIN_ONLY,
   // DX-542: equipos biomédicos por sede y su hoja de vida, solo ADMIN.
   'GET /equipment': ADMIN_ONLY,
   'POST /equipment': ADMIN_ONLY,

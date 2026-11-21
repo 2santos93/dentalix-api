@@ -145,6 +145,16 @@ function throttlers(
           request(context).params?.token,
         ),
     },
+    // DX-588: el tablero de la pantalla de sala de espera, por IP y por token.
+    strict('waiting-room'),
+    {
+      ...strict('waiting-room-token'),
+      generateKey: (context, _ip, name) =>
+        publicTokenRateLimitKey(
+          routePrefix(context, name),
+          request(context).params?.token,
+        ),
+    },
     // DX-101: el portal del paciente (verificar la fecha y sus datos), por IP
     // y, la verificación, por token.
     strict('patient-access'),

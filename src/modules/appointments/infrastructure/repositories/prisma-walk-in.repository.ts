@@ -27,6 +27,7 @@ import {
   INCLUDE_PATIENT_NAME,
   mapToEntity,
 } from './prisma-appointment.repository';
+import { assignTurnNumber } from '../turn-numbers';
 
 /** Códigos de auditoría de «Atender sin cita» (DX-470). */
 export const WALK_IN_AUDIT_REASONS = {
@@ -189,6 +190,9 @@ export class PrismaWalkInRepository implements WalkInRepository {
         },
         include: INCLUDE_PATIENT_NAME,
       });
+
+      // DX-588: llega ya en «Llegó»: su turno del día en la sede.
+      await assignTurnNumber(tx, tenantId, appointment.id);
 
       // DX-556: un prospecto convertido que llega sin cita: «Cita agendada»
       // (y «Asistió» al completarla, como cualquier cita).

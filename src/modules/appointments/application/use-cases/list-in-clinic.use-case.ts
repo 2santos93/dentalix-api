@@ -62,6 +62,8 @@ export interface InClinicItem {
   arrivedAt: Date | null;
   seatedAt: Date | null;
   readyForCheckoutAt: Date | null;
+  /** DX-588: turno del día en la sede (al marcar «Llegó»). */
+  turnNumber: number | null;
   /** Minutos en el grupo actual: esperando, en el sillón o por cobrar. */
   minutesInStatus: number;
   /** Minutos que esperó (o lleva esperando) desde la llegada hasta el sillón. */
@@ -129,6 +131,7 @@ function toItem(
     arrivedAt: a.arrivedAt,
     seatedAt: a.seatedAt,
     readyForCheckoutAt: a.readyForCheckoutAt,
+    turnNumber: a.turnNumber,
     minutesInStatus: minutesSince(enteredAt(a), now),
     waitedMinutes: minutesSince(arrived, a.seatedAt ?? now),
     punctuality: arrivalPunctuality(a.start, arrived),

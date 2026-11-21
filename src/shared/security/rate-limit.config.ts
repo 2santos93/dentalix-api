@@ -140,6 +140,15 @@
  *                  usuario y con UN balde para las tres rutas, como
  *                  patient-import (SEC-046). El tope de lecturas a la vez es
  *                  el mismo de las importaciones (`ImportReadSlotInterceptor`).
+ * - waiting-room:  el tablero público de la pantalla de sala de espera
+ *                  (DX-588, `GET /public/waiting-room/:token`), por IP. Cada
+ *                  televisor sondea cada ~8 s (7,5/min); 120/min deja hasta
+ *                  ~15 pantallas tras el NAT de una clínica y frena el barrido
+ *                  de tokens. Variables: RATE_LIMIT_WAITING_ROOM_*.
+ * - waiting-room-token: la misma ruta, por TOKEN (hash, sin IP), como
+ *                  payment-link-token: 30/min es 4 veces el sondeo de una
+ *                  pantalla (deja reintentos y una pestaña de más), y una
+ *                  pantalla filtrada no admite ráfagas aunque cambie de IP.
  */
 export type RateLimitPolicy =
   | 'auth'
@@ -177,7 +186,9 @@ export type RateLimitPolicy =
   | 'online-booking-write'
   | 'appointment-series'
   | 'recall-batch'
-  | 'bank-statement';
+  | 'bank-statement'
+  | 'waiting-room'
+  | 'waiting-room-token';
 
 export interface RateLimitRule {
   limit: number;
@@ -228,6 +239,8 @@ export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   'appointment-series': { limit: 30, ttlMs: MINUTE },
   'recall-batch': { limit: 30, ttlMs: MINUTE },
   'bank-statement': { limit: 10, ttlMs: MINUTE },
+  'waiting-room': { limit: 120, ttlMs: MINUTE },
+  'waiting-room-token': { limit: 30, ttlMs: MINUTE },
 };
 
 type EnvReader = (key: string) => string | undefined;
@@ -291,5 +304,7 @@ export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
     'appointment-series': rule('appointment-series'),
     'recall-batch': rule('recall-batch'),
     'bank-statement': rule('bank-statement'),
+    'waiting-room': rule('waiting-room'),
+    'waiting-room-token': rule('waiting-room-token'),
   };
 }

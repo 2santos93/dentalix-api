@@ -17,6 +17,7 @@ import {
   recoverReservationsInTx,
   replaceAppointmentPlanItems,
 } from '../appointment-plan-items';
+import { assignTurnNumber } from '../turn-numbers';
 import {
   planItemsClosedMessage,
   planItemsEditable,
@@ -588,6 +589,8 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
         : {}),
       ...(cancel ? await this.cancellationData(tx, id, cancel) : {}),
       ...(clearCancellation ? CLEARED_CANCELLATION : {}),
+      // DX-588: sin llegada no hay turno (vuelve a agendada o confirmada).
+      ...(rest.arrivedAt === null ? { turnNumber: null } : {}),
     };
     // DX-273 (revisión I1): lo que esta cita reserva ANTES del cambio; si
     // deja de reservarlo, una cita en la clínica puede recuperarlo.
@@ -642,6 +645,14 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
       });
       if (count === 0) {
         throw new ConflictException(PATIENT_FLOW_MESSAGES.stale);
+      }
+      // DX-588: al ENTRAR en «Llegó», el turno del día de la sede, en esta
+      // misma transacción (si algo falla después, el contador no sube).
+      if (
+        rest.status === AppointmentStatus.ARRIVED &&
+        rest.arrivedAt instanceof Date
+      ) {
+        await assignTurnNumber(tx, this.requireTenantId(), id);
       }
     }
     // DX-210: «Asignar» un hueco a una cita marcada. El UPDATE condicional
@@ -992,6 +1003,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
            SET "status" = "preArrivalStatus",
                "preArrivalStatus" = NULL,
                "arrivedAt" = NULL,
+               "turnNumber" = NULL,
                "overbooked" = ${overbooked},
                "updatedAt" = timezone('UTC', now())
          WHERE "id" = ${id}::uuid
@@ -1053,6 +1065,7 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
           appointmentType,
         }),
         providerName: names.get(a.providerId) ?? null,
+        turnNumber: a.turnNumber,
         urgent: appointmentType?.isUrgent ?? false,
       }));
     });
