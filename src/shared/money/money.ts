@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 /**
  * Dinero en la API (DX-054): los importes son `Decimal(14,2)` y se suman en
  * CENTAVOS enteros para que 0.1 + 0.2 sea 0.3. Es la ÚNICA definición del
@@ -39,6 +40,19 @@ export function roundCents(cents: number): number {
  */
 export function amountText(amount: number, digits: number): string {
   return amount.toFixed(digits);
+}
+
+/**
+ * DX-053: como `amountText` pero EXACTO, para un importe que llega como texto
+ * de NUMERIC (la exportación de la clínica): nunca pasa por coma flotante.
+ */
+export function decimalAmountText(amount: string, digits: number): string {
+  return new Prisma.Decimal(amount).toFixed(digits);
+}
+
+/** ¿El texto de NUMERIC es un entero (sin céntimos)? */
+export function isWholeDecimal(amount: string): boolean {
+  return new Prisma.Decimal(amount).isInteger();
 }
 
 /**

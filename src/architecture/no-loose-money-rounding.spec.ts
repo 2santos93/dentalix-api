@@ -38,6 +38,11 @@ export interface Allowed {
 }
 
 export const ALLOWED: readonly Allowed[] = [
+  {
+    file: 'src/modules/clinic-exports/domain/clinic-export.ts',
+    text: "value.toFixed(1).replace('.', ',')",
+    reason: 'DX-053: tamaño del ZIP en KB/MB/GB, no un importe',
+  },
   // Porcentajes y variaciones
   {
     file: 'src/modules/discounts/domain/discount-policy.ts',

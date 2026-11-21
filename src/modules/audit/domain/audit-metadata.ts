@@ -30,6 +30,11 @@ export interface AuditMetadata {
    */
   failedAttempts?: number;
   /**
+   * DX-053: exportación de los datos de la clínica (pedirla o descargarla):
+   * solo recuentos del ZIP (bytes, ficheros y filas), nunca su contenido.
+   */
+  clinicExport?: AuditClinicExport;
+  /**
    * DX-121: cita movida — hora y profesional antes y después. Solo instantes
    * ISO y uuids: ni paciente, ni motivo, ni notas.
    */
@@ -1820,6 +1825,29 @@ function messageTemplate(value: unknown): AuditMessageTemplate | null {
   return { key, channel, language, ...(draft !== undefined ? { draft } : {}) };
 }
 
+export interface AuditClinicExport {
+  sizeBytes: number;
+  fileCount: number;
+  totalRows: number;
+}
+
+function clinicExportCounts(input: unknown): AuditClinicExport | null {
+  if (!isRecord(input)) return null;
+  const counts = [input.sizeBytes, input.fileCount, input.totalRows];
+  if (
+    !counts.every(
+      (n) => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0,
+    )
+  ) {
+    return null;
+  }
+  return {
+    sizeBytes: input.sizeBytes as number,
+    fileCount: input.fileCount as number,
+    totalRows: input.totalRows as number,
+  };
+}
+
 export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   if (!isRecord(input)) return {};
   const out: AuditMetadata = {};
@@ -1845,6 +1873,8 @@ export function sanitizeAuditMetadata(input: unknown): AuditMetadata {
   ) {
     out.failedAttempts = input.failedAttempts;
   }
+  const exported = clinicExportCounts(input.clinicExport);
+  if (exported) out.clinicExport = exported;
   const move = appointmentMove(input.move);
   if (move) out.move = move;
   const status = statusChange(input.status);

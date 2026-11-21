@@ -44,6 +44,7 @@ const TEMPLATE_TO_DB: Record<EmailTemplateName, EmailTemplate> = {
   'online-booking-code': EmailTemplate.ONLINE_BOOKING_CODE,
   'online-booking-received': EmailTemplate.ONLINE_BOOKING_RECEIVED,
   'appointment-series': EmailTemplate.APPOINTMENT_SERIES,
+  'clinic-export-ready': EmailTemplate.CLINIC_EXPORT_READY,
   'mfa-notice': EmailTemplate.MFA_NOTICE,
   'mfa-enrollment-code': EmailTemplate.MFA_ENROLLMENT_CODE,
 };
