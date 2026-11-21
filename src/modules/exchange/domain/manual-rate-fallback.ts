@@ -27,6 +27,36 @@ export interface ManualRateRow {
   date: string;
   currency: string;
   rate: number;
+  /** DX-586: id de la tasa (`manual_exchange_rates.id`), su referencia. */
+  id?: string;
+  /**
+   * DX-586: desde qué instante rige. Con varias del mismo día y moneda, vale
+   * la de mayor `effectiveFrom` (el repositorio ya descarta las posteriores
+   * al instante del abono).
+   */
+  effectiveFrom?: Date;
+}
+
+/**
+ * DX-586: de varias tasas del mismo día y moneda, la que rige: la de mayor
+ * `effectiveFrom` (sin él, la última de la lista).
+ */
+export function latestPerDayAndCurrency(
+  rows: readonly ManualRateRow[],
+): ManualRateRow[] {
+  const byKey = new Map<string, ManualRateRow>();
+  for (const row of rows) {
+    const key = `${row.date}|${row.currency}`;
+    const current = byKey.get(key);
+    if (
+      current === undefined ||
+      (row.effectiveFrom?.getTime() ?? 0) >=
+        (current.effectiveFrom?.getTime() ?? 0)
+    ) {
+      byKey.set(key, row);
+    }
+  }
+  return [...byKey.values()];
 }
 
 export interface SelectedManualRate {
@@ -39,6 +69,8 @@ export interface SelectedManualRates {
   /** Día civil común a todas las tasas elegidas (≤ el día pedido). */
   rateDate: string;
   rates: Record<string, number>;
+  /** DX-586: las filas elegidas (con su id, si lo traen), por moneda. */
+  rows: Record<string, ManualRateRow>;
 }
 
 /**
@@ -97,18 +129,24 @@ export function selectManualRatesForPair(
   floor: string | null = null,
 ): SelectedManualRates | null {
   const wanted = [...new Set(currencies)].filter((c) => c !== BASE_CURRENCY);
-  if (wanted.length === 0) return { rateDate: day, rates: {} };
+  if (wanted.length === 0) return { rateDate: day, rates: {}, rows: {} };
   const oldest = windowStart(day, maxAgeDays, floor);
-  const byDate = new Map<string, Record<string, number>>();
-  for (const row of rows) {
+  const byDate = new Map<string, Record<string, ManualRateRow>>();
+  for (const row of latestPerDayAndCurrency(rows)) {
     if (row.date > day || row.date < oldest) continue;
     if (!wanted.includes(row.currency)) continue;
-    byDate.set(row.date, { ...byDate.get(row.date), [row.currency]: row.rate });
+    byDate.set(row.date, { ...byDate.get(row.date), [row.currency]: row });
   }
   const dates = [...byDate.keys()].sort().reverse();
   for (const rateDate of dates) {
-    const rates = byDate.get(rateDate)!;
-    if (wanted.every((c) => rates[c] !== undefined)) return { rateDate, rates };
+    const picked = byDate.get(rateDate)!;
+    if (wanted.every((c) => picked[c] !== undefined)) {
+      const rates: Record<string, number> = {};
+      for (const [currency, row] of Object.entries(picked)) {
+        rates[currency] = row.rate;
+      }
+      return { rateDate, rates, rows: picked };
+    }
   }
   return null;
 }

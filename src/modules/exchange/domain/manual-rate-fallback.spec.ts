@@ -3,6 +3,7 @@ import {
   isValidManualRateMaxAge,
   selectManualRate,
   selectManualRatesForPair,
+  latestPerDayAndCurrency,
   windowStart,
   type ManualRateRow,
 } from './manual-rate-fallback';
@@ -91,7 +92,7 @@ describe('selectManualRatesForPair (DX-384)', () => {
   });
 
   it('sin monedas distintas de USD no hay nada que buscar: la del propio día', () => {
-    expect(selectManualRatesForPair('2026-10-31', 3, [], [])).toEqual({
+    expect(selectManualRatesForPair('2026-10-31', 3, [], [])).toMatchObject({
       rateDate: '2026-10-31',
       rates: {},
     });
@@ -105,7 +106,10 @@ describe('selectManualRatesForPair (DX-384)', () => {
     ];
     expect(
       selectManualRatesForPair('2026-10-31', 3, ['EUR', 'VES'], rows),
-    ).toEqual({ rateDate: '2026-10-30', rates: { EUR: 0.92, VES: 36.5 } });
+    ).toMatchObject({
+      rateDate: '2026-10-30',
+      rates: { EUR: 0.92, VES: 36.5 },
+    });
   });
 
   it('si las dos no coinciden dentro del plazo, no hay tasa (nunca se mezclan fechas)', () => {
@@ -123,7 +127,7 @@ describe('selectManualRatesForPair (DX-384)', () => {
         ['VES'],
         [ves('2026-10-30', 36.5)],
       ),
-    ).toEqual({ rateDate: '2026-10-30', rates: { VES: 36.5 } });
+    ).toMatchObject({ rateDate: '2026-10-30', rates: { VES: 36.5 } });
   });
 });
 
@@ -153,5 +157,44 @@ describe('límite inferior «manual desde» (DX-384)', () => {
     expect(
       selectManualRatesForPair('2026-11-02', 3, ['VES'], rows, '2026-11-02'),
     ).toBeNull();
+  });
+});
+
+describe('varias tasas manuales el mismo día (DX-586)', () => {
+  const at = (iso: string) => new Date(iso);
+  const row = (
+    id: string,
+    date: string,
+    rate: number,
+    effectiveFrom: string,
+  ): ManualRateRow => ({
+    id,
+    date,
+    currency: 'VES',
+    rate,
+    effectiveFrom: at(effectiveFrom),
+  });
+
+  it('con dos del mismo día vale la de mayor effectiveFrom, y su fila lleva el id', () => {
+    const rows = [
+      row('b', '2026-11-20', 920.1, '2026-11-20T18:30:00.000Z'),
+      row('a', '2026-11-20', 918.77, '2026-11-20T12:00:00.000Z'),
+    ];
+    const picked = selectManualRatesForPair('2026-11-20', 3, ['VES'], rows);
+    expect(picked?.rates).toEqual({ VES: 920.1 });
+    expect(picked?.rows.VES.id).toBe('b');
+  });
+
+  it('latestPerDayAndCurrency deja una por día y moneda', () => {
+    const rows = [
+      row('a', '2026-11-20', 918.77, '2026-11-20T12:00:00.000Z'),
+      row('b', '2026-11-20', 920.1, '2026-11-20T18:30:00.000Z'),
+      row('c', '2026-11-19', 915, '2026-11-19T04:00:00.000Z'),
+    ];
+    expect(
+      latestPerDayAndCurrency(rows)
+        .map((r) => r.id)
+        .sort(),
+    ).toEqual(['b', 'c']);
   });
 });

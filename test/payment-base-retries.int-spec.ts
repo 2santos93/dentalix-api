@@ -374,6 +374,7 @@ describe('DX-380 · reintentos de abonos sin base (int)', () => {
         date: DAYS[3],
         currency: 'EUR',
         rate: 4000,
+        effectiveFrom: new Date(`${DAYS[3]}T00:00:00Z`),
         createdById: clinic.userId,
       }),
     );
@@ -405,6 +406,7 @@ describe('DX-380 · reintentos de abonos sin base (int)', () => {
           date: DAYS[3],
           currency: 'EUR',
           rate: 4000,
+          effectiveFrom: new Date(`${DAYS[3]}T00:00:00Z`),
           createdById: clinic.userId,
         });
         return retries.wake();

@@ -71,8 +71,12 @@ import {
 import { netCreditIn } from '../credit/prisma-plan-credit-reader';
 import { readPlanBalanceSnapshotIn } from '../allocations/prisma-plan-allocation.repository';
 import { Payment } from '../../domain/entities/payment.entity';
-import { exchangeRateStatus } from '../../domain/payment-exchange-rate';
 import {
+  exchangeRateStatus,
+  paymentRateUsed,
+} from '../../domain/payment-exchange-rate';
+import {
+  FROZEN_RATE_SELECT,
   frozenRateData,
   frozenRateOf,
   manualRatesStillMatch,
@@ -223,6 +227,7 @@ function mapToEntity(payment: PrismaPayment, timeZone: string): Payment {
     ),
     exchangeRateCurrency: payment.exchangeRateCurrency,
     frozenRate: frozenRateOf(payment),
+    rateUsed: paymentRateUsed(payment.currency, frozenRateOf(payment)),
     exchangeRateStatus: exchangeRateStatus({
       currency: payment.currency,
       exchangeRateCurrency: payment.exchangeRateCurrency,
@@ -288,6 +293,8 @@ const CASH_PAYMENT_SELECT = {
   // DX-571: ¿conciliado con el extracto? (emparejado activo; como mucho uno
   // por el único parcial; una consulta por página con IN, no por fila).
   bankMatches: { where: { endedAt: null }, select: { id: true }, take: 1 },
+  // DX-586: la tasa usada (qué tasa y cuándo), como en el detalle.
+  ...FROZEN_RATE_SELECT,
 } satisfies Prisma.PaymentSelect;
 
 type PrismaCashPayment = Prisma.PaymentGetPayload<{
@@ -372,6 +379,7 @@ function mapToCashPayment(
     collectedAmount: collectedAmount(row.amount.toNumber(), adjustments),
     hasProof: row.proof !== null,
     reconciled: row.bankMatches.length > 0,
+    rateUsed: paymentRateUsed(row.currency, frozenRateOf(row)),
   };
 }
 

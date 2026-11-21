@@ -286,6 +286,12 @@ export interface PaymentReceiptEmailVars {
     /** La diferencia no devuelta que se sumó al abono; null si no hubo. */
     remainderLabel: string | null;
   };
+  /**
+   * DX-586: «918,77 Bs. por USD (BCV, fecha valor 20/11/2026)», una por cada
+   * tasa usada (un cobro dividido puede tener varias). Ausente si el abono no
+   * convirtió o congeló su tasa antes de DX-586: el email es el de antes.
+   */
+  rateUsedLabels?: string[];
 }
 
 /**

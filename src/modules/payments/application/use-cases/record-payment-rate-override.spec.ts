@@ -15,6 +15,9 @@ describe('overrideFrozenRate (DX-569)', () => {
       source: 'MANUAL',
       date: '2026-11-14',
       quotedOn: '2026-11-14',
+      // DX-586: no sale de ninguna tasa registrada.
+      ref: 'OVERRIDE:2026-11-14',
+      valueDate: null,
     });
   });
 

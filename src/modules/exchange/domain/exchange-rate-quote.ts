@@ -30,6 +30,48 @@ export interface ExchangeRateQuote {
    * sirve para auditar que se usó.
    */
   backup?: { manualSince: string };
+  /**
+   * DX-586: referencia estable a la tasa usada, la que guarda el abono
+   * (`exchangeRateRef`): por cada moneda que no es USD, `BCV:<fecha valor>`
+   * (VES y EUR con fuente BCV), `MANUAL:<id de la tasa manual>` o
+   * `AUTOMATIC:<día de la tasa>`; si son dos distintas, unidas con «+».
+   * Siempre la da `ConvertAmountUseCase`; opcional para los dobles de test.
+   */
+  ref?: string;
+  /** DX-586: fecha valor del BCV (solo con fuente BCV y VES o EUR); si no, null. */
+  valueDate?: string | null;
+}
+
+/** DX-586: separador de las referencias de las dos monedas de una cotización. */
+export const RATE_REF_SEPARATOR = '+';
+
+const MANUAL_REF_ID =
+  /MANUAL:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi;
+
+/** DX-586: los ids de tasas manuales que nombra una referencia (`MANUAL:<id>`). */
+export function manualRateIdsOfRef(ref: string | null | undefined): string[] {
+  if (!ref) return [];
+  return [...ref.matchAll(MANUAL_REF_ID)].map((m) => m[1].toLowerCase());
+}
+
+/**
+ * DX-586: la referencia de la tasa de una cotización (ver
+ * `ExchangeRateQuote.ref`). `partOf` da la de cada moneda que no es USD.
+ */
+export function quoteRef(
+  currencies: readonly string[],
+  source: ExchangeRateSource,
+  rateDate: string,
+  partOf: (currency: string) => string,
+): string {
+  const parts = [
+    ...new Set(
+      currencies.filter((c) => c !== BASE_CURRENCY).map((c) => partOf(c)),
+    ),
+  ];
+  return parts.length > 0
+    ? parts.join(RATE_REF_SEPARATOR)
+    : `${source}:${rateDate}`;
 }
 
 /**

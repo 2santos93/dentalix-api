@@ -192,6 +192,10 @@ function paymentReceipt(
       text: `${vars.toOpeningBalance ? 'Concepto' : 'Plan'}: ${vars.planLabel}`,
     },
   );
+  // DX-586: qué tasa se usó (fuente y fecha valor u hora).
+  for (const label of vars.rateUsedLabels ?? []) {
+    blocks.push({ kind: 'paragraph', text: `Tasa usada: ${label}` });
+  }
   // DX-570: recibido, aplicado y vuelto (con su tasa y su día).
   if (vars.cashChange) {
     blocks.push(
