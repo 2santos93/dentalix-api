@@ -1,3 +1,4 @@
+import { toRateColumn } from '../../../shared/money/rate-conversion';
 import { BadRequestException } from '@nestjs/common';
 import { unknownCurrencyNamedMessage } from '../../../shared/money/currency-messages';
 import { BASE_CURRENCY } from './exchange-rate-source';
@@ -203,5 +204,5 @@ export function perReference(
   ) {
     return null;
   }
-  return Number((to / from).toFixed(8));
+  return toRateColumn(to / from);
 }
