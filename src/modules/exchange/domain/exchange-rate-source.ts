@@ -39,7 +39,14 @@ export const MANUAL_RATE_DATE_MESSAGE =
 export const MANUAL_RATE_FUTURE_DATE_MESSAGE =
   'No se puede registrar la tasa de un día que aún no ha llegado en la sede.';
 export const MANUAL_RATE_DUPLICATE_MESSAGE =
-  'Ya hay una tasa registrada para esa moneda en ese día. Si ningún abono la usó, corrígela en la lista.';
+  'Ya hay una tasa registrada para esa moneda desde esa misma hora. Registra la nueva con otra hora o, si ningún abono la usó, corrígela en la lista.';
+/** DX-586: `effectiveFrom` del alta de una tasa manual. */
+export const MANUAL_RATE_EFFECTIVE_FROM_MESSAGE =
+  'La hora desde la que rige la tasa tiene que ser una fecha y hora con zona horaria (ISO 8601, con Z o un desfase).';
+export const MANUAL_RATE_EFFECTIVE_FROM_FUTURE_MESSAGE =
+  'La tasa no puede regir desde una hora que aún no ha llegado.';
+export const MANUAL_RATE_EFFECTIVE_FROM_DAY_MESSAGE =
+  'La hora desde la que rige la tasa tiene que ser del mismo día de la tasa en la sede.';
 /** DX-375: una tasa manual que ya congeló algún abono no se cambia. */
 export const MANUAL_RATE_IN_USE_MESSAGE =
   'Esta tasa ya la usa al menos un abono y no se puede cambiar: el saldo de esos abonos se calculó con ella.';

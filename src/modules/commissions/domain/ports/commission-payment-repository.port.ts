@@ -63,6 +63,11 @@ export interface DocumentLine {
   base: number;
   percent: number;
   amount: number;
+  /** DX-018-bis: lo descontado de la base (laboratorio y pasarela). */
+  labCost: number;
+  cardFee: number;
+  /** Costos de laboratorio en otra moneda, sin descontar. */
+  labCostSkippedCurrencies: string[];
   /** Pago vivo que la cubre, si lo hay. */
   paymentId: string | null;
 }
@@ -81,6 +86,9 @@ export interface SettlementDocumentSource {
   header: SettlementHeader;
   closedAt: Date;
   basis: 'COLLECTED' | 'PRODUCED';
+  /** DX-018-bis: los descuentos de la regla al cerrar. */
+  deductLabCost: boolean;
+  deductCardFee: boolean;
   lines: DocumentLine[];
   payments: CommissionPaymentView[];
   format: DocumentFormat;

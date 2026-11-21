@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsInt,
@@ -16,6 +16,7 @@ import { IsBoundedDecimal } from '../../../../shared/validation/bounded-decimal'
 import {
   MANUAL_RATE_CURRENCY_MESSAGE,
   MANUAL_RATE_DATE_MESSAGE,
+  MANUAL_RATE_EFFECTIVE_FROM_MESSAGE,
   MANUAL_RATE_MAX,
   MANUAL_RATE_MAX_DECIMALS,
   MANUAL_RATE_MESSAGE,
@@ -56,6 +57,18 @@ export class RegisterManualExchangeRateDto {
     { message: MANUAL_RATE_MESSAGE },
   )
   rate!: number;
+
+  @ApiPropertyOptional({
+    type: String,
+    format: 'date-time',
+    example: '2026-11-20T14:30:00-04:00',
+    description:
+      'DX-586: desde qué instante del día `date` rige (ISO 8601 con Z o desfase). Nunca futuro y del mismo día civil que `date` en la sede. Sin él: ahora si `date` es hoy; el inicio del día si es anterior. Así se registran varias tasas el mismo día («desde las 14:30»): cada abono usa la de mayor `effectiveFrom` ≤ su instante.',
+  })
+  @IsOptional()
+  @IsString({ message: MANUAL_RATE_EFFECTIVE_FROM_MESSAGE })
+  @TextMaxLength(INPUT_CODE_MAX)
+  effectiveFrom?: string;
 }
 
 /**
@@ -125,6 +138,14 @@ export class ManualExchangeRateDto {
     description: 'Unidades de la moneda por 1 USD.',
   })
   rate!: number;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    description:
+      'DX-586: desde qué instante del día rige. Las anteriores a DX-586, desde el inicio del día en la sede principal.',
+  })
+  effectiveFrom!: Date;
 
   @ApiProperty({ type: ManualExchangeRateAuthorDto })
   createdBy!: ManualExchangeRateAuthorDto;

@@ -20,6 +20,7 @@ function method(
     requiresReference: false,
     proofPolicy: 'NONE',
     allowInPaymentLink: false,
+    gatewayFeePercent: null,
     adjustments: [],
     legacyMethod: null,
     createdAt: NOW,

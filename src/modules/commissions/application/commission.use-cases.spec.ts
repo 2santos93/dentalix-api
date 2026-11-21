@@ -32,6 +32,8 @@ const summary = (userId: string) => ({
   basis: 'COLLECTED' as const,
   releaseMode: 'PER_ITEM' as const,
   percent: 35,
+  deductLabCost: false,
+  deductCardFee: false,
   closedAt: new Date(),
   closedBy: { userId: 'admin', name: 'Admin' },
   lockDateBefore: null,

@@ -69,6 +69,7 @@ const MEDIUM = (
   requiresReference: false,
   proofPolicy,
   allowInPaymentLink: false,
+  gatewayFeePercent: null,
   legacyMethod: null,
   adjustments: [],
   createdAt: NOW,

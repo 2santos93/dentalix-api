@@ -291,24 +291,13 @@ describe('Honorarios de odontólogos: regla, vista previa y cierre (e2e, DX-018)
     await as(a, receptionA).get('/commissions/settlements').expect(403);
   });
 
-  it('valida la regla: %, categorías y descuentos sin datos de origen (400 en español)', async () => {
+  it('valida la regla: % y categorías (400 en español)', async () => {
     const path = `/commissions/rules/${draX.userId}`;
     const bad = await as(a)
       .put(path, { basis: 'COLLECTED', releaseMode: 'PER_ITEM', percent: 120 })
       .expect(400);
     expect((bad.body as { message: string }).message).toBe(
       COMMISSION_RULE_MESSAGES.percent,
-    );
-    const lab = await as(a)
-      .put(path, {
-        basis: 'COLLECTED',
-        releaseMode: 'PER_ITEM',
-        percent: 35,
-        deductLabCost: true,
-      })
-      .expect(400);
-    expect((lab.body as { message: string }).message).toBe(
-      COMMISSION_RULE_MESSAGES.labCostUnavailable,
     );
     await as(a)
       .put(path, {
@@ -367,8 +356,8 @@ describe('Honorarios de odontólogos: regla, vista previa y cierre (e2e, DX-018)
       expect.arrayContaining(['Endodoncia', 'Higiene']),
     );
     expect(rules.deductionsAvailable).toEqual({
-      labCost: false,
-      cardFee: false,
+      labCost: true,
+      cardFee: true,
     });
     const withRule = rules.professionals.filter((p) => p.rule !== null);
     expect(withRule.map((p) => p.professional.userId).sort()).toEqual(

@@ -1,3 +1,4 @@
+import type { PaymentRateUsed } from '../payment-exchange-rate';
 import type { PaymentAdjustmentLine } from '../payment-adjustment-line';
 import { PaymentMethod, TreatmentPlanStatus } from '@prisma/client';
 
@@ -70,6 +71,11 @@ export interface CashPayment {
    */
   adjustments: PaymentAdjustmentLine[];
   collectedAmount: number;
+  /**
+   * DX-586: la tasa usada (qué tasa y cuándo) si el abono convirtió con una
+   * congelada desde DX-586; `null` si no. Ausente en los dobles de test.
+   */
+  rateUsed?: PaymentRateUsed | null;
 }
 
 /**

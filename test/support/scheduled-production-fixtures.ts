@@ -246,6 +246,7 @@ export function scheduledProductionSeeding(raw: PrismaClient) {
       data: {
         tenantId: c.tenantId,
         date: new Date(`${day}T00:00:00Z`),
+        effectiveFrom: new Date(`${day}T00:00:00Z`),
         currency,
         rate: new Prisma.Decimal(rate),
         createdById: c.dentist.userId,
