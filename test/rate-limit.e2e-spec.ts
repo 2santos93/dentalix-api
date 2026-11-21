@@ -33,6 +33,7 @@ const LOW_LIMITS: RateLimitConfig = {
   'direct-upload': { limit: 2, ttlMs: 60_000 },
   'patient-import': { limit: 2, ttlMs: 60_000 },
   'exchange-rates': { limit: 2, ttlMs: 60_000 },
+  'exchange-header': { limit: 2, ttlMs: 60_000 },
   'caller-lookup': { limit: 2, ttlMs: 60_000 },
   anamnesis: { limit: 4, ttlMs: 60_000 },
   'anamnesis-token': { limit: 2, ttlMs: 60_000 },
@@ -436,6 +437,30 @@ describe('Rate limiting (e2e)', () => {
       expectTooMany(await rates('rx-1', 'clinica-1'));
       expectTooMany(await convert('rx-1', 'clinica-1'));
       expect((await rates('rx-2', 'clinica-1')).status).toBe(401);
+    });
+
+    it('DX-584: la tasa del menú, su propio balde por clínica+usuario (no gasta el de rates)', async () => {
+      const bearer = (sub: string, tenantId: string): string =>
+        'Bearer ' +
+        [
+          Buffer.from('{"alg":"HS256","typ":"JWT"}').toString('base64url'),
+          Buffer.from(JSON.stringify({ sub, tenantId })).toString('base64url'),
+          'firma-invalida',
+        ].join('.');
+      const header = (sub: string, tenantId: string) =>
+        request(app.getHttpServer())
+          .get('/api/v1/exchange/header')
+          .set('Authorization', bearer(sub, tenantId));
+      const rates = (sub: string, tenantId: string) =>
+        request(app.getHttpServer())
+          .get('/api/v1/exchange/rates?date=2026-10-01')
+          .set('Authorization', bearer(sub, tenantId));
+      for (let i = 0; i < LOW_LIMITS['exchange-header'].limit; i++) {
+        expect((await header('hd-1', 'clinica-1')).status).toBe(401);
+      }
+      expectTooMany(await header('hd-1', 'clinica-1'));
+      expect((await header('hd-2', 'clinica-1')).status).toBe(401);
+      expect((await rates('hd-1', 'clinica-1')).status).toBe(401);
     });
 
     it('DX-224: «¿Quién llama?», un balde por clínica+usuario', async () => {

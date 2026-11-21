@@ -25,6 +25,7 @@ import { ConvertAmountUseCase } from '../src/modules/exchange/application/use-ca
 import { GetExchangeRateSettingsUseCase } from '../src/modules/exchange/application/use-cases/exchange-rate-settings.use-cases';
 import { PrismaExchangeRateRepository } from '../src/modules/exchange/infrastructure/repositories/prisma-exchange-rate.repository';
 import { PrismaClinicExchangeSettingsRepository } from '../src/modules/exchange/infrastructure/repositories/prisma-clinic-exchange-settings.repository';
+import { PrismaClinicCurrenciesRepository } from '../src/modules/exchange/infrastructure/repositories/prisma-clinic-currencies.repository';
 import { PrismaManualExchangeRateRepository } from '../src/modules/exchange/infrastructure/repositories/prisma-manual-exchange-rate.repository';
 import type { DentalCatalogRepository } from '../src/modules/dental-catalog/domain/ports/dental-catalog-repository.port';
 import type { DentalCatalogItem } from '../src/modules/dental-catalog/domain/entities/dental-catalog-item.entity';
@@ -73,7 +74,10 @@ const rates = new ClinicReferenceRateSource(
   prisma,
   tenantContext,
   convert,
-  new GetExchangeRateSettingsUseCase(settingsRepo),
+  new GetExchangeRateSettingsUseCase(
+    settingsRepo,
+    new PrismaClinicCurrenciesRepository(prisma, tenantContext),
+  ),
   now,
   new PrismaCurrencyDigitsCatalog(prisma),
 );

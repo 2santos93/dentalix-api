@@ -89,6 +89,10 @@
  *                  dos rutas. Primera barrera; lo que de verdad protege la
  *                  cuota del proveedor es el presupuesto de fallos de caché
  *                  de `ProviderRatesGate` (`EXCHANGE_PROVIDER_*`).
+ * - exchange-header: la tasa del menú (`GET /exchange/header`, DX-584), por
+ *                  clínica + usuario. Suave (60/min): la web la pide al
+ *                  montar, al volver el foco, cada 5 min y por evento. Sus
+ *                  fallos de caché gastan el mismo presupuesto del proveedor.
  * - caller-lookup: «¿Quién llama?» (`POST /patients/lookup-by-phone`, DX-224),
  *                  por clínica + usuario. Cada petición lee datos de
  *                  pacientes por un teléfono: frena a quien pruebe números
@@ -151,6 +155,7 @@ export type RateLimitPolicy =
   | 'direct-upload'
   | 'patient-import'
   | 'exchange-rates'
+  | 'exchange-header'
   | 'caller-lookup'
   | 'anamnesis'
   | 'anamnesis-token'
@@ -200,6 +205,7 @@ export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   'direct-upload': { limit: 60, ttlMs: MINUTE },
   'patient-import': { limit: 10, ttlMs: MINUTE },
   'exchange-rates': { limit: 120, ttlMs: MINUTE },
+  'exchange-header': { limit: 60, ttlMs: MINUTE },
   'caller-lookup': { limit: 60, ttlMs: MINUTE },
   anamnesis: { limit: 20, ttlMs: MINUTE },
   'anamnesis-token': { limit: 10, ttlMs: MINUTE },
@@ -262,6 +268,7 @@ export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
     'direct-upload': rule('direct-upload'),
     'patient-import': rule('patient-import'),
     'exchange-rates': rule('exchange-rates'),
+    'exchange-header': rule('exchange-header'),
     'caller-lookup': rule('caller-lookup'),
     anamnesis: rule('anamnesis'),
     'anamnesis-token': rule('anamnesis-token'),

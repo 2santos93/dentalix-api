@@ -8,9 +8,14 @@ import { GetRatesForDateUseCase } from './get-rates-for-date.use-case';
 import { ExchangeRateRepository } from '../../domain/ports/exchange-rate-repository.port';
 import { ExchangeRateProvider } from '../../domain/ports/exchange-rate-provider.port';
 import { ExchangeRateSnapshot } from '../../domain/entities/exchange-rate-snapshot.entity';
-import { MissingExchangeRateError } from '../../domain/missing-exchange-rate.error';
+import {
+  isMissingRateError,
+  MissingBcvRateError,
+  MissingExchangeRateError,
+} from '../../domain/missing-exchange-rate.error';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
+  makeBcvRates,
   makeManualRates,
   makeSettings,
 } from '../__fixtures__/in-memory-exchange-settings';
@@ -271,6 +276,94 @@ describe('ConvertAmountUseCase', () => {
         'No hay tasa de EUR para el día 2026-07-22: la clínica usa tasa manual y aún no la registró.',
       );
       expect(fetchRates).not.toHaveBeenCalled();
+    });
+  });
+
+  // DX-585: con BCV, VES y EUR del BCV; sin su tasa, «sin tasa» propio.
+  describe('clínica con tasa BCV (DX-585)', () => {
+    const TENANT = '58558558-5585-4585-8585-585585585585';
+
+    function bcvUseCase(
+      bcv = makeBcvRates([
+        { valueDate: '2026-07-21', usdVes: 400, eurVes: 500 },
+      ]),
+    ) {
+      const tenantContext = new TenantContextService();
+      const fetchRates = jest
+        .fn()
+        .mockResolvedValue({ base: 'USD', rates: { GBP: 0.8, VES: 1 } });
+      const repo: ExchangeRateRepository = {
+        findByDate: () => Promise.resolve([]),
+        upsertMany: () => Promise.resolve(),
+      };
+      const uc = new ConvertAmountUseCase(
+        new GetRatesForDateUseCase(
+          repo,
+          { fetchRates },
+          makeSettings({ [TENANT]: 'BCV' }, tenantContext),
+          makeManualRates({}, tenantContext),
+          tenantContext,
+          undefined,
+          undefined,
+          undefined,
+          bcv,
+        ),
+      );
+      const run = <R>(fn: () => Promise<R>) => tenantContext.run(TENANT, fn);
+      return { uc, fetchRates, run };
+    }
+
+    it('convierte VES→USD y EUR→VES con la tasa del BCV que rige el día, sin el proveedor', async () => {
+      const { uc, run, fetchRates } = bcvUseCase();
+      await expect(
+        run(() =>
+          uc.execute({ amount: 4000, from: 'VES', to: 'USD', date: DATE }),
+        ),
+      ).resolves.toMatchObject({ result: 10, rateDate: DATE });
+      await expect(
+        run(() =>
+          uc.execute({ amount: 10, from: 'EUR', to: 'VES', date: DATE }),
+        ),
+      ).resolves.toMatchObject({ result: 5000 });
+      expect(fetchRates).not.toHaveBeenCalled();
+    });
+
+    it('la cotización congela la fuente BCV', async () => {
+      const { uc, run } = bcvUseCase();
+      await expect(
+        run(() => uc.quote({ from: 'VES', to: 'USD', date: DATE })),
+      ).resolves.toEqual({
+        from: 'VES',
+        to: 'USD',
+        date: DATE,
+        rateDate: DATE,
+        source: 'BCV',
+        fromPerBase: 400,
+        toPerBase: 1,
+      });
+    });
+
+    it('sin tasa del BCV: MissingBcvRateError («sin tasa»), nunca la del proveedor', async () => {
+      const { uc, run } = bcvUseCase(makeBcvRates([]));
+      const out = run(() =>
+        uc.execute({ amount: 100, from: 'USD', to: 'VES', date: DATE }),
+      );
+      await expect(out).rejects.toBeInstanceOf(MissingBcvRateError);
+      const error = (await out.catch((e: unknown) => e)) as MissingBcvRateError;
+      expect(error.getResponse()).toMatchObject({
+        code: 'EXCHANGE_RATE_BCV_MISSING',
+      });
+      expect(isMissingRateError(await out.catch((e: unknown) => e))).toBe(true);
+    });
+
+    it('otra moneda sale del proveedor', async () => {
+      const { uc, run, fetchRates } = bcvUseCase();
+      await expect(
+        run(() =>
+          uc.execute({ amount: 8, from: 'GBP', to: 'USD', date: DATE }),
+        ),
+      ).resolves.toMatchObject({ result: 10 });
+      expect(fetchRates).toHaveBeenCalledWith(DATE);
     });
   });
 

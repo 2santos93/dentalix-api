@@ -4,8 +4,10 @@ import {
   Inject,
   Injectable,
   Logger,
+  Optional,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { AcceptedCurrenciesGate } from '../../../exchange/application/accepted-currencies-gate';
 import { PaymentMethod } from '@prisma/client';
 import type { LockActor } from '../../../financial-lock/domain/financial-lock';
 import { IDEMPOTENCY_KEY_INVALID_MESSAGE } from '../../../../shared/validation/idempotency-key';
@@ -114,6 +116,12 @@ export interface RecordPaymentOptions {
    * de idempotencia, como el motivo de una referencia repetida.
    */
   lockActor?: LockActor | null;
+  /**
+   * DX-584: no mirar las monedas que acepta la clínica. Solo la confirmación
+   * de un pago reportado por el enlace (DX-569): su moneda la fijó el enlace
+   * al crearlo y el paciente ya pagó; rechazarlo al confirmar no tiene arreglo.
+   */
+  anyCurrency?: boolean;
 }
 
 export const RATE_OVERRIDE_PAIR_MESSAGE =
@@ -267,7 +275,19 @@ export class RecordPaymentUseCase {
     private readonly now: PaymentClock,
     // DX-570: lo recibido y el vuelto de un abono en efectivo.
     private readonly cashChange: CashChangePreparer,
+    // DX-584: solo las monedas que acepta la clínica (lista vacía = todas).
+    @Optional()
+    private readonly acceptedCurrencies?: AcceptedCurrenciesGate,
   ) {}
+
+  /**
+   * DX-584: 400 `CURRENCY_NOT_ACCEPTED` si la clínica tiene monedas aceptadas
+   * y alguna de estas (ya normalizadas) no está. La usan el abono suelto y
+   * el cobro dividido (todas sus líneas de una vez).
+   */
+  async assertAcceptedCurrencies(currencies: readonly string[]): Promise<void> {
+    await this.acceptedCurrencies?.assertAccepted(currencies);
+  }
 
   /**
    * `normalizePaidAt` más la ventana de fecha: DX-054 (400 si va a más de 24 h
@@ -325,6 +345,9 @@ export class RecordPaymentUseCase {
     }
 
     const currency = await this.validCurrency(input);
+    if (options.anyCurrency !== true) {
+      await this.assertAcceptedCurrencies([currency]);
+    }
     // DX-570: la forma del vuelto, antes de tocar nada.
     const withChange = hasCashChange(input);
     if (withChange) this.cashChange.assertShape(input);

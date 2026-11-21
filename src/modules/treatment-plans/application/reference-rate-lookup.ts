@@ -19,7 +19,8 @@ export function referenceRateDay(
   sedeToday: string,
   utcToday: string,
 ): string {
-  if (source === 'AUTOMATIC' && utcToday < sedeToday) return utcToday;
+  // DX-585: con BCV, las monedas que no son del BCV salen del proveedor.
+  if (source !== 'MANUAL' && utcToday < sedeToday) return utcToday;
   return sedeToday;
 }
 

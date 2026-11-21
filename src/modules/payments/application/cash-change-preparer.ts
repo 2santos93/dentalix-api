@@ -2,8 +2,10 @@ import {
   BadRequestException,
   Inject,
   Injectable,
+  Optional,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { AcceptedCurrenciesGate } from '../../exchange/application/accepted-currencies-gate';
 import {
   PAYMENT_METHOD_REPOSITORY,
   type PaymentMethodRepository,
@@ -97,6 +99,9 @@ export class CashChangePreparer {
     @Inject(CURRENCY_DIGITS_CATALOG)
     private readonly digits: CurrencyDigitsCatalog,
     private readonly convertAmount: ConvertAmountUseCase,
+    // DX-584: las líneas del vuelto, solo en monedas que acepta la clínica.
+    @Optional()
+    private readonly acceptedCurrencies?: AcceptedCurrenciesGate,
   ) {}
 
   /**
@@ -140,6 +145,7 @@ export class CashChangePreparer {
     const currencies = await Promise.all(
       requests.map((line) => this.validCurrency(line)),
     );
+    await this.acceptedCurrencies?.assertAccepted(currencies);
     const table = await this.digits.table([payment.currency, ...currencies]);
     const payDigits = table.roundingDigits(payment.currency);
     if (!(tendered > 0) || !Number.isFinite(tendered)) {
