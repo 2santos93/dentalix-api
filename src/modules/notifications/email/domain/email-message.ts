@@ -36,6 +36,7 @@ export const EMAIL_TEMPLATES = [
   'online-booking-code',
   'online-booking-received',
   'appointment-series',
+  'clinic-export-ready',
 ] as const;
 export type EmailTemplateName = (typeof EMAIL_TEMPLATES)[number];
 
@@ -96,6 +97,9 @@ export const TENANT_DAILY_BUDGET: Readonly<
   // diario, pero se encola sin tope (en la transacción de la serie: el tope
   // no puede deshacer las citas).
   'appointment-series': 'clinic',
+  // DX-053: lo dispara la clínica (un ADMIN pide la exportación): cuenta en
+  // el tope diario; se encola sin tope (aviso de seguridad: no se calla).
+  'clinic-export-ready': 'clinic',
 };
 
 /** Las plantillas que no gastan el tope diario de la clínica (ver arriba). */
@@ -619,6 +623,26 @@ export interface QuoteFollowUpEmailVars {
   unsubscribeUrl: string | null;
 }
 
+/**
+ * DX-053: la exportación de los datos de la clínica está lista. Va a TODOS
+ * los ADMIN activos (también es un aviso de seguridad: un volcado de datos de
+ * salud). SIN enlace de descarga: solo a Ajustes › Exportar datos, donde la
+ * descarga exige sesión de ADMIN.
+ */
+export interface ClinicExportReadyEmailVars {
+  clinicName: string;
+  /** Quién la pidió, o null si ya no es miembro. */
+  requestedByName: string | null;
+  /** Cuándo la pidió, en la zona y el formato de la sede principal. */
+  requestedAtLabel: string | null;
+  /** Hasta cuándo se puede descargar (24 h), igual. */
+  expiresAtLabel: string | null;
+  /** «2,4 MB». */
+  sizeLabel: string;
+  /** `/settings/exportar-datos` en el host de la clínica; null sin host. */
+  settingsUrl: string | null;
+}
+
 export interface EmailVarsByTemplate {
   invitation: InvitationEmailVars;
   'password-reset': PasswordResetEmailVars;
@@ -645,6 +669,7 @@ export interface EmailVarsByTemplate {
   'online-booking-code': OnlineBookingCodeEmailVars;
   'online-booking-received': OnlineBookingReceivedEmailVars;
   'appointment-series': AppointmentSeriesEmailVars;
+  'clinic-export-ready': ClinicExportReadyEmailVars;
 }
 
 /** Lo que el remitente produce para una plantilla: asunto, HTML y texto. */

@@ -685,3 +685,6 @@ export const PROFESSIONAL_REPORT_ROLES: ClinicRole[] = [
   ClinicRole.ADMIN,
 ];
 export const NO_SHOWS_CSV_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
+/** DX-053: pedir, ver y descargar la exportación de los datos de la clínica. */
+export const CLINIC_EXPORT_ROLES: ClinicRole[] = [ClinicRole.ADMIN];

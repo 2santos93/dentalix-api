@@ -12,6 +12,8 @@ const MIME_BY_EXT: Record<string, string> = {
   '.docx':
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   '.dcm': 'application/dicom',
+  // DX-053: la exportación de los datos de la clínica (siempre como adjunto).
+  '.zip': 'application/zip',
 };
 
 /** Tipo por la extensión de la clave; `application/octet-stream` si no se conoce. */

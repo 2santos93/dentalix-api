@@ -5083,6 +5083,12 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       routes: ['GET /public/waiting-room/:token'],
     },
     {
+      spec: 'clinic-exports.e2e-spec.ts',
+      checks:
+        'B → 404 al descargar la exportación de A, que sigue sin descargar; el historial de B no la ve (DX-053)',
+      routes: ['POST /clinic-exports/:id/download'],
+    },
+    {
       spec: 'commission-payments.e2e-spec.ts',
       checks:
         'B → 404 con el enlace de conformidad de A en su host (ver, abrir, firmar y descargar), igual que uno inventado, y el pago de A sigue igual (DX-464)',

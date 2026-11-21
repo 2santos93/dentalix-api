@@ -248,6 +248,13 @@ function throttlers(
       generateKey: (context, _ip, name) =>
         staffActorRateLimitKey(name, request(context).headers.authorization),
     },
+    {
+      // DX-053: pedir y descargar la exportación de la clínica, un balde por
+      // clínica + usuario para las dos rutas.
+      ...strict('clinic-export'),
+      generateKey: (context, _ip, name) =>
+        staffActorRateLimitKey(name, request(context).headers.authorization),
+    },
   ];
 }
 

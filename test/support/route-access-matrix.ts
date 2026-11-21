@@ -881,6 +881,10 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'POST /waiting-room-screens': ADMIN_ONLY,
   'PATCH /waiting-room-screens/:id': ADMIN_ONLY,
   'POST /waiting-room-screens/:id/revoke': ADMIN_ONLY,
+  // DX-053: exportación de los datos de la clínica, solo ADMIN.
+  'GET /clinic-exports': ADMIN_ONLY,
+  'POST /clinic-exports': ADMIN_ONLY,
+  'POST /clinic-exports/:id/download': ADMIN_ONLY,
   // DX-542: equipos biomédicos por sede y su hoja de vida, solo ADMIN.
   'GET /equipment': ADMIN_ONLY,
   'POST /equipment': ADMIN_ONLY,

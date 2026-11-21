@@ -327,6 +327,8 @@ model Tenant {
   chairs                                  Chair[]
   waitingRoomScreens                      WaitingRoomScreen[]
   locationTurnCounters                    LocationTurnCounter[]
+  // DX-053: exportaciones de los datos de la clínica.
+  clinicExports                           ClinicExport[]
   // DX-542: equipos biomédicos de las sedes y sus mantenimientos.
   equipment                               Equipment[]
   equipmentMaintenances                   EquipmentMaintenance[]
@@ -5158,6 +5160,8 @@ enum AuditResourceType {
   BANK_RECONCILIATION_MATCH
   // DX-588: pantallas de sala de espera (alta, cambios y revocación).
   WAITING_ROOM_SCREEN
+  // DX-053: pedir y descargar la exportación de los datos de la clínica.
+  CLINIC_EXPORT
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -5253,6 +5257,8 @@ enum EmailTemplate {
   ONLINE_BOOKING_RECEIVED   @map("online-booking-received")
   // DX-562: aviso único al paciente con todas las fechas de una serie de citas.
   APPOINTMENT_SERIES        @map("appointment-series")
+  // DX-053: aviso a los ADMIN de que la exportación de datos está lista.
+  CLINIC_EXPORT_READY       @map("clinic-export-ready")
 }
 
 /// Registro de envíos de email (patrón outbox). NUNCA guarda el destinatario
@@ -10502,4 +10508,47 @@ model LocationTurnCounter {
 
   @@id([tenantId, locationId, day], map: "location_turn_counters_pkey")
   @@map("location_turn_counters")
+}
+
+/// DX-053: estado de una exportación de los datos de la clínica.
+enum ClinicExportStatus {
+  PENDING
+  RUNNING
+  READY
+  FAILED
+}
+
+/// DX-053: exportación de los datos de la clínica (ZIP de CSV) pedida por un
+/// ADMIN desde Ajustes › Exportar datos. Una sola en curso por clínica (índice
+/// único parcial `clinic_exports_one_active_key`); la descarga es de un solo
+/// uso (`downloadedAt`) y caduca a las 24 h; el fichero se borra a los 7 días
+/// (`fileDeletedAt`). No se borra (sin DELETE para la app).
+model ClinicExport {
+  id                String             @id @default(uuid()) @db.Uuid
+  tenantId          String             @db.Uuid
+  status            ClinicExportStatus @default(PENDING)
+  requestedById     String             @db.Uuid
+  requestedAt       DateTime           @default(now())
+  startedAt         DateTime?
+  completedAt       DateTime?
+  /// Código del fallo (`BUILD_FAILED`, `STALE`, `TOO_LARGE`), sin detalle técnico.
+  errorCode         String?            @db.VarChar(40)
+  /// Clave del ZIP en el almacén (`clinic-exports/<tenant>/<id>.zip`).
+  fileKey           String?
+  sizeBytes         BigInt?
+  fileCount         Int?
+  /// `{ "pacientes.csv": 120, … }`: filas de cada fichero.
+  rowCounts         Json?
+  /// Hasta cuándo se puede descargar (fin + 24 h).
+  downloadExpiresAt DateTime?
+  downloadedAt      DateTime?
+  downloadedById    String?            @db.Uuid
+  fileDeletedAt     DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, requestedAt(sort: Desc), id(sort: Desc)], map: "clinic_exports_tenant_requested_idx")
+  @@map("clinic_exports")
 }

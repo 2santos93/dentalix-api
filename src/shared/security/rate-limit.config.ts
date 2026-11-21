@@ -140,6 +140,11 @@
  *                  usuario y con UN balde para las tres rutas, como
  *                  patient-import (SEC-046). El tope de lecturas a la vez es
  *                  el mismo de las importaciones (`ImportReadSlotInterceptor`).
+ * - clinic-export: pedir y descargar la exportación de los datos de la
+ *                  clínica (DX-053, volcado de datos de salud), por clínica +
+ *                  usuario y con UN balde para las dos rutas. 10/min sobra
+ *                  para quien pide una y la descarga; frena el martilleo. El
+ *                  historial (que la web sondea) no cuenta.
  * - waiting-room:  el tablero público de la pantalla de sala de espera
  *                  (DX-588, `GET /public/waiting-room/:token`), por IP. Cada
  *                  televisor sondea cada ~8 s (7,5/min); 120/min deja hasta
@@ -188,7 +193,8 @@ export type RateLimitPolicy =
   | 'recall-batch'
   | 'bank-statement'
   | 'waiting-room'
-  | 'waiting-room-token';
+  | 'waiting-room-token'
+  | 'clinic-export';
 
 export interface RateLimitRule {
   limit: number;
@@ -241,6 +247,7 @@ export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   'bank-statement': { limit: 10, ttlMs: MINUTE },
   'waiting-room': { limit: 120, ttlMs: MINUTE },
   'waiting-room-token': { limit: 30, ttlMs: MINUTE },
+  'clinic-export': { limit: 10, ttlMs: MINUTE },
 };
 
 type EnvReader = (key: string) => string | undefined;
@@ -306,5 +313,6 @@ export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
     'bank-statement': rule('bank-statement'),
     'waiting-room': rule('waiting-room'),
     'waiting-room-token': rule('waiting-room-token'),
+    'clinic-export': rule('clinic-export'),
   };
 }
