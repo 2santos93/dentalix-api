@@ -313,6 +313,12 @@ export const AUDIT_PATIENT_MERGE_RESOLVED = [
   'responsiblePayersCleared',
   'documentsDuplicatedVoided',
   'recallsMerged',
+  // DX-172 (captación): los recomendados del absorbido, el conservado que se
+  // recomendaba a sí mismo y la fuente heredada. Sin estas claves la
+  // auditoría de una fusión con recomendados perdía todo `patientMerge`.
+  'referralsMoved',
+  'selfReferralCleared',
+  'acquisitionInherited',
 ] as const;
 
 export const AUDIT_RECORD_COPY_SECTIONS = [

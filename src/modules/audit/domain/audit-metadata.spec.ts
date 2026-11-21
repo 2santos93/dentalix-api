@@ -1671,6 +1671,26 @@ describe('sanitizeAuditMetadata — fusión de pacientes (DX-266)', () => {
     ).toEqual({ reason: 'PATIENT_MERGED', patientMerge });
   });
 
+  it('DX-172 (captación): los recomendados movidos, la autorrecomendación y la fuente heredada no tiran la fusión', () => {
+    const withReferrals = {
+      ...patientMerge,
+      resolved: {
+        referralsMoved: 2,
+        selfReferralCleared: 1,
+        acquisitionInherited: 1,
+      },
+    };
+    expect(
+      sanitizeAuditMetadata({
+        reason: 'PATIENT_MERGE_LEFTOVERS_MOVED',
+        patientMerge: withReferrals,
+      }),
+    ).toEqual({
+      reason: 'PATIENT_MERGE_LEFTOVERS_MOVED',
+      patientMerge: withReferrals,
+    });
+  });
+
   it('descarta la fusión entera si trae una tabla desconocida, texto o un recuento raro', () => {
     for (const bad of [
       { ...patientMerge, moved: { notas_clinicas: 1 } },

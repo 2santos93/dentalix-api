@@ -2311,6 +2311,10 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   'POST /patient-duplicates/merge':
     'patient-merge.e2e-spec.ts y patient-merge.int-spec.ts',
   'POST /patient-duplicates/dismissals': 'patient-merge.e2e-spec.ts',
+  // DX-266-bis: volver a pasar lo tardío (PATIENT_MERGE_LEFTOVERS_MOVED en
+  // los dos, con lo movido por tabla); sin nada pendiente, nada.
+  'POST /patient-duplicates/merge-leftovers':
+    'patient-merge.e2e-spec.ts y patient-merge.int-spec.ts',
   // DX-569: datos para pagar de un medio, como configuración (DX-360) sin
   // sus valores, en la transacción del cambio.
   'PUT /payment-methods/:id/instructions': 'payment-links.e2e-spec.ts',

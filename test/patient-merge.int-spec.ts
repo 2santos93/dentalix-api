@@ -12,7 +12,9 @@ import { purgeDemoTenants } from './support/demo-tenant-purge';
 import { purgeTenants } from './support/tenant-purge';
 import {
   holdLock,
+  pauseAfterSql,
   settle,
+  sqlStop,
   waitForLockWaiters,
 } from './support/postgres-concurrency';
 
@@ -312,6 +314,16 @@ describe('DX-266 · fusionar las parejas de la demo', () => {
         const left = await leftovers(tx, tables, absorbed);
         delete left.patient_responsible_parties;
         expect(left).toEqual({});
+        // DX-266-bis: y lo que cuenta como pendiente está de acuerdo (el
+        // vínculo entre los dos no lo es); volver a pasar no hace nada.
+        const [{ pending }] = await tx.$queryRaw<
+          { pending: Record<string, number> }[]
+        >`SELECT dx_patient_merge_pending(${absorbed}::uuid) AS pending`;
+        expect(pending).toEqual({});
+        const [{ late }] = await tx.$queryRaw<
+          { late: { moved: object; resolved: object } }[]
+        >`SELECT dx_merge_patients_late(${absorbed}::uuid, ${demoAdmin}::uuid) AS late`;
+        expect(late).toEqual({ moved: {}, resolved: {} });
         const afterRows = await immutableRows(tx, immutable, [kept]);
         expect(afterRows).toEqual(beforeRows);
         const [after] = await tx.$queryRaw<
@@ -853,5 +865,329 @@ describe('DX-266 · «uno por paciente» y bloqueos', () => {
       break;
     }
     expect(checked).toBe(true);
+  });
+});
+
+describe('DX-266-bis · lo que llega tarde al absorbido', () => {
+  let slot = 0;
+  /** Una hora libre para cada cita del bloque (sin solapes con la demo). */
+  function nextSlot(): { start: Date; end: Date } {
+    slot += 1;
+    const start = new Date(Date.UTC(2031, 0, 5, 12 + (slot % 8), 0));
+    start.setUTCDate(start.getUTCDate() + Math.floor(slot / 8));
+    return { start, end: new Date(start.getTime() + 30 * 60_000) };
+  }
+
+  async function where(): Promise<{ locationId: string; providerId: string }> {
+    const a = await owner.appointment.findFirstOrThrow({
+      where: { tenantId: demoTenant },
+      select: { locationId: true, providerId: true },
+    });
+    return { locationId: a.locationId, providerId: a.providerId };
+  }
+
+  /** Dos pacientes nuevos; el absorbido, el de id menor. */
+  async function freshPair(): Promise<[string, string]> {
+    const make = async (first: string) =>
+      (
+        await owner.patient.create({
+          data: { tenantId: demoTenant, firstName: first, lastName: 'Tardío' },
+        })
+      ).id;
+    const ids = [await make('Uno'), await make('Dos')].sort();
+    return [ids[0], ids[1]];
+  }
+
+  async function pending(absorbed: string): Promise<Record<string, number>> {
+    const [{ pending: out }] = await prisma.runWithTenant(
+      demoTenant,
+      (tx) =>
+        tx.$queryRaw<{ pending: Record<string, number> }[]>`
+        SELECT dx_patient_merge_pending(${absorbed}::uuid) AS pending`,
+    );
+    return out;
+  }
+
+  const merge = (keptId: string, absorbedId: string) =>
+    inTenant(demoTenant, () =>
+      repo.merge({ keptId, absorbedId, choices: {} }, new Date(), ctx()),
+    );
+  const moveLeftovers = (absorbedId: string) =>
+    inTenant(demoTenant, () =>
+      repo.moveLeftovers(absorbedId, new Date(), ctx()),
+    );
+  const leftoverEvents = (patientId: string) =>
+    owner.auditEvent.findMany({
+      where: {
+        tenantId: demoTenant,
+        resourceId: patientId,
+        metadata: { path: ['reason'], equals: 'PATIENT_MERGE_LEFTOVERS_MOVED' },
+      },
+      select: { metadata: true },
+    });
+
+  it('dx_merge_patients es la entrada fina del cuerpo común (una sola lista de tablas) y la app no llama al cuerpo', async () => {
+    const [row] = await owner.$queryRaw<
+      {
+        wrapper: string;
+        late: string;
+        core: boolean;
+        lateExec: boolean;
+        pendingExec: boolean;
+      }[]
+    >`
+      SELECT (SELECT prosrc FROM pg_proc WHERE oid = 'public.dx_merge_patients(uuid, uuid, uuid)'::regprocedure) AS wrapper,
+             (SELECT prosrc FROM pg_proc WHERE oid = 'public.dx_merge_patients_late(uuid, uuid)'::regprocedure) AS late,
+             has_function_privilege('dentalix_app', 'public.dx_merge_patients_core(uuid, uuid, uuid, boolean)', 'EXECUTE') AS core,
+             has_function_privilege('dentalix_app', 'public.dx_merge_patients_late(uuid, uuid)', 'EXECUTE') AS "lateExec",
+             has_function_privilege('dentalix_app', 'public.dx_patient_merge_pending(uuid)', 'EXECUTE') AS "pendingExec"`;
+    // Si falla: una migración reescribió dx_merge_patients con el cuerpo
+    // entero. Los cambios de la fusión van en dx_merge_patients_core (unión
+    // completa sobre su última definición): si no, «volver a pasar» se queda
+    // con la fusión vieja.
+    expect(row.wrapper).toContain(
+      'dx_merge_patients_core(p_absorbed, p_kept, p_actor, false)',
+    );
+    expect(row.wrapper).not.toContain('dx_patient_merge_tables');
+    expect(row.late).toContain(
+      'dx_merge_patients_core(p_absorbed, v_kept, p_actor, true)',
+    );
+    expect(row.core).toBe(false);
+    expect(row.lateExec).toBe(true);
+    expect(row.pendingExec).toBe(true);
+  });
+
+  it('la ventana: una cita que validó al absorbido antes de la fusión y confirmó después queda en él; la ficha del conservado la ve y «volver a pasar» la mueve una vez, con auditoría', async () => {
+    const [absorbed, kept] = await freshPair();
+    const at = await where();
+    const slotA = nextSlot();
+    // La fusión se para DESPUÉS de dx_merge_patients, con sus bloqueos y sin
+    // confirmar.
+    const stop = sqlStop(/dx_merge_patients\(/);
+    const restore = pauseAfterSql(prisma, [stop]);
+    let appointmentId: string | undefined;
+    try {
+      const merging = settle(merge(kept, absorbed));
+      const mergePid = await stop.reached.wait;
+      // La escritura: valida al paciente (vivo: la fusión no ha confirmado) e
+      // inserta la cita. La FK espera a la fusión (FOR UPDATE del paciente).
+      const writing = settle(
+        prisma.runWithTenant(demoTenant, async (tx) => {
+          const live = await tx.patient.findFirst({
+            where: { id: absorbed, deletedAt: null },
+            select: { id: true },
+          });
+          expect(live).not.toBeNull();
+          const a = await tx.appointment.create({
+            data: {
+              tenantId: demoTenant,
+              ...at,
+              patientId: absorbed,
+              ...slotA,
+              status: 'SCHEDULED',
+            },
+            select: { id: true },
+          });
+          appointmentId = a.id;
+        }),
+      );
+      await waitForLockWaiters(owner, [mergePid], 1);
+      stop.release.open();
+      const [merged, written] = await Promise.all([merging, writing]);
+      expect(merged.status).toBe('fulfilled');
+      expect(written.status).toBe('fulfilled');
+    } finally {
+      restore();
+    }
+
+    // Quedó en el absorbido (la FK no mira deletedAt).
+    expect(
+      (
+        await owner.appointment.findUniqueOrThrow({
+          where: { id: appointmentId },
+        })
+      ).patientId,
+    ).toBe(absorbed);
+
+    // Y un recomendado del absorbido que llegó tarde (DX-172).
+    await prisma.runWithTenant(
+      demoTenant,
+      (tx) =>
+        tx.$queryRaw`SELECT dx_patient_sources_ensure(${demoTenant}::uuid)`,
+    );
+    const referral = await owner.patientSource.findFirstOrThrow({
+      where: { tenantId: demoTenant, systemKey: 'PATIENT_REFERRAL' },
+      select: { id: true },
+    });
+    const referred = await owner.patient.create({
+      data: {
+        tenantId: demoTenant,
+        firstName: 'Recomendado',
+        lastName: 'Tardío',
+        sourceId: referral.id,
+        referredByPatientId: absorbed,
+      },
+      select: { id: true },
+    });
+
+    expect(await pending(absorbed)).toEqual({ appointments: 1, patients: 1 });
+    const listed = await inTenant(demoTenant, () => repo.leftovers(kept));
+    expect(listed).toEqual([
+      expect.objectContaining({
+        absorbedPatientId: absorbed,
+        tables: [
+          { table: 'appointments', count: 1 },
+          { table: 'patients', count: 1 },
+        ],
+        categories: [
+          { category: 'appointments', count: 1 },
+          { category: 'other', count: 1 },
+        ],
+        total: 2,
+      }),
+    ]);
+
+    const result = await moveLeftovers(absorbed);
+    expect(result).toMatchObject({
+      patientId: kept,
+      absorbedPatientId: absorbed,
+      moved: [{ table: 'appointments', count: 1 }],
+      resolved: [{ kind: 'referralsMoved', count: 1 }],
+    });
+    expect(
+      (
+        await owner.appointment.findUniqueOrThrow({
+          where: { id: appointmentId },
+        })
+      ).patientId,
+    ).toBe(kept);
+    expect(
+      (await owner.patient.findUniqueOrThrow({ where: { id: referred.id } }))
+        .referredByPatientId,
+    ).toBe(kept);
+    expect(await pending(absorbed)).toEqual({});
+    expect(await inTenant(demoTenant, () => repo.leftovers(kept))).toEqual([]);
+
+    // Auditoría en los dos, con lo movido (y el recomendado: la clave de
+    // DX-172 ya no hace caer todo `patientMerge`).
+    const [keptEvent] = await leftoverEvents(kept);
+    expect(keptEvent.metadata).toMatchObject({
+      reason: 'PATIENT_MERGE_LEFTOVERS_MOVED',
+      patientMerge: {
+        role: 'KEPT',
+        otherPatientId: absorbed,
+        moved: { appointments: 1 },
+        resolved: { referralsMoved: 1 },
+      },
+    });
+    expect(await leftoverEvents(absorbed)).toHaveLength(1);
+
+    // Idempotente: otra vez, nada se mueve y nada se audita.
+    const again = await moveLeftovers(absorbed);
+    expect(again).toMatchObject({ moved: [], resolved: [] });
+    expect(await leftoverEvents(kept)).toHaveLength(1);
+    // El absorbido sigue retirado, apuntando al conservado.
+    const row = await owner.patient.findUniqueOrThrow({
+      where: { id: absorbed },
+      select: { mergedIntoId: true, deletedAt: true },
+    });
+    expect(row.mergedIntoId).toBe(kept);
+    expect(row.deletedAt).not.toBeNull();
+  });
+
+  it('«volver a pasar» y una fusión del conservado con un tercero a la vez: sin interbloqueo, y lo tardío acaba en el último conservado', async () => {
+    const [absorbed, kept] = await freshPair();
+    const [third] = await freshPair();
+    await merge(kept, absorbed);
+    const at = await where();
+    const late = await owner.appointment.create({
+      data: {
+        tenantId: demoTenant,
+        ...at,
+        patientId: absorbed,
+        ...nextSlot(),
+        status: 'SCHEDULED',
+      },
+      select: { id: true },
+    });
+    // Retiene al conservado para que las dos esperen a la vez.
+    const held = await holdLock(
+      owner,
+      (tx) =>
+        tx.$queryRaw`SELECT 1 FROM "patients" WHERE "id" = ${kept}::uuid FOR UPDATE`,
+    );
+    const moving = settle(moveLeftovers(absorbed));
+    const mergingKept = settle(merge(third, kept));
+    await waitForLockWaiters(owner, [held.pid], 2);
+    held.release();
+    await held.done;
+    const [moved, merged] = await Promise.all([moving, mergingKept]);
+    // Nunca un interbloqueo (40P01): una espera a la otra.
+    for (const o of [moved, merged]) {
+      if (o.status === 'rejected') {
+        expect(String(o.reason)).not.toMatch(/deadlock|40P01/i);
+      }
+    }
+    expect(merged.status).toBe('fulfilled');
+    // Si la fusión fue primero, «volver a pasar» respondió 409 (el
+    // conservado ya no lo es) y lo tardío sigue en el absorbido, que ahora
+    // apunta al tercero: otra vuelta lo pasa ahí.
+    if (moved.status === 'rejected') {
+      expect(moved.reason).toBeInstanceOf(ConflictException);
+      await moveLeftovers(absorbed);
+    }
+    expect(
+      (await owner.appointment.findUniqueOrThrow({ where: { id: late.id } }))
+        .patientId,
+    ).toBe(third);
+    expect(
+      (await owner.patient.findUniqueOrThrow({ where: { id: absorbed } }))
+        .mergedIntoId,
+    ).toBe(third);
+    expect(await pending(absorbed)).toEqual({});
+  });
+
+  it('lo tardío que choca con el conservado (dos citas a la misma hora) no se mueve: 409 con el código de la fusión y nada cambia', async () => {
+    const [absorbed, kept] = await freshPair();
+    await merge(kept, absorbed);
+    // Dos profesionales distintos (un profesional tampoco admite solapes).
+    const providers = await owner.appointment.findMany({
+      where: { tenantId: demoTenant },
+      distinct: ['providerId'],
+      select: { locationId: true, providerId: true },
+      take: 2,
+    });
+    expect(providers).toHaveLength(2);
+    const same = nextSlot();
+    for (const [i, patientId] of [kept, absorbed].entries()) {
+      await owner.appointment.create({
+        data: {
+          tenantId: demoTenant,
+          ...providers[i],
+          patientId,
+          ...same,
+          status: 'SCHEDULED',
+        },
+      });
+    }
+    await expect(moveLeftovers(absorbed)).rejects.toMatchObject({
+      response: { code: 'MERGE_OVERLAPPING_APPOINTMENTS' },
+    });
+    expect(await pending(absorbed)).toEqual({ appointments: 1 });
+    expect(await leftoverEvents(kept)).toHaveLength(0);
+  });
+
+  it('sobre un paciente vivo (no fusionado): 409 MERGE_PATIENT_NOT_MERGED; de otra clínica: 404', async () => {
+    const [alive] = await freshPair();
+    await expect(moveLeftovers(alive)).rejects.toMatchObject({
+      response: { code: 'MERGE_PATIENT_NOT_MERGED' },
+    });
+    expect(await pending(alive)).toEqual({});
+    await expect(moveLeftovers(foreignPatient)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    expect(
+      await inTenant(demoTenant, () => repo.leftovers(foreignPatient)),
+    ).toBeNull();
   });
 });
