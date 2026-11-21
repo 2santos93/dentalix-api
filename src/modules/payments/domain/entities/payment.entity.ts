@@ -4,6 +4,7 @@ import { PaymentMethod } from '@prisma/client';
 import type {
   FrozenExchangeRate,
   PaymentExchangeRateStatus,
+  PaymentRateUsed,
 } from '../payment-exchange-rate';
 
 /**
@@ -72,6 +73,12 @@ export interface Payment {
   exchangeRateCurrency: string | null;
   /** DX-375: la tasa que congeló, o `null` (misma moneda, sin tasa o anterior). */
   frozenRate: FrozenExchangeRate | null;
+  /**
+   * DX-586: la tasa usada (qué tasa, de qué fuente y fecha valor, cuándo se
+   * cotizó y su referencia); `null` sin tasa congelada o si se congeló antes
+   * de DX-586. Ausente en las entidades que no la leen (dobles de test).
+   */
+  rateUsed: PaymentRateUsed | null;
   /** DX-375: `exchangeRateStatus` de las dos de arriba. */
   exchangeRateStatus: PaymentExchangeRateStatus;
   /**

@@ -1,4 +1,5 @@
 import type { ExchangeRateSource } from '../../exchange/domain/exchange-rate-source';
+import { toRateColumn } from '../../../shared/money/rate-conversion';
 
 /**
  * DX-375: la tasa que congeló un abono, para siempre. Las dos monedas en
@@ -31,6 +32,38 @@ export interface FrozenExchangeRate {
    * (su fuente queda MANUAL y su día, el del abono): solo para auditarlo.
    */
   backup?: { manualSince: string };
+  /**
+   * DX-586: referencia estable a la tasa usada (`exchangeRateRef`):
+   * `BCV:<fecha valor>`, `AUTOMATIC:<día>`, `MANUAL:<id>` (dos unidas con
+   * «+») u `OVERRIDE:<día>` (la que fijó recepción, DX-569). `null`/ausente
+   * en los abonos congelados antes de DX-586.
+   */
+  ref?: string | null;
+  /** DX-586: fecha valor del BCV (solo con fuente BCV); si no, null. */
+  valueDate?: string | null;
+  /**
+   * DX-586: cuándo se cotizó (hora de la BD al congelar). Solo en una tasa
+   * leída de la fila; `null`/ausente en las congeladas antes de DX-586.
+   */
+  quotedAt?: Date | null;
+}
+
+/**
+ * DX-586: la tasa usada tal como se enseña: «1 {unit} = {rate} {currency}»,
+ * con `unit` la moneda más fuerte de las dos (la de menos unidades por USD),
+ * de qué fuente, con qué fecha valor (BCV), cuándo se cotizó y su referencia.
+ * Solo en los abonos congelados desde DX-586 (con referencia).
+ */
+export interface PaymentRateUsed {
+  /** Unidades de `currency` por 1 `unit` (hasta 8 decimales). */
+  rate: number;
+  unit: string;
+  currency: string;
+  source: ExchangeRateSource;
+  valueDate: string | null;
+  /** ISO 8601. */
+  quotedAt: string;
+  ref: string;
 }
 
 /**
@@ -63,4 +96,33 @@ export function exchangeRateStatus(
   return payment.currency === payment.exchangeRateCurrency
     ? 'NOT_NEEDED'
     : 'MISSING';
+}
+
+/**
+ * DX-586: la tasa usada de un abono de `paymentCurrency` con su tasa
+ * congelada, o `null` si no la tiene o se congeló antes de DX-586 (sin
+ * referencia ni instante: esos abonos y sus recibos no cambian).
+ */
+export function paymentRateUsed(
+  paymentCurrency: string,
+  frozen: FrozenExchangeRate | null,
+): PaymentRateUsed | null {
+  if (!frozen?.ref || !frozen.quotedAt) return null;
+  const paymentIsStronger = frozen.fromPerBase <= frozen.toPerBase;
+  const [unit, currency] = paymentIsStronger
+    ? [paymentCurrency, frozen.currency]
+    : [frozen.currency, paymentCurrency];
+  return {
+    rate: toRateColumn(
+      paymentIsStronger
+        ? frozen.toPerBase / frozen.fromPerBase
+        : frozen.fromPerBase / frozen.toPerBase,
+    ),
+    unit,
+    currency,
+    source: frozen.source,
+    valueDate: frozen.valueDate ?? null,
+    quotedAt: frozen.quotedAt.toISOString(),
+    ref: frozen.ref,
+  };
 }

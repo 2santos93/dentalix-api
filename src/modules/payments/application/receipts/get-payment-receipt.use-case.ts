@@ -11,7 +11,10 @@ import type {
   ReceiptSplitView,
 } from '../../domain/entities/payment-receipt.entity';
 import { splitTotal } from '../../domain/split-payment';
-import { exchangeRateStatus } from '../../domain/payment-exchange-rate';
+import {
+  exchangeRateStatus,
+  paymentRateUsed,
+} from '../../domain/payment-exchange-rate';
 import { convertWithQuote } from '../../../exchange/domain/exchange-rate-quote';
 import {
   buildReceiptSnapshot,
@@ -75,6 +78,8 @@ function receiptExchangeRate(
   return {
     status,
     rate: frozen,
+    // DX-586: qué tasa y cuándo (solo las congeladas desde DX-586).
+    rateUsed: paymentRateUsed(rate.currency, frozen),
     equivalentAmount: frozen
       ? convertWithQuote(rate.amount, {
           from: rate.currency,

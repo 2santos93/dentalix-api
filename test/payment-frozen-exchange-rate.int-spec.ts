@@ -207,7 +207,13 @@ async function registerManual(
   rate: number,
 ): Promise<string> {
   const saved = await inClinic(clinic, () =>
-    manualRepo.create({ date, currency, rate, createdById: clinic.userId }),
+    manualRepo.create({
+      date,
+      currency,
+      rate,
+      effectiveFrom: new Date(`${date}T00:00:00Z`),
+      createdById: clinic.userId,
+    }),
   );
   return saved.id;
 }
@@ -398,6 +404,9 @@ describe('Tasa congelada en cada abono (DX-375, int)', () => {
         exchangeRateTo: null,
         exchangeRateSource: null,
         exchangeRateDate: null,
+        // DX-586: también la referencia (el instante lo quita la BD).
+        exchangeRateRef: null,
+        exchangeRateValueDate: null,
       },
     });
     const [legacy] = await inClinic(auto, () =>
@@ -425,7 +434,7 @@ describe('Tasa congelada en cada abono (DX-375, int)', () => {
       raw.$executeRaw`UPDATE "payments" SET "exchangeRateCurrency" = 'VES' WHERE "id" = ${id}::uuid`,
     ).rejects.toThrow(/payments_exchange_rate_check/);
     await expect(
-      raw.$executeRaw`UPDATE "payments" SET "exchangeRateCurrency" = 'XXX', "exchangeRateFrom" = NULL, "exchangeRateTo" = NULL, "exchangeRateSource" = NULL, "exchangeRateDate" = NULL WHERE "id" = ${id}::uuid`,
+      raw.$executeRaw`UPDATE "payments" SET "exchangeRateCurrency" = 'XXX', "exchangeRateFrom" = NULL, "exchangeRateTo" = NULL, "exchangeRateSource" = NULL, "exchangeRateDate" = NULL, "exchangeRateRef" = NULL WHERE "id" = ${id}::uuid`,
     ).rejects.toThrow(/payments_exchange_rate_currency_fkey/);
   });
 

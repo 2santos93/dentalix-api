@@ -9,6 +9,9 @@ import {
   MANUAL_RATE_CURRENCY_MESSAGE,
   MANUAL_RATE_DATE_MESSAGE,
   MANUAL_RATE_DUPLICATE_MESSAGE,
+  MANUAL_RATE_EFFECTIVE_FROM_DAY_MESSAGE,
+  MANUAL_RATE_EFFECTIVE_FROM_FUTURE_MESSAGE,
+  MANUAL_RATE_EFFECTIVE_FROM_MESSAGE,
   MANUAL_RATE_FUTURE_DATE_MESSAGE,
   MANUAL_RATE_MESSAGE,
   MANUAL_RATE_IN_USE_MESSAGE,
@@ -299,6 +302,128 @@ describe('Corregir una tasa manual (DX-375)', () => {
       ).rejects.toMatchObject({
         response: { message: MANUAL_RATE_MESSAGE, field: 'rate' },
       });
+    },
+  );
+});
+
+describe('Varias tasas manuales el mismo día (DX-586)', () => {
+  const A = '66666666-6666-4666-8666-666666666666';
+  const ADMIN = 'u-admin';
+  // 2026-11-20 19:00 UTC = 15:00 en Caracas.
+  const NOW = new Date('2026-11-20T19:00:00.000Z');
+  const tenantContext = new TenantContextService();
+  let manual: ReturnType<typeof makeManualRates>;
+  const register = () =>
+    new RegisterManualExchangeRateUseCase(
+      manual,
+      () => NOW,
+      new ExchangeSourceChangeHooks(),
+    );
+  const run = <T>(fn: () => Promise<T>) => tenantContext.run(A, fn);
+  const badRequest = async (promise: Promise<unknown>) => {
+    const error = await promise.catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(BadRequestException);
+    return (error as BadRequestException).getResponse();
+  };
+
+  beforeEach(() => {
+    manual = makeManualRates({}, tenantContext, {
+      zones: { [A]: 'America/Caracas' },
+      members: { [A]: [ADMIN] },
+    });
+  });
+
+  it('registra dos el mismo día, cada una desde su hora, y las lista por hora', async () => {
+    await run(() =>
+      register().execute(
+        {
+          date: '2026-11-20',
+          currency: 'VES',
+          rate: 918.77,
+          effectiveFrom: '2026-11-20T08:00:00-04:00',
+        },
+        ADMIN,
+      ),
+    );
+    await run(() =>
+      register().execute(
+        {
+          date: '2026-11-20',
+          currency: 'VES',
+          rate: 920.1,
+          effectiveFrom: '2026-11-20T14:30:00-04:00',
+        },
+        ADMIN,
+      ),
+    );
+    const day = await run(() => manual.listDay('2026-11-20'));
+    expect(day.map((r) => [r.rate, r.effectiveFrom.toISOString()])).toEqual([
+      [918.77, '2026-11-20T12:00:00.000Z'],
+      [920.1, '2026-11-20T18:30:00.000Z'],
+    ]);
+  });
+
+  it('sin hora: hoy rige desde ahora; un día anterior, desde su inicio en la sede', async () => {
+    const today = await run(() =>
+      register().execute(
+        { date: '2026-11-20', currency: 'VES', rate: 918.77 },
+        ADMIN,
+      ),
+    );
+    expect(today.effectiveFrom).toEqual(NOW);
+    const before = await run(() =>
+      register().execute(
+        { date: '2026-11-19', currency: 'VES', rate: 915 },
+        ADMIN,
+      ),
+    );
+    expect(before.effectiveFrom.toISOString()).toBe('2026-11-19T04:00:00.000Z');
+  });
+
+  it('la misma moneda desde el mismo instante: 409', async () => {
+    const input = {
+      date: '2026-11-20',
+      currency: 'VES',
+      rate: 918.77,
+      effectiveFrom: '2026-11-20T08:00:00-04:00',
+    };
+    await run(() => register().execute(input, ADMIN));
+    await expect(
+      run(() => register().execute({ ...input, rate: 919 }, ADMIN)),
+    ).rejects.toThrow(MANUAL_RATE_DUPLICATE_MESSAGE);
+  });
+
+  it.each([
+    ['sin zona', '2026-11-20T08:00:00', MANUAL_RATE_EFFECTIVE_FROM_MESSAGE],
+    ['no es una fecha', 'mañana', MANUAL_RATE_EFFECTIVE_FROM_MESSAGE],
+    [
+      'futura',
+      '2026-11-20T16:00:00-04:00',
+      MANUAL_RATE_EFFECTIVE_FROM_FUTURE_MESSAGE,
+    ],
+    [
+      'de otro día en la sede',
+      '2026-11-19T23:30:00-04:00',
+      MANUAL_RATE_EFFECTIVE_FROM_DAY_MESSAGE,
+    ],
+  ])(
+    'effectiveFrom %s: 400 en español',
+    async (_label, effectiveFrom, message) => {
+      await expect(
+        badRequest(
+          run(() =>
+            register().execute(
+              {
+                date: '2026-11-20',
+                currency: 'VES',
+                rate: 918.77,
+                effectiveFrom,
+              },
+              ADMIN,
+            ),
+          ),
+        ),
+      ).resolves.toMatchObject({ message, field: 'effectiveFrom' });
     },
   );
 });

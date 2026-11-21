@@ -25,6 +25,7 @@ import {
   ConvertAmountResult,
 } from '../application/use-cases/convert-amount.use-case';
 import { GetRatesQueryDto } from './dto/get-rates-query.dto';
+import type { ManualExchangeRate } from '../domain/entities/manual-exchange-rate.entity';
 import { ConvertQueryDto } from './dto/convert-query.dto';
 import { RatesResponseDto } from './dto/rates-response.dto';
 import { ConvertResponseDto } from './dto/convert-response.dto';
@@ -77,19 +78,30 @@ export class ExchangeController {
       'con su presupuesto de fallos de caché (429 al superarlo). DX-384: con ' +
       'MANUAL y `currencies`, si alguna no tiene tasa ese día se devuelve la ' +
       'última fecha anterior, dentro del plazo de la clínica, que las tiene ' +
-      'todas; `rateDate` dice de qué día son las tasas.',
+      'todas; `rateDate` dice de qué día son las tasas. DX-586: con varias ' +
+      'tasas manuales el mismo día, rige la de mayor `effectiveFrom` ≤ ahora ' +
+      '(la última del día si es pasado); `manualRates` dice cuáles y ' +
+      '`manualDay` lista todas las del día pedido.',
   })
   @ApiOkResponse({ type: RatesResponseDto })
   @ApiTooManyRequestsResponse({ description: TOO_MANY_DESCRIPTION })
   rates(
     @Query() query: GetRatesQueryDto,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<RatesForDate> {
-    return withProviderErrors(res, () =>
-      this.getRatesForDate.forRequest(query.date, {
+  ): Promise<RatesForDate & { manualDay?: ManualExchangeRate[] }> {
+    return withProviderErrors(res, async () => {
+      const read = await this.getRatesForDate.forRequest(query.date, {
         currencies: query.currencies,
-      }),
-    );
+      });
+      // DX-586: con MANUAL, además la lista del día (varias por moneda, cada
+      // una desde su hora) para la web.
+      return read.source === 'MANUAL'
+        ? {
+            ...read,
+            manualDay: await this.getRatesForDate.manualDay(query.date),
+          }
+        : read;
+    });
   }
 
   @Get('convert')

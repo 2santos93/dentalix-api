@@ -5,6 +5,10 @@ import {
   PaymentMethod,
   TreatmentPlanStatus,
 } from '@prisma/client';
+import {
+  PaymentRateUsedDto,
+  RATE_USED_DESCRIPTION,
+} from './frozen-exchange-rate.dto';
 
 // Forma de la respuesta de `GET /payments` (la caja). Existe solo para
 // documentar el contrato en Swagger —de ahí sale el tipo del cliente web vía
@@ -228,6 +232,13 @@ export class CashPaymentDto {
       'DX-571: conciliado con un movimiento del extracto del banco (Caja › Conciliación).',
   })
   reconciled!: boolean;
+
+  @ApiProperty({
+    type: PaymentRateUsedDto,
+    nullable: true,
+    description: RATE_USED_DESCRIPTION,
+  })
+  rateUsed!: PaymentRateUsedDto | null;
 
   @ApiProperty({
     type: [PaymentAdjustmentLineDto],

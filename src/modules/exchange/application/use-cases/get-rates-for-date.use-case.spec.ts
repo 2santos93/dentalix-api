@@ -212,6 +212,7 @@ describe('GetRatesForDateUseCase', () => {
       ).resolves.toEqual({
         base: 'USD',
         source: 'MANUAL',
+        manualRates: expect.any(Array),
         rates: { VES: 40.12345678 },
         rateDate: '2026-10-30',
       });
@@ -235,6 +236,7 @@ describe('GetRatesForDateUseCase', () => {
       ).resolves.toEqual({
         base: 'USD',
         source: 'MANUAL',
+        manualRates: expect.any(Array),
         rates: {},
         rateDate: '2026-10-29',
       });
@@ -295,6 +297,7 @@ describe('GetRatesForDateUseCase', () => {
       ).resolves.toEqual({
         base: 'USD',
         source: 'MANUAL',
+        manualRates: expect.any(Array),
         rates: { VES: 40 },
         rateDate: '2026-10-30',
       });
@@ -303,6 +306,7 @@ describe('GetRatesForDateUseCase', () => {
       ).resolves.toEqual({
         base: 'USD',
         source: 'MANUAL',
+        manualRates: expect.any(Array),
         rates: {},
         rateDate: '2026-10-31',
       });
@@ -373,6 +377,7 @@ describe('GetRatesForDateUseCase', () => {
       ).resolves.toEqual({
         base: 'USD',
         source: 'MANUAL',
+        manualRates: expect.any(Array),
         rates: { GBP: 4000 },
         rateDate: '2026-10-28',
         backup: { manualSince: SINCE },
@@ -457,6 +462,7 @@ describe('GetRatesForDateUseCase', () => {
       await expect(tenantContext.run(C, () => lookup(SINCE))).resolves.toEqual({
         base: 'USD',
         source: 'MANUAL',
+        manualRates: expect.any(Array),
         rates: {},
         rateDate: '2026-10-30',
       });
@@ -753,6 +759,7 @@ describe('GetRatesForDateUseCase', () => {
       await expect(asM(() => uc.forRequest('2026-10-31'))).resolves.toEqual({
         base: 'USD',
         source: 'MANUAL',
+        manualRates: expect.any(Array),
         rates: {},
         rateDate: '2026-10-31',
       });
@@ -878,12 +885,14 @@ describe('GetRatesForDateUseCase', () => {
       await expect(asM(() => uc.forRequest('2026-10-15'))).resolves.toEqual({
         base: 'USD',
         source: 'MANUAL',
+        manualRates: expect.any(Array),
         rates: {},
         rateDate: '2026-10-15',
       });
       await expect(asM(() => uc.execute('2026-10-30'))).resolves.toEqual({
         base: 'USD',
         source: 'MANUAL',
+        manualRates: expect.any(Array),
         rates: {},
         rateDate: '2026-10-30',
       });

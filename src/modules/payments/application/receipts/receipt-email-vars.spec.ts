@@ -1,4 +1,4 @@
-import { receiptEmailVars } from './receipt-email-vars';
+import { rateUsedLabel, receiptEmailVars } from './receipt-email-vars';
 import {
   buildReceiptSnapshot,
   parseReceiptSnapshot,
@@ -453,5 +453,34 @@ describe('receiptEmailVars (DX-136)', () => {
     expect(receiptEmailVars(view(), SEDE_ZONE, SEDE_FMT)).not.toHaveProperty(
       'cashChange',
     );
+  });
+});
+
+describe('rateUsedLabel (DX-586)', () => {
+  const rate = {
+    rate: 918.7662,
+    unit: 'USD',
+    currency: 'VES',
+    source: 'BCV' as const,
+    valueDate: '2026-11-20',
+    quotedAt: '2026-11-20T14:15:00.000Z',
+    ref: 'BCV:2026-11-20',
+  };
+
+  it('«918,77 Bs. por USD (BCV, fecha valor 20/11/2026)» con el texto propio de la moneda', () => {
+    expect(
+      rateUsedLabel(rate, 'America/Caracas', SEDE_FMT, { VES: 'Bs.' }),
+    ).toBe('918,77 Bs. por USD (BCV, fecha valor 20/11/2026)');
+  });
+
+  it('sin fecha valor dice la fuente y la hora de la cotización en la sede', () => {
+    expect(
+      rateUsedLabel(
+        { ...rate, source: 'MANUAL', valueDate: null, ref: 'MANUAL:x' },
+        'America/Caracas',
+        SEDE_FMT,
+        null,
+      ),
+    ).toBe('918,77 VES por USD (manual, 20/11/2026 10:15)');
   });
 });

@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ExchangeRateSource } from '@prisma/client';
+import { ManualExchangeRateDto } from './manual-exchange-rate.dto';
 
 /** DX-585: de qué publicación del BCV salen VES y EUR. */
 export class BcvRateInfoDto {
@@ -16,6 +17,31 @@ export class BcvRateInfoDto {
     description: 'Cuándo se consultó la tasa del BCV.',
   })
   fetchedAt!: string;
+}
+
+/** DX-586: una tasa manual que rige en `rates`, con su id y desde cuándo. */
+export class ManualRateUsedDto {
+  @ApiProperty({ format: 'uuid' })
+  id!: string;
+
+  @ApiProperty({ description: 'Código ISO 4217 de 3 letras.' })
+  currency!: string;
+
+  @ApiProperty({
+    example: 918.77,
+    description: 'Unidades de la moneda por 1 USD.',
+  })
+  rate!: number;
+
+  @ApiProperty({ example: '2026-11-20', description: 'Día civil de la tasa.' })
+  date!: string;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    description: 'Desde qué instante del día rige.',
+  })
+  effectiveFrom!: string;
 }
 
 // Response shape for GET /exchange/rates — documents the RatesForDate
@@ -57,4 +83,18 @@ export class RatesResponseDto {
       'DX-585: solo con fuente BCV. La tasa del BCV de la que salen VES y EUR (como mucho 7 días anterior al día pedido); null si no hay ninguna y VES y EUR no aparecen en `rates` («sin tasa»). Con las otras fuentes no viene.',
   })
   bcv?: BcvRateInfoDto | null;
+
+  @ApiPropertyOptional({
+    type: [ManualRateUsedDto],
+    description:
+      'DX-586: solo con tasas manuales. Las que rigen en `rates`: por moneda, la de mayor `effectiveFrom` ≤ ahora del día `rateDate` (la última del día si es pasado). Es la tasa que congelaría un abono registrado ahora (`MANUAL:<id>`).',
+  })
+  manualRates?: ManualRateUsedDto[];
+
+  @ApiPropertyOptional({
+    type: [ManualExchangeRateDto],
+    description:
+      'DX-586: solo con fuente MANUAL. Todas las tasas registradas para el día pedido (`date`), por moneda y hora (`effectiveFrom`), para la lista del día.',
+  })
+  manualDay?: ManualExchangeRateDto[];
 }
