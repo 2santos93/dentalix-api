@@ -237,6 +237,8 @@ export interface ListInClinicParams {
 /** Una cita del panel con el nombre de su profesional y si es urgente. */
 export interface InClinicAppointment extends Appointment {
   providerName: string | null;
+  /** DX-588: turno del día en la sede (al marcar «Llegó»). */
+  turnNumber: number | null;
   /** DX-470: el tipo de la cita es de urgencia (aunque se haya desactivado). */
   urgent: boolean;
 }

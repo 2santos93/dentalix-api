@@ -40,6 +40,9 @@ describe('loadRateLimitConfig', () => {
     expect(cfg['recall-batch']).toEqual({ limit: 30, ttlMs: 60_000 });
     // DX-571: leer un extracto del banco, por clínica + usuario.
     expect(cfg['bank-statement']).toEqual({ limit: 10, ttlMs: 60_000 });
+    // DX-588: el tablero de la pantalla de sala de espera, por IP y por token.
+    expect(cfg['waiting-room']).toEqual({ limit: 120, ttlMs: 60_000 });
+    expect(cfg['waiting-room-token']).toEqual({ limit: 30, ttlMs: 60_000 });
     // DX-099: el cuestionario público de anamnesis, por IP y por token.
     expect(cfg.anamnesis).toEqual({ limit: 20, ttlMs: 60_000 });
     expect(cfg['anamnesis-token']).toEqual({ limit: 10, ttlMs: 60_000 });

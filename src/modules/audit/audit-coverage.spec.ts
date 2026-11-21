@@ -1,3 +1,4 @@
+import { WaitingRoomScreensController } from '../waiting-room/presentation/waiting-room-screens.controller';
 import { PlanVisitsController } from '../treatment-plans/presentation/plan-visits.controller';
 import { AppointmentsController } from '../appointments/presentation/appointments.controller';
 import { RequestMethod, Type } from '@nestjs/common';
@@ -2073,6 +2074,25 @@ const EXPECTED: Record<string, AuditOptions> = {
     reason: 'CHAIR_REACTIVATED',
   },
 
+  // DX-588: pantallas de sala de espera (sin paciente). No se borran: se
+  // revocan. Las lecturas del televisor no se auditan.
+  'POST /waiting-room-screens': {
+    action: 'CREATE',
+    resource: 'WAITING_ROOM_SCREEN',
+    resourceId: RES,
+  },
+  'PATCH /waiting-room-screens/:id': {
+    action: 'UPDATE',
+    resource: 'WAITING_ROOM_SCREEN',
+    resourceId: { param: 'id' },
+  },
+  'POST /waiting-room-screens/:id/revoke': {
+    action: 'UPDATE',
+    resource: 'WAITING_ROOM_SCREEN',
+    resourceId: { param: 'id' },
+    reason: 'WAITING_ROOM_SCREEN_REVOKED',
+  },
+
   // DX-542: equipos biomédicos (sin paciente). No se borran: se dan de baja;
   // los mantenimientos se anulan con motivo.
   'POST /equipment': {
@@ -2904,6 +2924,7 @@ const CONTROLLERS: Type[] = [
   CashOutflowsController,
   ScheduleBlocksController,
   ChairsController,
+  WaitingRoomScreensController,
   EquipmentController,
   StaffController,
   ClinicalNoteTemplatesController,

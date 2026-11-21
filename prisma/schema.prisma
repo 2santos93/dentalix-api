@@ -325,6 +325,8 @@ model Tenant {
   // DX-233: horario de cada profesional por sede y sus excepciones por fecha.
   // DX-211: sillones de las sedes.
   chairs                                  Chair[]
+  waitingRoomScreens                      WaitingRoomScreen[]
+  locationTurnCounters                    LocationTurnCounter[]
   // DX-542: equipos biomédicos de las sedes y sus mantenimientos.
   equipment                               Equipment[]
   equipmentMaintenances                   EquipmentMaintenance[]
@@ -765,6 +767,9 @@ model Location {
   // DX-233: horario de los profesionales en la sede y sus excepciones.
   // DX-211: sillones de la sede.
   chairs                     Chair[]
+  // DX-588: pantallas de sala de espera y contador de turnos del día.
+  waitingRoomScreens         WaitingRoomScreen[]
+  turnCounters               LocationTurnCounter[]
   // DX-542: equipos biomédicos de la sede.
   equipment                  Equipment[]
   providerSchedules          ProviderSchedule[]
@@ -1838,6 +1843,12 @@ model Appointment {
   arrivedAt              DateTime?
   seatedAt               DateTime?
   readyForCheckoutAt     DateTime?
+  /// DX-588: turno del día en la sede, asignado al ENTRAR en «Llegó» con el
+  /// contador location_turn_counters (estable mientras dure la visita; los
+  /// números no se reutilizan). Lo borran «Deshacer llegada» y la vuelta a
+  /// agendada/confirmada. NULL en las citas que no han llegado y en las
+  /// anteriores a DX-588.
+  turnNumber             Int?
   /// DX-306: hora en que la cita pasó a COMPLETED (la salida). La pone el
   /// trigger appointments_completed_at; la app no la escribe. NULL fuera de
   /// COMPLETED y en las citas completadas antes de DX-306.
@@ -5145,6 +5156,8 @@ enum AuditResourceType {
   BANK_ACCOUNT
   BANK_STATEMENT_IMPORT
   BANK_RECONCILIATION_MATCH
+  // DX-588: pantallas de sala de espera (alta, cambios y revocación).
+  WAITING_ROOM_SCREEN
 }
 
 /// Registro de auditoría (DX-009): quién vio o cambió qué dato clínico o
@@ -10432,4 +10445,61 @@ model BankReconciliationMatch {
   @@index([matchedById], map: "bank_reconciliation_matches_matched_by_idx")
   @@index([endedById], map: "bank_reconciliation_matches_ended_by_idx")
   @@map("bank_reconciliation_matches")
+}
+
+/// DX-588: modo del nombre visible en la pantalla de sala de espera.
+enum WaitingRoomNameMode {
+  /// «Ana R.»: primer nombre e inicial del primer apellido (por defecto).
+  NAME_INITIAL
+  /// «Turno 7»: el turno del día en la sede; ningún nombre.
+  TURN_NUMBER
+}
+
+/// DX-588: pantalla de sala de espera (el televisor) de una sede. El token
+/// solo viaja en el enlace; aquí su SHA-256. Da acceso de SOLO LECTURA al
+/// tablero de la sede (GET /public/waiting-room/:token). No se borra: se
+/// revoca (sin DELETE para dentalix_app).
+model WaitingRoomScreen {
+  id           String              @id @default(uuid()) @db.Uuid
+  tenantId     String              @db.Uuid
+  locationId   String              @db.Uuid
+  /// 1–60, recortado y sin caracteres de control (CHECK).
+  name         String              @db.VarChar(60)
+  /// SHA-256 hex del token (64): único en TODA la BD.
+  tokenHash    String              @unique(map: "waiting_room_screens_token_hash_key") @db.Char(64)
+  nameMode     WaitingRoomNameMode @default(NAME_INITIAL)
+  /// Mensajes rotativos (0–5, de 1 a 140 caracteres; CHECK).
+  messages     String[]            @default([])
+  soundEnabled Boolean             @default(false)
+  revokedAt    DateTime?
+  revokedById  String?             @db.Uuid
+  createdById  String?             @db.Uuid
+  updatedById  String?             @db.Uuid
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id])
+  location Location @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
+
+  @@index([tenantId, locationId], map: "waiting_room_screens_location_idx")
+  @@map("waiting_room_screens")
+}
+
+/// DX-588: último turno dado en una sede un día civil (zona de la sede). Lo
+/// sube de uno en uno un INSERT … ON CONFLICT DO UPDATE … RETURNING al marcar
+/// «Llegó», en la misma transacción: dos recepciones a la vez no comparten
+/// número.
+model LocationTurnCounter {
+  tenantId   String   @db.Uuid
+  locationId String   @db.Uuid
+  day        DateTime @db.Date
+  lastNumber Int
+  updatedAt  DateTime @default(now()) @updatedAt
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id])
+  // CASCADE: dato derivado de la sede (la app nunca borra sedes).
+  location Location @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Cascade)
+
+  @@id([tenantId, locationId, day], map: "location_turn_counters_pkey")
+  @@map("location_turn_counters")
 }

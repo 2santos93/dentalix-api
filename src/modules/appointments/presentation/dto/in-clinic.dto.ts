@@ -77,6 +77,14 @@ export class InClinicItemDto {
   readyForCheckoutAt!: Date | null;
 
   @ApiProperty({
+    type: Number,
+    nullable: true,
+    description:
+      'DX-588: turno del día en la sede, dado al marcar «Llegó» (estable mientras dure la visita; el que ve el paciente en la pantalla de sala de espera en modo «Número de turno»). null si llegó antes de DX-588.',
+  })
+  turnNumber!: number | null;
+
+  @ApiProperty({
     description:
       'Minutos (enteros, reloj del servidor) en el grupo actual: esperando desde la llegada, en el sillón desde que se sentó, o por cobrar desde que quedó listo.',
   })

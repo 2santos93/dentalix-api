@@ -178,6 +178,10 @@ export const NO_APP_DELETE = [
   // emparejado solo se cierra (dx_bank_match_guard).
   'bank_accounts',
   'bank_reconciliation_matches',
+  // DX-588: la pantalla de sala de espera se revoca, no se borra; el
+  // contador de turnos del día solo sube.
+  'waiting_room_screens',
+  'location_turn_counters',
 ] as const;
 
 /**

@@ -4472,6 +4472,15 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       ],
     },
     {
+      spec: 'waiting-room.e2e-spec.ts',
+      checks:
+        'B → 404 al renombrar o revocar la pantalla de sala de espera de A, y la pantalla de A sigue igual (DX-588)',
+      routes: [
+        'PATCH /waiting-room-screens/:id',
+        'POST /waiting-room-screens/:id/revoke',
+      ],
+    },
+    {
       spec: 'bank-reconciliation.e2e-spec.ts',
       checks:
         'B → 404 en las listas, el resumen, el historial, la edición, «Volver a emparejar», la inspección, la vista previa y la importación de la cuenta de A, en los candidatos de un movimiento de A y al deshacer un emparejado de A; el extracto de B con la misma referencia empareja SOLO su abono y la cuenta y el emparejado de A siguen igual (DX-571)',
@@ -5067,6 +5076,12 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
    * `COVERED_ELSEWHERE`).
    */
   const PUBLIC_TOKEN_COVERED_ELSEWHERE: readonly IsolationExemption[] = [
+    {
+      spec: 'waiting-room.e2e-spec.ts',
+      checks:
+        'B → el mismo 404 con el token de la pantalla de A en su host, igual que uno inventado o mal formado (DX-588)',
+      routes: ['GET /public/waiting-room/:token'],
+    },
     {
       spec: 'commission-payments.e2e-spec.ts',
       checks:

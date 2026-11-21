@@ -354,6 +354,9 @@ export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
     'clinical-note-templates.e2e-spec.ts',
   // DX-211: «B manda el sillón, la sede o el profesional de A → 404/400 en
   // español (o 403 por la sede) y no se crea ni cambia nada».
+  // DX-588: «B manda la sede o la pantalla de A → 403/404 y nada cambia».
+  'GET /waiting-room-screens ?locationId': 'waiting-room.e2e-spec.ts',
+  'POST /waiting-room-screens body.locationId': 'waiting-room.e2e-spec.ts',
   'GET /chairs ?locationId': 'chairs.e2e-spec.ts',
   'POST /chairs body.locationId': 'chairs.e2e-spec.ts',
   'POST /chairs body.defaultProviderId': 'chairs.e2e-spec.ts',
