@@ -340,6 +340,9 @@ describe('ConvertAmountUseCase', () => {
         source: 'BCV',
         fromPerBase: 400,
         toPerBase: 1,
+        // DX-586: qué tasa del BCV (su fecha valor).
+        ref: 'BCV:2026-07-21',
+        valueDate: '2026-07-21',
       });
     });
 
@@ -385,6 +388,8 @@ describe('ConvertAmountUseCase', () => {
         source: 'AUTOMATIC',
         fromPerBase: 4000,
         toPerBase: 0.9,
+        ref: 'AUTOMATIC:2026-07-22',
+        valueDate: null,
       });
     });
 
@@ -483,6 +488,8 @@ describe('ConvertAmountUseCase', () => {
           fromPerBase: 1,
           toPerBase: 4000,
           backup: { manualSince: SINCE },
+          ref: expect.stringMatching(/^MANUAL:[0-9a-f-]{36}$/) as string,
+          valueDate: null,
         });
         expect(fetchRates).not.toHaveBeenCalled();
       });
@@ -507,6 +514,8 @@ describe('ConvertAmountUseCase', () => {
           source: 'AUTOMATIC',
           fromPerBase: 0.9,
           toPerBase: 3900,
+          ref: `AUTOMATIC:${DAY}`,
+          valueDate: null,
         });
         expect(fetchRates).toHaveBeenCalledWith(DAY);
       });
@@ -593,5 +602,121 @@ describe('ConvertAmountUseCase', () => {
       ),
     );
     expect(memo).toEqual(fresh);
+  });
+});
+
+describe('tasa al momento: varias manuales el mismo día (DX-586)', () => {
+  const TENANT = '58658658-6586-4586-8586-586586586586';
+  const DAY = '2026-11-20';
+  // 2026-11-20 16:00 de Caracas.
+  const NOW = new Date('2026-11-20T20:00:00.000Z');
+
+  function setup(options: { maxAgeDays?: number } = {}) {
+    const tenantContext = new TenantContextService();
+    const manual = makeManualRates({}, tenantContext);
+    const fetchRates = jest.fn();
+    const uc = new ConvertAmountUseCase(
+      new GetRatesForDateUseCase(
+        { findByDate: () => Promise.resolve([]), upsertMany: jest.fn() },
+        { fetchRates },
+        makeSettings(
+          {
+            [TENANT]: {
+              source: 'MANUAL',
+              manualSince: '2026-01-01',
+              manualRateMaxAgeDays: options.maxAgeDays ?? 3,
+            },
+          },
+          tenantContext,
+        ),
+        manual,
+        tenantContext,
+        undefined,
+        () => NOW,
+      ),
+    );
+    const run = <T>(fn: () => Promise<T>) => tenantContext.run(TENANT, fn);
+    const add = (
+      date: string,
+      rate: number,
+      effectiveFrom: string,
+      currency = 'VES',
+    ) =>
+      run(() =>
+        manual.create({
+          date,
+          currency,
+          rate,
+          effectiveFrom: new Date(effectiveFrom),
+          createdById: 'admin',
+        }),
+      );
+    return { uc, run, add, fetchRates };
+  }
+
+  const quoteAt = (s: ReturnType<typeof setup>, asOf?: string, date = DAY) =>
+    s.run(() =>
+      s.uc.quote({
+        from: 'VES',
+        to: 'USD',
+        date,
+        ...(asOf ? { asOf: new Date(asOf) } : {}),
+      }),
+    );
+
+  it('el abono de las 10:00 usa la de las 08:00 y el de las 15:00 la de las 14:30', async () => {
+    const s = setup();
+    const early = await s.add(DAY, 918.77, '2026-11-20T08:00:00-04:00');
+    const late = await s.add(DAY, 920.1, '2026-11-20T14:30:00-04:00');
+    await expect(
+      quoteAt(s, '2026-11-20T10:00:00-04:00'),
+    ).resolves.toMatchObject({
+      fromPerBase: 918.77,
+      rateDate: DAY,
+      ref: `MANUAL:${early.id}`,
+    });
+    await expect(
+      quoteAt(s, '2026-11-20T15:00:00-04:00'),
+    ).resolves.toMatchObject({ fromPerBase: 920.1, ref: `MANUAL:${late.id}` });
+    // Sin instante: ahora (las 16:00), la vigente.
+    await expect(quoteAt(s)).resolves.toMatchObject({ fromPerBase: 920.1 });
+    expect(s.fetchRates).not.toHaveBeenCalled();
+  });
+
+  it('antes de la primera del día, la última del día anterior dentro del plazo (DX-384)', async () => {
+    const s = setup();
+    const yesterday = await s.add(
+      '2026-11-19',
+      915,
+      '2026-11-19T17:00:00-04:00',
+    );
+    await s.add(DAY, 920.1, '2026-11-20T14:30:00-04:00');
+    await expect(
+      quoteAt(s, '2026-11-20T10:00:00-04:00'),
+    ).resolves.toMatchObject({
+      fromPerBase: 915,
+      rateDate: '2026-11-19',
+      ref: `MANUAL:${yesterday.id}`,
+    });
+  });
+
+  it('sin plazo y antes de la primera del día: sin tasa', async () => {
+    const s = setup({ maxAgeDays: 0 });
+    await s.add(DAY, 920.1, '2026-11-20T14:30:00-04:00');
+    await expect(
+      quoteAt(s, '2026-11-20T10:00:00-04:00'),
+    ).rejects.toBeInstanceOf(MissingExchangeRateError);
+  });
+
+  it('dos monedas manuales que no son USD: las dos referencias unidas con «+»', async () => {
+    const s = setup();
+    const ves = await s.add(DAY, 918.77, '2026-11-20T08:00:00-04:00');
+    const eur = await s.add(DAY, 0.9, '2026-11-20T09:00:00-04:00', 'EUR');
+    await expect(
+      s.run(() => s.uc.quote({ from: 'VES', to: 'EUR', date: DAY })),
+    ).resolves.toMatchObject({
+      ref: `MANUAL:${ves.id}+MANUAL:${eur.id}`,
+      valueDate: null,
+    });
   });
 });

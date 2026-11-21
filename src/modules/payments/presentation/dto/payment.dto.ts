@@ -12,6 +12,8 @@ import {
 import {
   EXCHANGE_RATE_STATUS_DESCRIPTION,
   FrozenExchangeRateDto,
+  PaymentRateUsedDto,
+  RATE_USED_DESCRIPTION,
 } from './frozen-exchange-rate.dto';
 
 /** DX-570: la tasa del día congelada en una línea de vuelto en otra moneda. */
@@ -245,6 +247,13 @@ export class PaymentDto {
       'tasa» o anterior aún sin congelar.',
   })
   frozenRate!: FrozenExchangeRateDto | null;
+
+  @ApiProperty({
+    type: PaymentRateUsedDto,
+    nullable: true,
+    description: RATE_USED_DESCRIPTION,
+  })
+  rateUsed!: PaymentRateUsedDto | null;
 
   @ApiProperty({
     enum: PAYMENT_EXCHANGE_RATE_STATUSES,

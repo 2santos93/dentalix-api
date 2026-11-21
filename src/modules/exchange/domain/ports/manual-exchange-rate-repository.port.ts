@@ -9,10 +9,22 @@ export interface NewManualExchangeRate {
   date: string;
   currency: string;
   rate: number;
+  /** DX-586: desde qué instante del día `date` rige. */
+  effectiveFrom: Date;
   createdById: string;
 }
 
-/** Ya hay una tasa para ese día y moneda en la clínica (índice único). */
+/**
+ * DX-586: la tasa manual que rige para una moneda en un instante: la de
+ * mayor `effectiveFrom` ≤ ese instante del día pedido.
+ */
+export interface ManualRateInForce {
+  id: string;
+  rate: number;
+  effectiveFrom: Date;
+}
+
+/** Ya hay una tasa para esa moneda desde ese instante en la clínica (índice único). */
 export class ManualExchangeRateTakenError extends Error {
   constructor() {
     super('manual exchange rate already registered');
@@ -49,29 +61,43 @@ export class ManualExchangeRateInUseError extends Error {
  * FORCE): toda lectura y escritura va con `runWithTenant`.
  */
 export interface ManualExchangeRateRepository {
-  /** Las tasas de un día civil, `{ moneda: tasa }` (vacío si no hay). */
-  ratesOn(date: string): Promise<Record<string, number>>;
+  /**
+   * Las tasas de un día civil que rigen en el instante `asOf` (DX-586: por
+   * moneda, la de mayor `effectiveFrom` ≤ `asOf`), `{ moneda: tasa }` (vacío
+   * si no hay).
+   */
+  ratesOn(date: string, asOf: Date): Promise<Record<string, ManualRateInForce>>;
   /**
    * DX-384: las tasas de los días `from`..`to` (ambos incluidos, días
    * civiles), de `currencies` si se dan; con ellas se elige la última tasa
-   * dentro del plazo de la clínica. Sin orden.
+   * dentro del plazo de la clínica. DX-586: solo las de `effectiveFrom` ≤
+   * `asOf` y, por día y moneda, la última. Sin orden.
    */
   ratesBetween(
     from: string,
     to: string,
-    currencies?: readonly string[],
+    currencies: readonly string[] | undefined,
+    asOf: Date,
   ): Promise<ManualRateRow[]>;
-  /** Las últimas, del día más reciente al más antiguo y por moneda. */
-  listRecent(limit: number): Promise<ManualExchangeRate[]>;
   /**
-   * Alta. Lanza `ManualExchangeRateTakenError` si ya hay una para ese día y
-   * moneda y `ManualExchangeRateAuthorError` si el autor no es miembro vivo.
+   * Las últimas, del día más reciente al más antiguo; dentro del día, por
+   * moneda y (DX-586) de la más reciente a la más antigua.
+   */
+  listRecent(limit: number): Promise<ManualExchangeRate[]>;
+  /** DX-586: todas las tasas registradas para un día, por moneda y hora. */
+  listDay(date: string): Promise<ManualExchangeRate[]>;
+  /**
+   * Alta. Lanza `ManualExchangeRateTakenError` si ya hay una para esa moneda
+   * desde ese mismo instante (DX-586) y `ManualExchangeRateAuthorError` si el
+   * autor no es miembro vivo.
    */
   create(input: NewManualExchangeRate): Promise<ManualExchangeRate>;
   /**
-   * DX-375: cambia la tasa (solo `rate`; el día y la moneda no). Bloquea la
-   * fila FOR UPDATE y comprueba en la misma transacción que ningún abono la
-   * congeló (el alta de un abono la toma FOR SHARE). Lanza
+   * DX-375: cambia la tasa (solo `rate`; el día, la hora y la moneda no).
+   * Bloquea la fila FOR UPDATE y comprueba en la misma transacción que ningún
+   * abono la congeló (el alta de un abono la toma FOR SHARE; DX-586: un abono
+   * la usa si la nombra en su referencia, o si no tiene referencia y es del
+   * mismo día y moneda). Lanza
    * `ManualExchangeRateNotFoundError` o `ManualExchangeRateInUseError`.
    */
   correct(id: string, rate: number): Promise<ManualExchangeRate>;

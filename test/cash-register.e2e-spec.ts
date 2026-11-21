@@ -465,6 +465,8 @@ describe('Caja — GET /payments (e2e)', () => {
       splitLines: null,
       // DX-414: sembrado sin recibo numerado.
       receiptNumber: null,
+      // DX-586: en su moneda, sin tasa usada.
+      rateUsed: null,
       // DX-389: sembrado sin comprobante del cobro.
       hasProof: false,
       // DX-571: sin conciliar con el extracto.

@@ -1,5 +1,8 @@
 import type { ExchangeRateSource } from '../../domain/exchange-rate-source';
-import { MANUAL_RATE_MAX_AGE_DEFAULT } from '../../domain/manual-rate-fallback';
+import {
+  latestPerDayAndCurrency,
+  MANUAL_RATE_MAX_AGE_DEFAULT,
+} from '../../domain/manual-rate-fallback';
 import type {
   ClinicExchangeSettings,
   ClinicExchangeSettingsRepository,
@@ -11,6 +14,7 @@ import {
   ManualExchangeRateNotFoundError,
   ManualExchangeRateTakenError,
   type ManualExchangeRateRepository,
+  type ManualRateInForce,
   type NewManualExchangeRate,
 } from '../../domain/ports/manual-exchange-rate-repository.port';
 import type { ManualExchangeRate } from '../../domain/entities/manual-exchange-rate.entity';
@@ -133,8 +137,9 @@ export function makeManualRates(
   let seq = 0;
   const add = (
     tenant: string,
-    input: Omit<NewManualExchangeRate, 'createdById'> & {
+    input: Omit<NewManualExchangeRate, 'createdById' | 'effectiveFrom'> & {
       createdById?: string;
+      effectiveFrom?: Date;
     },
   ) => {
     seq += 1;
@@ -143,6 +148,9 @@ export function makeManualRates(
       date: input.date,
       currency: input.currency,
       rate: input.rate,
+      // DX-586: sin hora, rige desde el inicio del día (en UTC).
+      effectiveFrom:
+        input.effectiveFrom ?? new Date(`${input.date}T00:00:00.000Z`),
       createdBy: {
         userId: input.createdById ?? 'seed',
         fullName: 'Dra. Admin',
@@ -168,33 +176,62 @@ export function makeManualRates(
     markUsed: (tenantId, date, currency) => {
       used.add(usedKey(tenantId, date, currency));
     },
-    ratesOn: (date) => {
-      const out: Record<string, number> = {};
-      for (const row of store.get(tenantOf(ctx)) ?? []) {
-        if (row.date === date) out[row.currency] = row.rate;
+    ratesOn: (date, asOf) => {
+      const out: Record<string, ManualRateInForce> = {};
+      const rows = (store.get(tenantOf(ctx)) ?? [])
+        .filter((row) => row.date === date && row.effectiveFrom <= asOf)
+        .sort((a, b) => a.effectiveFrom.getTime() - b.effectiveFrom.getTime());
+      for (const row of rows) {
+        out[row.currency] = {
+          id: row.id,
+          rate: row.rate,
+          effectiveFrom: row.effectiveFrom,
+        };
       }
       return Promise.resolve(out);
     },
-    ratesBetween: (from, to, currencies) =>
+    ratesBetween: (from, to, currencies, asOf) =>
       Promise.resolve(
-        (store.get(tenantOf(ctx)) ?? [])
-          .filter(
-            (r) =>
-              r.date >= from &&
-              r.date <= to &&
-              (!currencies || currencies.includes(r.currency)),
-          )
-          .map((r) => ({ date: r.date, currency: r.currency, rate: r.rate })),
+        latestPerDayAndCurrency(
+          (store.get(tenantOf(ctx)) ?? [])
+            .filter(
+              (r) =>
+                r.date >= from &&
+                r.date <= to &&
+                r.effectiveFrom <= asOf &&
+                (!currencies || currencies.includes(r.currency)),
+            )
+            .map((r) => ({
+              id: r.id,
+              date: r.date,
+              currency: r.currency,
+              rate: r.rate,
+              effectiveFrom: r.effectiveFrom,
+            })),
+        ),
       ),
     listRecent: (limit) =>
       Promise.resolve(
         [...(store.get(tenantOf(ctx)) ?? [])]
           .sort((x, y) =>
-            x.date === y.date
-              ? x.currency.localeCompare(y.currency)
-              : y.date.localeCompare(x.date),
+            x.date !== y.date
+              ? y.date.localeCompare(x.date)
+              : x.currency !== y.currency
+                ? x.currency.localeCompare(y.currency)
+                : y.effectiveFrom.getTime() - x.effectiveFrom.getTime(),
           )
           .slice(0, limit)
+          .map((row) => withUse(tenantOf(ctx), row)),
+      ),
+    listDay: (date) =>
+      Promise.resolve(
+        (store.get(tenantOf(ctx)) ?? [])
+          .filter((row) => row.date === date)
+          .sort((x, y) =>
+            x.currency !== y.currency
+              ? x.currency.localeCompare(y.currency)
+              : x.effectiveFrom.getTime() - y.effectiveFrom.getTime(),
+          )
           .map((row) => withUse(tenantOf(ctx), row)),
       ),
     create: (input) => {
@@ -205,7 +242,9 @@ export function makeManualRates(
       }
       if (
         (store.get(tenant) ?? []).some(
-          (r) => r.date === input.date && r.currency === input.currency,
+          (r) =>
+            r.currency === input.currency &&
+            r.effectiveFrom.getTime() === input.effectiveFrom.getTime(),
         )
       ) {
         return Promise.reject(new ManualExchangeRateTakenError());

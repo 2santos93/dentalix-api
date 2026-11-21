@@ -208,6 +208,9 @@ describe('Cuota del proveedor de tasas (e2e, SEC-054)', () => {
     expect(todays.body).toEqual({
       base: 'USD',
       source: 'MANUAL',
+      // DX-586: las manuales que rigen y la lista del día.
+      manualRates: expect.any(Array) as unknown,
+      manualDay: expect.any(Array) as unknown,
       rates: {},
       rateDate: today(),
     });

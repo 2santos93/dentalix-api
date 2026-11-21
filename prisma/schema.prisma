@@ -131,6 +131,9 @@ model Tenant {
   /// DX-584: mostrar la tasa en el menú. NULL = automático (si hay alguna
   /// moneda aceptada distinta de la de referencia); true/false = forzado.
   showRateInHeader                        Boolean?
+  /// DX-586: última vez que alguien de la clínica pidió «Actualizar tasa»
+  /// (POST /exchange/refresh). Una cada 5 minutos por clínica. Hora de la BD.
+  exchangeRateRefreshedAt                 DateTime?                        @db.Timestamptz(3)
   /// DX-019: datos fiscales y de contacto de la clínica (Ajustes › Datos de
   /// la clínica, solo ADMIN, PATCH /clinic/settings, auditado). Texto libre,
   /// sin formato por país; NULL = sin dato. CHECK de longitud y una línea.
@@ -3043,8 +3046,9 @@ model BcvRateSnapshot {
 
 /// DX-374: tasa de cambio que la clínica fija para un día civil y una moneda,
 /// en unidades de `currency` por 1 USD (la misma base que
-/// `exchange_rate_snapshots`). Una por (clínica, día, moneda) y no se
-/// sobrescribe: la app solo tiene SELECT e INSERT. RLS FORCE por tenant; la FK
+/// `exchange_rate_snapshots`). DX-586: varias por (clínica, día, moneda), cada
+/// una desde su `effectiveFrom`; no se sobrescribe: la app solo tiene SELECT e
+/// INSERT (y UPDATE de `rate`, DX-375). RLS FORCE por tenant; la FK
 /// compuesta al autor exige que sea miembro de la MISMA clínica, como la
 /// atribución de DX-050.
 model ManualExchangeRate {
@@ -3056,6 +3060,11 @@ model ManualExchangeRate {
   currency              String
   /// Unidades de `currency` por 1 USD. CHECK > 0; hasta 8 decimales.
   rate                  Decimal  @db.Decimal(18, 8)
+  /// DX-586: desde qué instante del día `date` rige (varias tasas por día).
+  /// Las anteriores a DX-586: el inicio del día en la sede principal. Si una
+  /// réplica anterior no la manda, la pone el trigger
+  /// manual_exchange_rates_effective_from.
+  effectiveFrom         DateTime @db.Timestamptz(3)
   createdById           String   @db.Uuid
   createdByMembershipId String   @db.Uuid
   createdAt             DateTime @default(dbgenerated("timezone('UTC'::text, now())"))
@@ -3064,9 +3073,11 @@ model ManualExchangeRate {
   currencyRef Currency         @relation(fields: [currency], references: [code], onDelete: Restrict, map: "manual_exchange_rates_currency_fkey")
   createdBy   ClinicMembership @relation(fields: [tenantId, createdByMembershipId, createdById], references: [tenantId, id, userId], onDelete: Restrict, map: "manual_exchange_rates_created_by_fkey")
 
-  /// Una tasa por clínica, día y moneda. También sirve la lectura por
-  /// (clínica, día) y la lista de las últimas (recorrido hacia atrás).
-  @@unique([tenantId, date, currency], map: "manual_exchange_rates_tenant_date_currency_key")
+  /// DX-586: una tasa por clínica, moneda e instante desde el que rige (antes,
+  /// una por día y moneda). El índice del día sirve la lectura por (clínica,
+  /// día) y la lista de las últimas (recorrido hacia atrás).
+  @@unique([tenantId, currency, effectiveFrom], map: "manual_exchange_rates_tenant_currency_effective_key")
+  @@index([tenantId, date, currency, effectiveFrom], map: "manual_exchange_rates_tenant_date_currency_idx")
   @@index([tenantId, createdByMembershipId, createdById], map: "manual_exchange_rates_created_by_idx")
   @@map("manual_exchange_rates")
 }
@@ -3095,6 +3106,7 @@ model Currency {
   paymentAdjustments          PaymentAdjustment[]         @relation("PaymentAdjustmentCurrency")
   // DX-017: moneda del precio de referencia de un servicio de laboratorio.
   dentalLabServices           DentalLabService[]
+  dentalLabOrderCosts         DentalLabOrder[]            @relation("DentalLabOrderCostCurrency")
   paymentPlans                PaymentPlan[]
   // DX-150: compromisos de pago en esa moneda.
   paymentPromises             PaymentPromise[]
@@ -3256,6 +3268,9 @@ model ClinicPaymentMethod {
   // DX-569: «Permitir en el enlace de pago». Solo se ofrece al paciente si
   // además está activo y tiene datos para pagar en la sede del enlace.
   allowInPaymentLink Boolean            @default(false)
+  // DX-018-bis: % que la pasarela cobra a la CLÍNICA por cada cobro con este
+  // medio (0 < p ≤ 100; null = ninguno). Los honorarios pueden descontarlo.
+  gatewayFeePercent  Decimal?           @db.Decimal(5, 2)
   legacyMethod       PaymentMethod?
   createdById        String?            @db.Uuid
   updatedById        String?            @db.Uuid
@@ -3567,6 +3582,18 @@ model Payment {
   exchangeRateTo           Decimal?            @db.Decimal(18, 8)
   exchangeRateSource       ExchangeRateSource?
   exchangeRateDate         DateTime?           @db.Date
+  // DX-586: QUÉ tasa y CUÁNDO. `exchangeRateQuotedAt` es el instante en que
+  // se cotizó (lo pone la BD, trigger payments_exchange_rate_quoted_at, al
+  // congelar: al registrar o en el barrido); `exchangeRateValueDate`, la
+  // fecha valor del BCV (solo con fuente BCV), y `exchangeRateRef`, la
+  // referencia estable a la tasa usada (`BCV:<fecha valor>`,
+  // `AUTOMATIC:<día>`, `MANUAL:<id de manual_exchange_rates>`; con dos
+  // monedas que no son USD, las dos unidas con «+»). NULL en los abonos
+  // anteriores y en los que no convierten (CHECK
+  // payments_exchange_rate_moment_check).
+  exchangeRateQuotedAt     DateTime?           @db.Timestamptz(3)
+  exchangeRateValueDate    DateTime?           @db.Date
+  exchangeRateRef          String?
   // DX-377: el medio de pago del catálogo de la clínica (FK compuesta) y la
   // referencia que dio el pagador: tal cual (`reference`) y normalizada para
   // comparar (`referenceNormalized`: sin espacios y en mayúsculas). `method`
@@ -9058,11 +9085,16 @@ model DentalLabOrder {
   cancelledAt              DateTime?
   cancelledById            String?   @db.Uuid
   cancelReason             String?
+  /// DX-018-bis: lo que cobra el laboratorio por el trabajo (solo ADMIN lo
+  /// ve y lo pone; también tras «Enviada»). Importe y moneda, los dos o ninguno.
+  cost                     Decimal?  @db.Decimal(14, 2)
+  costCurrency             String?   @db.Char(3)
   createdById              String    @db.Uuid
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
 
   tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  costCurrencyRef   Currency?          @relation("DentalLabOrderCostCurrency", fields: [costCurrency], references: [code], onDelete: Restrict, map: "dental_lab_orders_cost_currency_fkey")
   location          Location           @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict, map: "dental_lab_orders_location_fkey")
   patient           Patient            @relation(fields: [tenantId, patientId], references: [tenantId, id], onDelete: Restrict, map: "dental_lab_orders_patient_fkey")
   membership        ClinicMembership   @relation(fields: [tenantId, professionalMembershipId], references: [tenantId, id], onDelete: Restrict, map: "dental_lab_orders_membership_fkey")
@@ -9096,6 +9128,7 @@ model DentalLabOrder {
   @@index([receivedById], map: "dental_lab_orders_received_by_idx")
   @@index([checkedById], map: "dental_lab_orders_checked_by_idx")
   @@index([cancelledById], map: "dental_lab_orders_cancelled_by_idx")
+  @@index([costCurrency], map: "dental_lab_orders_cost_currency_idx")
   // PARCIAL, no declarable en Prisma:
   //   dental_lab_orders_pending_idx ("tenantId", "locationId", "dueOn")
   //     WHERE "receivedAt" IS NULL AND "cancelledAt" IS NULL
@@ -9269,18 +9302,22 @@ enum CommissionLineKind {
 /// compuestas a la membresía (MISMO usuario) y a users van en SQL
 /// (20270103090200_dx018_commissions). Se desactiva, no se borra (trigger).
 model CommissionRule {
-  id           String                @id @default(uuid()) @db.Uuid
-  tenantId     String                @db.Uuid
-  membershipId String                @db.Uuid
-  userId       String                @db.Uuid
-  basis        CommissionBasis
-  releaseMode  CommissionReleaseMode @default(PER_ITEM)
-  percent      Decimal               @db.Decimal(5, 2)
-  active       Boolean               @default(true)
-  createdById  String                @db.Uuid
-  updatedById  String                @db.Uuid
-  createdAt    DateTime              @default(now())
-  updatedAt    DateTime              @updatedAt
+  id            String                @id @default(uuid()) @db.Uuid
+  tenantId      String                @db.Uuid
+  membershipId  String                @db.Uuid
+  userId        String                @db.Uuid
+  basis         CommissionBasis
+  releaseMode   CommissionReleaseMode @default(PER_ITEM)
+  percent       Decimal               @db.Decimal(5, 2)
+  active        Boolean               @default(true)
+  /// DX-018-bis: descontar el costo de laboratorio del ítem antes del %.
+  deductLabCost Boolean               @default(false)
+  /// DX-018-bis: descontar la comisión de la pasarela del abono antes del %.
+  deductCardFee Boolean               @default(false)
+  createdById   String                @db.Uuid
+  updatedById   String                @db.Uuid
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
 
   tenant     Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   categories CommissionRuleCategory[]
@@ -9322,6 +9359,9 @@ model CommissionSettlement {
   percent          Decimal               @db.Decimal(5, 2)
   /// [{ category, percent }] de la regla al cerrar.
   categoryPercents Json                  @default("[]")
+  /// DX-018-bis: los descuentos de la regla al cerrar.
+  deductLabCost    Boolean               @default(false)
+  deductCardFee    Boolean               @default(false)
   lockDateBefore   DateTime?             @db.Date
   lockDateAfter    DateTime              @db.Date
   closedById       String                @db.Uuid
@@ -9345,29 +9385,38 @@ model CommissionSettlement {
 /// del ítem. Las FK compuestas al ítem, al abono, a la sede y a las monedas
 /// van en SQL.
 model CommissionSettlementLine {
-  id                  String             @id @default(uuid()) @db.Uuid
-  tenantId            String             @db.Uuid
-  settlementId        String             @db.Uuid
-  userId              String             @db.Uuid
-  kind                CommissionLineKind
-  adjustsLineId       String?            @db.Uuid
-  treatmentPlanId     String             @db.Uuid
-  treatmentPlanItemId String             @db.Uuid
-  paymentId           String?            @db.Uuid
-  locationId          String?            @db.Uuid
-  catalogCode         String
-  catalogLabel        String
-  category            String?
-  toothNumber         String
-  completedAt         DateTime?
-  paidAt              DateTime?
-  paymentAmount       Decimal?           @db.Decimal(14, 2)
-  paymentCurrency     String?            @db.Char(3)
-  releasedAt          DateTime?
-  currency            String             @db.Char(3)
-  base                Decimal            @db.Decimal(14, 2)
-  percent             Decimal            @db.Decimal(5, 2)
-  amount              Decimal            @db.Decimal(14, 2)
+  id                       String             @id @default(uuid()) @db.Uuid
+  tenantId                 String             @db.Uuid
+  settlementId             String             @db.Uuid
+  userId                   String             @db.Uuid
+  kind                     CommissionLineKind
+  adjustsLineId            String?            @db.Uuid
+  treatmentPlanId          String             @db.Uuid
+  treatmentPlanItemId      String             @db.Uuid
+  paymentId                String?            @db.Uuid
+  locationId               String?            @db.Uuid
+  catalogCode              String
+  catalogLabel             String
+  category                 String?
+  toothNumber              String
+  completedAt              DateTime?
+  paidAt                   DateTime?
+  paymentAmount            Decimal?           @db.Decimal(14, 2)
+  paymentCurrency          String?            @db.Char(3)
+  releasedAt               DateTime?
+  currency                 String             @db.Char(3)
+  base                     Decimal            @db.Decimal(14, 2)
+  percent                  Decimal            @db.Decimal(5, 2)
+  amount                   Decimal            @db.Decimal(14, 2)
+  /// DX-018-bis: base antes de descuentos (null en las líneas anteriores: = base).
+  grossBase                Decimal?           @db.Decimal(14, 2)
+  /// Costo de laboratorio descontado (en la moneda de la línea).
+  labCostDeducted          Decimal            @default(0) @db.Decimal(14, 2)
+  /// % de la pasarela aplicado (null: no se descontó).
+  cardFeePercent           Decimal?           @db.Decimal(5, 2)
+  cardFeeDeducted          Decimal            @default(0) @db.Decimal(14, 2)
+  /// Monedas de costos de laboratorio que no se descontaron (no se convierten).
+  labCostSkippedCurrencies String[]           @default([])
 
   tenant       Tenant                     @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   settlement   CommissionSettlement       @relation(fields: [tenantId, settlementId, userId], references: [tenantId, id, userId], onDelete: Restrict, map: "commission_settlement_lines_settlement_fkey")

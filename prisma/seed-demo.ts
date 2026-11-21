@@ -120,7 +120,11 @@ import {
   ListPaymentMethodsUseCase,
   UpdatePaymentMethodUseCase,
 } from '../src/modules/payment-methods/application/payment-methods.use-cases';
-import { addCivilDays, civilDateIn } from '../src/shared/time/civil-day';
+import {
+  addCivilDays,
+  civilDateIn,
+  zonedStartOfDay,
+} from '../src/shared/time/civil-day';
 import { RegisterManualExchangeRateUseCase } from '../src/modules/exchange/application/use-cases/manual-exchange-rates.use-cases';
 import {
   CreateCollectionNoteUseCase,
@@ -696,7 +700,17 @@ class DemoSeeder {
       await this.inTenant(tenantId, locations[key], async () => {
         for (const currency of currencies) {
           await this.use(RegisterManualExchangeRateUseCase).execute(
-            { date, currency, rate: DEMO_MANUAL_RATES[currency](daysAgo) },
+            {
+              date,
+              currency,
+              rate: DEMO_MANUAL_RATES[currency](daysAgo),
+              // DX-586: cada tasa de la demo rige todo su día (también los
+              // abonos de hoy anteriores a la siembra).
+              effectiveFrom: zonedStartOfDay(
+                date,
+                DEMO_LOCATIONS[key].timeZone,
+              ).toISOString(),
+            },
             ownerId,
           );
         }

@@ -4620,6 +4620,15 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       ],
     },
     {
+      spec: 'commission-deductions.e2e-spec.ts',
+      checks:
+        'B → 404 al poner el costo de la orden de laboratorio de A y la comisión de la pasarela del medio de A, y ni el costo ni el % de A cambian (DX-018-bis)',
+      routes: [
+        'PUT /lab-orders/:id/cost',
+        'PUT /payment-methods/:id/gateway-fee',
+      ],
+    },
+    {
       spec: 'reminder-opt-out.e2e-spec.ts',
       checks:
         'B → 404 al consultar los avisos del paciente de A y no se añade ningún evento VIEW a la auditoría de A (DX-214)',

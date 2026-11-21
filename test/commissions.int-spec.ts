@@ -145,6 +145,11 @@ function accrual(c: Clinic, itemId: string): CommissionLineDraft {
     base: 200,
     percent: 30,
     amount: 60,
+    grossBase: 200,
+    labCostDeducted: 0,
+    cardFeePercent: null,
+    cardFeeDeducted: 0,
+    labCostSkippedCurrencies: [],
   };
 }
 
@@ -353,7 +358,11 @@ describe('Honorarios: RLS y liquidación congelada (int, DX-018)', () => {
         itemId: a.itemIds[0],
         settledBase: 200,
         settledAmount: 60,
-        currentBase: 0,
+        settledGross: 200,
+        originalGross: 200,
+        originalLabCost: 0,
+        cardFeePercent: null,
+        currentGross: 0,
         percent: 30,
       }),
     ]);
@@ -363,5 +372,117 @@ describe('Honorarios: RLS y liquidación congelada (int, DX-018)', () => {
         repo.read((r) => r.settledToAdjust(a.professional)),
       ),
     ).toEqual([]);
+  });
+  it('DX-018-bis: los candidatos traen el costo de laboratorio de sus órdenes vivas en la moneda del plan; las de otra moneda, aparte', async () => {
+    const lab = await raw.dentalLab.create({
+      data: { tenantId: a.tenantId, name: 'Laboratorio Dental Caracas' },
+    });
+    const order = (cost: string, currency: string) =>
+      raw.dentalLabOrder.create({
+        data: {
+          tenantId: a.tenantId,
+          locationId: a.locationId,
+          patientId: a.patientId,
+          professionalMembershipId: a.professional.membershipId,
+          labId: lab.id,
+          treatmentPlanItemId: a.itemIds[1],
+          description: 'Corona de zirconio',
+          createdById: a.professional.userId,
+          // Lo pone el trigger.
+          number: 0,
+          cost: new Prisma.Decimal(cost),
+          costCurrency: currency,
+        },
+      });
+    await order('50.10', 'USD');
+    await order('20', 'USD');
+    await order('3650', 'VES');
+    // Anulada: no cuenta (anular en el alta lo rechaza el CHECK de DX-017).
+    const voided = await order('999', 'USD');
+    await raw.dentalLabOrder.update({
+      where: { id: voided.id },
+      data: {
+        cancelledAt: new Date('2026-09-12T15:00:00.000Z'),
+        cancelledById: a.professional.userId,
+        cancelReason: 'Repetida por error',
+      },
+    });
+    const window = {
+      start: new Date('2026-08-31T10:00:00.000Z'),
+      end: new Date('2026-10-01T14:00:00.000Z'),
+    };
+    const read = (terms: CommissionRuleTerms) =>
+      inTenant(a, () =>
+        repo.read((r) => r.candidates(a.professional, terms, window)),
+      );
+    const [withLab] = await read({ ...TERMS, deductLabCost: true });
+    expect(withLab).toMatchObject({
+      itemId: a.itemIds[1],
+      labCost: 70.1,
+      labCostSkippedCurrencies: ['VES'],
+    });
+    // Sin «descontar laboratorio» ni se consulta.
+    const [withoutLab] = await read(TERMS);
+    expect(withoutLab).toMatchObject({
+      labCost: null,
+      labCostSkippedCurrencies: [],
+    });
+    // Otra clínica no ve los costos de A.
+    await expect(
+      inTenant(b, () =>
+        repo.read((r) =>
+          r.candidates(
+            a.professional,
+            { ...TERMS, deductLabCost: true },
+            window,
+          ),
+        ),
+      ),
+    ).resolves.toEqual([]);
+  });
+
+  it('DX-018-bis: la línea congelada cumple base = bruta − laboratorio − pasarela (CHECK)', async () => {
+    const period = { from: '2026-11-01', to: '2026-11-02' };
+    const line = (over: Partial<CommissionLineDraft>) => ({
+      ...accrual(a, a.itemIds[1]),
+      ...over,
+    });
+    await expect(
+      close(a, period, [line({ grossBase: 250, labCostDeducted: 30 })]),
+    ).rejects.toThrow(/commission_settlement_lines_deductions_check/);
+    await expect(
+      close(a, period, [
+        line({ grossBase: 210, cardFeePercent: 0, cardFeeDeducted: 10 }),
+      ]),
+    ).rejects.toThrow(/commission_settlement_lines_deductions_check/);
+    const closed = await close(a, period, [
+      line({
+        grossBase: 260,
+        labCostDeducted: 50.9,
+        cardFeePercent: 3.5,
+        cardFeeDeducted: 9.1,
+        labCostSkippedCurrencies: ['VES'],
+      }),
+    ]);
+    const view = await inTenant(a, () => repo.getSettlement(closed.id));
+    expect(view?.lines[0]).toMatchObject({
+      base: 200,
+      deductions: {
+        grossBase: 260,
+        labCost: 50.9,
+        cardFeePercent: 3.5,
+        cardFee: 9.1,
+        labCostSkippedCurrencies: ['VES'],
+      },
+    });
+    // Las líneas anteriores (sin base bruta) se leen como bruta = base.
+    const sept = await inTenant(a, () => repo.getSettlement(septId));
+    expect(sept?.lines[0].deductions).toEqual({
+      grossBase: 200,
+      labCost: 0,
+      cardFeePercent: null,
+      cardFee: 0,
+      labCostSkippedCurrencies: [],
+    });
   });
 });

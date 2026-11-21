@@ -61,6 +61,7 @@ function mapToEntity(row: PrismaPaymentMethod): ClinicPaymentMethodEntity {
     requiresReference: row.requiresReference,
     proofPolicy: row.proofPolicy,
     allowInPaymentLink: row.allowInPaymentLink,
+    gatewayFeePercent: row.gatewayFeePercent?.toNumber() ?? null,
     legacyMethod: row.legacyMethod,
     adjustments: row.adjustments.map(mapAdjustment),
     createdAt: row.createdAt,
@@ -254,6 +255,51 @@ export class PrismaPaymentMethodRepository implements PaymentMethodRepository {
         }),
       );
       return { ok: true, adjustment };
+    });
+  }
+
+  setGatewayFee(
+    paymentMethodId: string,
+    percent: number | null,
+    audit: AuditRequestContext,
+  ): Promise<ClinicPaymentMethodEntity | null> {
+    return this.prisma.runWithTenant(async (tx) => {
+      if (
+        !(await lockRow(
+          tx,
+          'payment_methods',
+          paymentMethodId,
+          'NO KEY UPDATE',
+        ))
+      ) {
+        return null;
+      }
+      const before = await tx.clinicPaymentMethod.findFirstOrThrow({
+        where: { id: paymentMethodId },
+        select: { gatewayFeePercent: true },
+      });
+      const row = await tx.clinicPaymentMethod.update({
+        where: { id: paymentMethodId },
+        data: {
+          gatewayFeePercent:
+            percent === null ? null : new Prisma.Decimal(percent),
+          updatedById: audit.actor.userId,
+        },
+        include: WITH_ADJUSTMENTS,
+      });
+      const event = configAuditEvent(audit, {
+        action: 'UPDATE',
+        resourceType: 'PAYMENT_METHOD',
+        resourceId: paymentMethodId,
+        reason: 'PAYMENT_METHOD_GATEWAY_FEE_UPDATED',
+        before: {
+          gatewayFeePercent: before.gatewayFeePercent?.toNumber() ?? null,
+        },
+        after: { gatewayFeePercent: percent },
+      });
+      // Sin cambio real no hay evento (configAuditEvent devuelve null).
+      if (event) await writeAuditEvent(tx, event);
+      return mapToEntity(row);
     });
   }
 

@@ -312,6 +312,9 @@ describe('Monedas de la clínica (DX-584, int)', () => {
       data: {
         tenantId: ve.tenantId,
         date: new Date('2026-11-18T00:00:00Z'),
+
+        effectiveFrom: new Date('2026-11-18T00:00:00Z'),
+
         currency: 'VES',
         rate: new Prisma.Decimal('905.5'),
         createdById: ve.userId,

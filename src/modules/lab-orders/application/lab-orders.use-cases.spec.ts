@@ -505,6 +505,97 @@ describe('DX-017 · órdenes de laboratorio', () => {
     });
   });
 
+  describe('DX-018-bis · costo del laboratorio', () => {
+    it('ADMIN lo pone también tras «Enviada»; se normaliza, se audita antes/después y solo ADMIN lo ve', async () => {
+      const { orders, lab, audit } = await setup();
+      const order = await orders.create(
+        'p1',
+        { labId: lab.id, ...CROWN },
+        dentist,
+      );
+      await orders.send(order.id, {}, dentist);
+      audit.record.mockClear();
+      const costed = await orders.setCost(
+        order.id,
+        { cost: '0180.5', currency: 'usd' },
+        admin,
+      );
+      expect(costed.cost).toEqual({ amount: '180.50', currency: 'USD' });
+      expect(audit.record).toHaveBeenCalledTimes(1);
+      expect(audit.record.mock.calls[0][0]).toMatchObject({
+        action: 'UPDATE',
+        resourceType: 'DENTAL_LAB_ORDER',
+        resourceId: order.id,
+        patient: { kind: 'patient', id: 'p1' },
+        metadata: {
+          reason: 'DENTAL_LAB_ORDER_COST_UPDATED',
+          changedFields: ['cost'],
+          configChange: {
+            before: { cost: null, costCurrency: null },
+            after: { cost: '180.50', costCurrency: 'USD' },
+          },
+        },
+      });
+      expect((await orders.get(order.id, 'ADMIN')).cost).toEqual({
+        amount: '180.50',
+        currency: 'USD',
+      });
+      expect((await orders.get(order.id, 'DENTIST')).cost).toBeNull();
+      expect((await orders.get(order.id, 'RECEPTION')).cost).toBeNull();
+      // La prescripción va al laboratorio: sin el costo.
+      expect((await orders.print(order.id, admin)).order.cost).toBeNull();
+
+      const changed = await orders.setCost(
+        order.id,
+        { cost: '3650', currency: 'VES' },
+        admin,
+      );
+      expect(changed.cost).toEqual({ amount: '3650.00', currency: 'VES' });
+      expect(audit.record.mock.calls.at(-1)![0].metadata).toMatchObject({
+        configChange: {
+          before: { cost: '180.50', costCurrency: 'USD' },
+          after: { cost: '3650.00', costCurrency: 'VES' },
+        },
+      });
+      const cleared = await orders.setCost(
+        order.id,
+        { cost: null, currency: null },
+        admin,
+      );
+      expect(cleared.cost).toBeNull();
+    });
+
+    it('importe sin moneda (o al revés) o sin cambios → 400; orden anulada → 409', async () => {
+      const { orders, lab } = await setup();
+      const order = await orders.create(
+        'p1',
+        { labId: lab.id, ...CROWN },
+        dentist,
+      );
+      await expect(
+        orders.setCost(order.id, { cost: '40', currency: null }, admin),
+      ).rejects.toThrow(BadRequestException);
+      await expect(
+        orders.setCost(order.id, { cost: null, currency: 'USD' }, admin),
+      ).rejects.toThrow(BadRequestException);
+      await expect(
+        orders.setCost(order.id, { cost: null, currency: null }, admin),
+      ).rejects.toThrow(BadRequestException);
+      await orders.setCost(order.id, { cost: '40', currency: 'USD' }, admin);
+      await expect(
+        orders.setCost(order.id, { cost: '40.00', currency: 'usd' }, admin),
+      ).rejects.toThrow('El costo ya es ese: no hay nada que cambiar.');
+      await orders.cancel(
+        order.id,
+        { reason: 'El paciente pospone el tratamiento' },
+        dentist,
+      );
+      await expect(
+        orders.setCost(order.id, { cost: '45', currency: 'USD' }, admin),
+      ).rejects.toThrow(ConflictException);
+    });
+  });
+
   describe('DX-017-bis · lecturas limitadas a las sedes permitidas (DX-089)', () => {
     /** Una orden en cada sede del mismo paciente, creadas sin restricción. */
     async function twoLocations() {
