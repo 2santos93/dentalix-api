@@ -15,6 +15,7 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateIf,
 } from 'class-validator';
 import {
   CANCEL_REASON_MAX,
@@ -73,6 +74,18 @@ export class LabOrderPlanItemRefDto {
   @ApiProperty({ format: 'uuid' }) planId!: string;
   @ApiProperty({ example: '16' }) toothNumber!: string;
   @ApiProperty({ example: 'Corona de zirconio' }) procedureName!: string;
+  @ApiProperty({
+    description:
+      'DX-018-bis: moneda del plan. Un costo en otra moneda no se descuenta de los honorarios.',
+  })
+  planCurrency!: string;
+}
+
+/** DX-018-bis: lo que cobra el laboratorio por la orden. */
+export class LabOrderCostDto {
+  @ApiProperty({ example: '180.00', description: 'Decimal en texto.' })
+  amount!: string;
+  @ApiProperty({ description: 'Código ISO 4217.' }) currency!: string;
 }
 
 export class LabOrderAppointmentRefDto {
@@ -169,6 +182,13 @@ export class LabOrderDto {
   @ApiProperty({ type: String, nullable: true }) cancelReason!: string | null;
   @ApiProperty({ type: LabOrderPlanItemRefDto, nullable: true })
   treatmentPlanItem!: LabOrderPlanItemRefDto | null;
+  @ApiProperty({
+    type: LabOrderCostDto,
+    nullable: true,
+    description:
+      'DX-018-bis: costo del trabajo. Solo ADMIN lo ve (null para el resto y en la impresión).',
+  })
+  cost!: LabOrderCostDto | null;
   @ApiProperty({ type: LabOrderAppointmentRefDto, nullable: true })
   appointment!: LabOrderAppointmentRefDto | null;
   @ApiProperty({
@@ -400,6 +420,41 @@ export class CreateLabOrderDto {
   @IsOptional()
   @IsUUID('all', { message: 'La sede debe ser un identificador válido' })
   locationId?: string;
+}
+
+const COST_PATTERN = /^\d{1,12}(\.\d{1,2})?$/;
+const COST_CURRENCY_PATTERN = /^[A-Za-z]{3}$/;
+
+/** DX-018-bis: PUT /lab-orders/:id/cost (solo ADMIN). */
+export class SetLabOrderCostDto {
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: '180.00',
+    description:
+      'Lo que cobra el laboratorio: decimal ≥ 0 con hasta 2 decimales, en texto. null lo quita (con la moneda en null).',
+  })
+  @ValidateIf((_, value) => value !== null)
+  @IsString({
+    message: 'El costo debe ser un número en texto, p. ej. «180.00».',
+  })
+  @Matches(COST_PATTERN, {
+    message: 'El costo debe ser un número ≥ 0 con hasta 2 decimales.',
+  })
+  cost!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Moneda del costo (ISO 4217). Si no es la del plan del ítem, no se descuenta de los honorarios.',
+  })
+  @ValidateIf((_, value) => value !== null)
+  @IsString({ message: 'La moneda debe ser un código ISO 4217 de 3 letras.' })
+  @Matches(COST_CURRENCY_PATTERN, {
+    message: 'La moneda debe ser un código ISO 4217 de 3 letras.',
+  })
+  currency!: string | null;
 }
 
 export class UpdateLabOrderDto {

@@ -77,6 +77,9 @@ export interface LabOrderWrite {
   cancelledAt?: Date;
   cancelledById?: string;
   cancelReason?: string;
+  /** DX-018-bis: el costo y su moneda (null los quita). */
+  cost?: string | null;
+  costCurrency?: string | null;
 }
 
 export interface LabOrderListQuery {
