@@ -1,8 +1,9 @@
-import { csvHeader, csvLine, exactAmount, zonedInstant } from './csv-format';
+import { csvDecimalAmount as exactAmount } from '../../../shared/csv/csv-cells';
+import { csvHeader, csvLine, zonedInstant } from './csv-format';
 import type { ExportColumn } from './export-catalog';
 
 describe('Celdas de la exportación (DX-053)', () => {
-  describe('exactAmount', () => {
+  describe('csvDecimalAmount', () => {
     it('USD y VES con 2 decimales, sin coma flotante', () => {
       expect(exactAmount('1200', 'USD')).toBe('1200.00');
       expect(exactAmount('36.5', 'VES')).toBe('36.50');

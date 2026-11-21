@@ -1,6 +1,8 @@
-import { Prisma } from '@prisma/client';
-import { CLDR_ZERO_FORMAT_DIGITS } from '../../../shared/format/cldr-format-digits';
-import { csvText } from '../../../shared/csv/csv-cells';
+import { csvDecimalAmount, csvText } from '../../../shared/csv/csv-cells';
+import { zonedIsoInstant } from '../../../shared/format/zoned-iso-instant';
+
+/** Instante de la fila: ISO 8601 con el desfase de la sede (ver zonedIsoInstant). */
+export const zonedInstant = zonedIsoInstant;
 import type { ExportColumn } from './export-catalog';
 
 /**
@@ -15,63 +17,6 @@ export type ExportRow = Record<string, unknown>;
 
 const YES = 'Sí';
 const NO = 'No';
-
-/**
- * Importe con los decimales de la pantalla (DX-488, como `csvAmount`) pero
- * EXACTO: llega como texto de NUMERIC y nunca pasa por coma flotante.
- */
-export function exactAmount(value: string, currency: string | null): string {
-  const decimal = new Prisma.Decimal(value);
-  const zero =
-    currency !== null &&
-    CLDR_ZERO_FORMAT_DIGITS.has(currency.trim().toUpperCase()) &&
-    decimal.isInteger();
-  return decimal.toFixed(zero ? 0 : 2);
-}
-
-const zoneFormatters = new Map<string, Intl.DateTimeFormat | null>();
-
-function formatterFor(zone: string): Intl.DateTimeFormat | null {
-  if (!zoneFormatters.has(zone)) {
-    let formatter: Intl.DateTimeFormat | null = null;
-    try {
-      formatter = new Intl.DateTimeFormat('en-US', {
-        timeZone: zone,
-        hourCycle: 'h23',
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        timeZoneName: 'longOffset',
-      });
-    } catch {
-      // Zona inválida (no debería: la sede la valida): se escribe en UTC.
-      formatter = null;
-    }
-    zoneFormatters.set(zone, formatter);
-  }
-  return zoneFormatters.get(zone) ?? null;
-}
-
-/**
- * Instante ISO 8601 a segundos: en la zona de la sede con su desfase
- * (`2026-11-21T09:30:00-04:00`) o, sin zona, en UTC (`…Z`).
- * `isoUtc` llega como `AAAA-MM-DDTHH:MM:SS.mmmZ` (ver `pageQuery`).
- */
-export function zonedInstant(isoUtc: string, zone: string | null): string {
-  const utc = `${isoUtc.slice(0, 19)}Z`;
-  const formatter = zone ? formatterFor(zone) : null;
-  if (!formatter) return utc;
-  const parts: Record<string, string> = {};
-  for (const p of formatter.formatToParts(new Date(isoUtc))) {
-    parts[p.type] = p.value;
-  }
-  // «GMT-04:00», «GMT+05:30» o «GMT» (UTC).
-  const offset = parts.timeZoneName.replace('GMT', '') || '+00:00';
-  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}:${parts.second}${offset}`;
-}
 
 /**
  * El valor tal como llega de `pageQuery` (texto, salvo booleanos y listas);
@@ -101,7 +46,7 @@ function cell(
     case 'date':
       return asText(value);
     case 'amount':
-      return exactAmount(
+      return csvDecimalAmount(
         asText(value),
         typeof currency === 'string' ? currency : null,
       );

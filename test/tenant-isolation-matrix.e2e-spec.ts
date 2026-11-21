@@ -4481,6 +4481,12 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       ],
     },
     {
+      spec: 'clinic-exports.e2e-spec.ts',
+      checks:
+        'B → 404 al descargar la exportación de A, que sigue sin descargar; el historial de B no la ve (DX-053)',
+      routes: ['POST /clinic-exports/:id/download'],
+    },
+    {
       spec: 'bank-reconciliation.e2e-spec.ts',
       checks:
         'B → 404 en las listas, el resumen, el historial, la edición, «Volver a emparejar», la inspección, la vista previa y la importación de la cuenta de A, en los candidatos de un movimiento de A y al deshacer un emparejado de A; el extracto de B con la misma referencia empareja SOLO su abono y la cuenta y el emparejado de A siguen igual (DX-571)',
@@ -5081,12 +5087,6 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       checks:
         'B → el mismo 404 con el token de la pantalla de A en su host, igual que uno inventado o mal formado (DX-588)',
       routes: ['GET /public/waiting-room/:token'],
-    },
-    {
-      spec: 'clinic-exports.e2e-spec.ts',
-      checks:
-        'B → 404 al descargar la exportación de A, que sigue sin descargar; el historial de B no la ve (DX-053)',
-      routes: ['POST /clinic-exports/:id/download'],
     },
     {
       spec: 'commission-payments.e2e-spec.ts',
