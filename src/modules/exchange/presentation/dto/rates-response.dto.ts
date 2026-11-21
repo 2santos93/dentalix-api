@@ -1,6 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ExchangeRateSource } from '@prisma/client';
-import { ManualExchangeRateDto } from './manual-exchange-rate.dto';
 
 /** DX-585: de qué publicación del BCV salen VES y EUR. */
 export class BcvRateInfoDto {
@@ -92,9 +91,9 @@ export class RatesResponseDto {
   manualRates?: ManualRateUsedDto[];
 
   @ApiPropertyOptional({
-    type: [ManualExchangeRateDto],
+    type: [ManualRateUsedDto],
     description:
-      'DX-586: solo con fuente MANUAL. Todas las tasas registradas para el día pedido (`date`), por moneda y hora (`effectiveFrom`), para la lista del día.',
+      'DX-586: solo con fuente MANUAL. Todas las tasas registradas para el día pedido (`date`), por moneda y hora (`effectiveFrom`), para la lista del día. Solo id, moneda, tasa, día y hora: ni el autor ni si un abono la usó (GET /exchange/manual-rates, solo ADMIN).',
   })
-  manualDay?: ManualExchangeRateDto[];
+  manualDay?: ManualRateUsedDto[];
 }

@@ -450,4 +450,123 @@ describe('Tasa congelada en cada abono (DX-375, int)', () => {
       { name: 'payments_exchange_rate_pending_idx', valid: true },
     ]);
   });
+  describe('qué tasa y cuándo (DX-586)', () => {
+    const moment = (id: string) =>
+      raw.payment.findUniqueOrThrow({
+        where: { id },
+        select: {
+          exchangeRateRef: true,
+          exchangeRateQuotedAt: true,
+          exchangeRateValueDate: true,
+        },
+      });
+
+    it('al congelar, el abono guarda su referencia y la BD pone el instante (que luego no cambia)', async () => {
+      const before = Date.now();
+      const id = await pay(auto, 4000, DAY);
+      const row = await moment(id);
+      expect(row.exchangeRateRef).toBe(`AUTOMATIC:${DAY}`);
+      expect(row.exchangeRateValueDate).toBeNull();
+      expect(row.exchangeRateQuotedAt!.getTime()).toBeGreaterThanOrEqual(
+        before - 60_000,
+      );
+      // Ni la API ni nadie lo reescribe.
+      await raw.$executeRaw`UPDATE "payments" SET "exchangeRateQuotedAt" = '2000-01-01T00:00:00Z' WHERE "id" = ${id}::uuid`;
+      expect((await moment(id)).exchangeRateQuotedAt).toEqual(
+        row.exchangeRateQuotedAt,
+      );
+    });
+
+    it('un abono sin tasa no tiene referencia ni instante; el barrido los pone al congelar', async () => {
+      const id = await pay(auto, 80000, OTHER_DAY, null);
+      expect(await moment(id)).toEqual({
+        exchangeRateRef: null,
+        exchangeRateQuotedAt: null,
+        exchangeRateValueDate: null,
+      });
+      await inClinic(auto, () => rebalancer.freezeAllPending());
+      const row = await moment(id);
+      expect(row.exchangeRateRef).toBe(`AUTOMATIC:${OTHER_DAY}`);
+      expect(row.exchangeRateQuotedAt).not.toBeNull();
+    });
+
+    it('el CHECK: referencia e instante juntos, con tasa, y fecha valor solo con BCV', async () => {
+      const id = await pay(auto, 4000, DAY);
+      await expect(
+        raw.$executeRaw`UPDATE "payments" SET "exchangeRateValueDate" = '2026-10-28' WHERE "id" = ${id}::uuid`,
+      ).rejects.toThrow(/payments_exchange_rate_moment_check/);
+      await expect(
+        raw.$executeRaw`UPDATE "payments" SET "exchangeRateRef" = '' WHERE "id" = ${id}::uuid`,
+      ).rejects.toThrow(/payments_exchange_rate_moment_check/);
+      const plain = await pay(auto, 4000, DAY, null);
+      await expect(
+        raw.$executeRaw`UPDATE "payments" SET "exchangeRateRef" = 'AUTOMATIC:2026-10-29' WHERE "id" = ${plain}::uuid`,
+      ).rejects.toThrow(/payments_exchange_rate_moment_check/);
+    });
+
+    it('dos tasas manuales el mismo día: la usada no se cambia y la otra sí (también en la BD)', async () => {
+      const used = await inClinic(manual, () =>
+        manualRepo.create({
+          date: OTHER_DAY,
+          currency: 'EUR',
+          rate: 0.91,
+          effectiveFrom: new Date(`${OTHER_DAY}T12:00:00.000Z`),
+          createdById: manual.userId,
+        }),
+      );
+      const unused = await inClinic(manual, () =>
+        manualRepo.create({
+          date: OTHER_DAY,
+          currency: 'EUR',
+          rate: 0.92,
+          effectiveFrom: new Date(`${OTHER_DAY}T18:30:00.000Z`),
+          createdById: manual.userId,
+        }),
+      );
+      // Un abono en EUR congelado con la de las 12:00 (su referencia).
+      await raw.$executeRaw`
+        INSERT INTO "payments" ("id", "tenantId", "locationId", "treatmentPlanId", "patientId", "amount", "currency", "paidAt", "updatedAt",
+                                "exchangeRateCurrency", "exchangeRateFrom", "exchangeRateTo", "exchangeRateSource", "exchangeRateDate", "exchangeRateRef")
+        SELECT gen_random_uuid(), ${manual.tenantId}::uuid, l."id", ${manual.planId}::uuid, ${manual.patientId}::uuid, 10, 'EUR',
+               ${`${OTHER_DAY}T16:00:00.000Z`}::timestamp, now(), 'USD', 0.91, 1, 'MANUAL', ${OTHER_DAY}::date, ${`MANUAL:${used.id}`}
+          FROM "locations" l WHERE l."tenantId" = ${manual.tenantId}::uuid LIMIT 1`;
+      await expect(
+        inClinic(manual, () => manualRepo.correct(used.id, 0.95)),
+      ).rejects.toBeInstanceOf(ManualExchangeRateInUseError);
+      await expect(
+        raw.$executeRaw`UPDATE "manual_exchange_rates" SET "rate" = 0.95 WHERE "id" = ${used.id}::uuid`,
+      ).rejects.toThrow(/DX-375/);
+      await expect(
+        inClinic(manual, () => manualRepo.correct(unused.id, 0.93)),
+      ).resolves.toMatchObject({ rate: 0.93 });
+      const listed = await inClinic(manual, () =>
+        manualRepo.listDay(OTHER_DAY),
+      );
+      expect(
+        listed.filter((r) => r.currency === 'EUR').map((r) => [r.id, r.inUse]),
+      ).toEqual([
+        [used.id, true],
+        [unused.id, false],
+      ]);
+    });
+
+    it('una réplica anterior que inserta sin hora: rige desde el inicio del día en la sede principal (Caracas)', async () => {
+      const membership = await raw.clinicMembership.findFirstOrThrow({
+        where: { tenantId: manual.tenantId },
+      });
+      await raw.$executeRaw`
+        INSERT INTO "manual_exchange_rates" ("id", "tenantId", "date", "currency", "rate", "createdById", "createdByMembershipId")
+        VALUES (gen_random_uuid(), ${manual.tenantId}::uuid, '2026-10-20', 'GBP', 3900, ${manual.userId}::uuid, ${membership.id}::uuid)`;
+      const row = await raw.manualExchangeRate.findFirstOrThrow({
+        where: { tenantId: manual.tenantId, currency: 'GBP' },
+      });
+      expect(row.effectiveFrom.toISOString()).toBe('2026-10-20T04:00:00.000Z');
+      // Una segunda sin hora del mismo día choca con el único nuevo.
+      await expect(
+        raw.$executeRaw`
+          INSERT INTO "manual_exchange_rates" ("id", "tenantId", "date", "currency", "rate", "createdById", "createdByMembershipId")
+          VALUES (gen_random_uuid(), ${manual.tenantId}::uuid, '2026-10-20', 'GBP', 3950, ${manual.userId}::uuid, ${membership.id}::uuid)`,
+      ).rejects.toThrow(/"tenantId", currency, "effectiveFrom"/);
+    });
+  });
 });

@@ -19,13 +19,13 @@ import type { Response } from 'express';
 import {
   GetRatesForDateUseCase,
   RatesForDate,
+  type ManualRateUsed,
 } from '../application/use-cases/get-rates-for-date.use-case';
 import {
   ConvertAmountUseCase,
   ConvertAmountResult,
 } from '../application/use-cases/convert-amount.use-case';
 import { GetRatesQueryDto } from './dto/get-rates-query.dto';
-import type { ManualExchangeRate } from '../domain/entities/manual-exchange-rate.entity';
 import { ConvertQueryDto } from './dto/convert-query.dto';
 import { RatesResponseDto } from './dto/rates-response.dto';
 import { ConvertResponseDto } from './dto/convert-response.dto';
@@ -88,7 +88,7 @@ export class ExchangeController {
   rates(
     @Query() query: GetRatesQueryDto,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<RatesForDate & { manualDay?: ManualExchangeRate[] }> {
+  ): Promise<RatesForDate & { manualDay?: ManualRateUsed[] }> {
     return withProviderErrors(res, async () => {
       const read = await this.getRatesForDate.forRequest(query.date, {
         currencies: query.currencies,

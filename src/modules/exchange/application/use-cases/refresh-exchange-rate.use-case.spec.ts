@@ -6,7 +6,6 @@ import type { ClinicExchangeSettingsRepository } from '../../domain/ports/clinic
 import type { ClinicCurrenciesRepository } from '../../domain/ports/clinic-currencies-repository.port';
 import {
   EXCHANGE_REFRESH_COOLDOWN_SECONDS,
-  type ExchangeRefreshCooldown,
   type RefreshClaim,
 } from '../../domain/ports/exchange-refresh-cooldown.port';
 import { ExchangeRateUnavailableError } from '../../domain/ports/exchange-rate-provider.port';
@@ -68,7 +67,7 @@ function setup(source: ExchangeRateSource, claim: RefreshClaim = { ok: true }) {
   const uc = new RefreshExchangeRateUseCase(
     settings as unknown as ClinicExchangeSettingsRepository,
     currencies as unknown as ClinicCurrenciesRepository,
-    cooldown as ExchangeRefreshCooldown,
+    cooldown,
     refreshBcv as unknown as RefreshBcvRateUseCase,
     rates as unknown as GetRatesForDateUseCase,
     header as unknown as GetExchangeHeaderUseCase,

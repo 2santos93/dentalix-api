@@ -20,6 +20,8 @@ import {
   ApiTooManyRequestsResponse,
 } from '@nestjs/swagger';
 import type { Response } from 'express';
+import { ExtraPermission } from '@prisma/client';
+import { AllowPermissions } from '../../auth/presentation/guards/permissions.decorator';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
 import { Roles } from '../../auth/presentation/guards/roles.decorator';
@@ -56,6 +58,8 @@ export class ExchangeRefreshController {
     private readonly tenantContext: TenantContextService,
   ) {}
 
+  // Como registrar abonos: también quien tiene el permiso extra de cobrar.
+  @AllowPermissions(ExtraPermission.PAYMENT_REGISTER)
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({

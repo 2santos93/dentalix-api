@@ -212,7 +212,7 @@ describe('GetRatesForDateUseCase', () => {
       ).resolves.toEqual({
         base: 'USD',
         source: 'MANUAL',
-        manualRates: expect.any(Array),
+        manualRates: expect.any(Array) as unknown,
         rates: { VES: 40.12345678 },
         rateDate: '2026-10-30',
       });
@@ -236,7 +236,7 @@ describe('GetRatesForDateUseCase', () => {
       ).resolves.toEqual({
         base: 'USD',
         source: 'MANUAL',
-        manualRates: expect.any(Array),
+        manualRates: expect.any(Array) as unknown,
         rates: {},
         rateDate: '2026-10-29',
       });
@@ -297,7 +297,7 @@ describe('GetRatesForDateUseCase', () => {
       ).resolves.toEqual({
         base: 'USD',
         source: 'MANUAL',
-        manualRates: expect.any(Array),
+        manualRates: expect.any(Array) as unknown,
         rates: { VES: 40 },
         rateDate: '2026-10-30',
       });
@@ -306,7 +306,7 @@ describe('GetRatesForDateUseCase', () => {
       ).resolves.toEqual({
         base: 'USD',
         source: 'MANUAL',
-        manualRates: expect.any(Array),
+        manualRates: expect.any(Array) as unknown,
         rates: {},
         rateDate: '2026-10-31',
       });
@@ -377,7 +377,7 @@ describe('GetRatesForDateUseCase', () => {
       ).resolves.toEqual({
         base: 'USD',
         source: 'MANUAL',
-        manualRates: expect.any(Array),
+        manualRates: expect.any(Array) as unknown,
         rates: { GBP: 4000 },
         rateDate: '2026-10-28',
         backup: { manualSince: SINCE },
@@ -462,7 +462,7 @@ describe('GetRatesForDateUseCase', () => {
       await expect(tenantContext.run(C, () => lookup(SINCE))).resolves.toEqual({
         base: 'USD',
         source: 'MANUAL',
-        manualRates: expect.any(Array),
+        manualRates: expect.any(Array) as unknown,
         rates: {},
         rateDate: '2026-10-30',
       });
@@ -759,7 +759,7 @@ describe('GetRatesForDateUseCase', () => {
       await expect(asM(() => uc.forRequest('2026-10-31'))).resolves.toEqual({
         base: 'USD',
         source: 'MANUAL',
-        manualRates: expect.any(Array),
+        manualRates: expect.any(Array) as unknown,
         rates: {},
         rateDate: '2026-10-31',
       });
@@ -885,14 +885,14 @@ describe('GetRatesForDateUseCase', () => {
       await expect(asM(() => uc.forRequest('2026-10-15'))).resolves.toEqual({
         base: 'USD',
         source: 'MANUAL',
-        manualRates: expect.any(Array),
+        manualRates: expect.any(Array) as unknown,
         rates: {},
         rateDate: '2026-10-15',
       });
       await expect(asM(() => uc.execute('2026-10-30'))).resolves.toEqual({
         base: 'USD',
         source: 'MANUAL',
-        manualRates: expect.any(Array),
+        manualRates: expect.any(Array) as unknown,
         rates: {},
         rateDate: '2026-10-30',
       });
@@ -938,5 +938,38 @@ describe('GetRatesForDateUseCase', () => {
       );
       expect(fetchRates).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+describe('lista del día de las tasas manuales (DX-586)', () => {
+  const TENANT = '58658658-6586-4586-8586-586586586586';
+  const DAY = '2026-11-20';
+
+  it('solo da id, moneda, tasa, día y hora: ni el autor ni si un abono la usó', async () => {
+    const ctx = new TenantContextService();
+    const manual = makeManualRates(
+      { [TENANT]: { [DAY]: { VES: 918.77 } } },
+      ctx,
+    );
+    manual.markUsed(TENANT, DAY, 'VES');
+    const uc = new GetRatesForDateUseCase(
+      { findByDate: () => Promise.resolve([]), upsertMany: jest.fn() },
+      { fetchRates: jest.fn() },
+      makeSettings({ [TENANT]: 'MANUAL' }, ctx),
+      manual,
+      ctx,
+    );
+    const day = await ctx.run(TENANT, () => uc.manualDay(DAY));
+    expect(day).toEqual([
+      {
+        id: manual.rows(TENANT)[0].id,
+        currency: 'VES',
+        rate: 918.77,
+        date: DAY,
+        effectiveFrom: `${DAY}T00:00:00.000Z`,
+      },
+    ]);
+    expect(day[0]).not.toHaveProperty('createdBy');
+    expect(day[0]).not.toHaveProperty('inUse');
   });
 });

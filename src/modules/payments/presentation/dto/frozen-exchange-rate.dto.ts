@@ -90,12 +90,13 @@ export class PaymentRateUsedDto {
   })
   rate!: number;
 
-  @ApiProperty({ example: 'USD', description: 'La moneda de la que se da 1.' })
+  @ApiProperty({
+    description: 'La moneda de la que se da 1 (código ISO 4217).',
+  })
   unit!: string;
 
   @ApiProperty({
-    example: 'VES',
-    description: 'La moneda en que se da la tasa.',
+    description: 'La moneda en que se da la tasa (código ISO 4217).',
   })
   currency!: string;
 

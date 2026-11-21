@@ -372,7 +372,7 @@ describe('tasa congelada de un abono (DX-375)', () => {
         source: 'MANUAL',
         date: DAY,
         quotedOn: DAY,
-        ref: expect.stringMatching(/^MANUAL:[0-9a-f-]{36}$/),
+        ref: expect.stringMatching(/^MANUAL:[0-9a-f-]{36}$/) as string,
         valueDate: null,
       });
 
@@ -463,7 +463,7 @@ describe('tasa congelada de un abono (DX-375)', () => {
         source: 'MANUAL',
         date: FRI,
         quotedOn: SAT,
-        ref: expect.stringMatching(/^MANUAL:[0-9a-f-]{36}$/),
+        ref: expect.stringMatching(/^MANUAL:[0-9a-f-]{36}$/) as string,
         valueDate: null,
       });
     });

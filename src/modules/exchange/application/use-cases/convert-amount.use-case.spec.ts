@@ -488,7 +488,7 @@ describe('ConvertAmountUseCase', () => {
           fromPerBase: 1,
           toPerBase: 4000,
           backup: { manualSince: SINCE },
-          ref: expect.stringMatching(/^MANUAL:[0-9a-f-]{36}$/),
+          ref: expect.stringMatching(/^MANUAL:[0-9a-f-]{36}$/) as string,
           valueDate: null,
         });
         expect(fetchRates).not.toHaveBeenCalled();
@@ -611,7 +611,7 @@ describe('tasa al momento: varias manuales el mismo día (DX-586)', () => {
   // 2026-11-20 16:00 de Caracas.
   const NOW = new Date('2026-11-20T20:00:00.000Z');
 
-  async function setup(options: { maxAgeDays?: number } = {}) {
+  function setup(options: { maxAgeDays?: number } = {}) {
     const tenantContext = new TenantContextService();
     const manual = makeManualRates({}, tenantContext);
     const fetchRates = jest.fn();
@@ -654,11 +654,7 @@ describe('tasa al momento: varias manuales el mismo día (DX-586)', () => {
     return { uc, run, add, fetchRates };
   }
 
-  const quoteAt = (
-    s: Awaited<ReturnType<typeof setup>>,
-    asOf?: string,
-    date = DAY,
-  ) =>
+  const quoteAt = (s: ReturnType<typeof setup>, asOf?: string, date = DAY) =>
     s.run(() =>
       s.uc.quote({
         from: 'VES',
@@ -669,7 +665,7 @@ describe('tasa al momento: varias manuales el mismo día (DX-586)', () => {
     );
 
   it('el abono de las 10:00 usa la de las 08:00 y el de las 15:00 la de las 14:30', async () => {
-    const s = await setup();
+    const s = setup();
     const early = await s.add(DAY, 918.77, '2026-11-20T08:00:00-04:00');
     const late = await s.add(DAY, 920.1, '2026-11-20T14:30:00-04:00');
     await expect(
@@ -688,7 +684,7 @@ describe('tasa al momento: varias manuales el mismo día (DX-586)', () => {
   });
 
   it('antes de la primera del día, la última del día anterior dentro del plazo (DX-384)', async () => {
-    const s = await setup();
+    const s = setup();
     const yesterday = await s.add(
       '2026-11-19',
       915,
@@ -705,7 +701,7 @@ describe('tasa al momento: varias manuales el mismo día (DX-586)', () => {
   });
 
   it('sin plazo y antes de la primera del día: sin tasa', async () => {
-    const s = await setup({ maxAgeDays: 0 });
+    const s = setup({ maxAgeDays: 0 });
     await s.add(DAY, 920.1, '2026-11-20T14:30:00-04:00');
     await expect(
       quoteAt(s, '2026-11-20T10:00:00-04:00'),
@@ -713,7 +709,7 @@ describe('tasa al momento: varias manuales el mismo día (DX-586)', () => {
   });
 
   it('dos monedas manuales que no son USD: las dos referencias unidas con «+»', async () => {
-    const s = await setup();
+    const s = setup();
     const ves = await s.add(DAY, 918.77, '2026-11-20T08:00:00-04:00');
     const eur = await s.add(DAY, 0.9, '2026-11-20T09:00:00-04:00', 'EUR');
     await expect(

@@ -364,13 +364,20 @@ export class GetRatesForDateUseCase {
   /**
    * DX-586: todas las tasas manuales registradas para un día (la lista del
    * día que enseña la web junto a las tasas: varias por moneda, cada una
-   * desde su hora). Sin clínica en el contexto, vacía.
+   * desde su hora). Sin clínica en el contexto, vacía. La ruta la ven los
+   * cuatro roles: solo id, moneda, tasa, día y hora; nunca el autor ni si un
+   * abono la usó (eso es de GET /exchange/manual-rates, solo ADMIN).
    */
-  manualDay(date: string): Promise<ManualExchangeRate[]> {
-    if (this.tenantContext.getTenantId() === undefined) {
-      return Promise.resolve([]);
-    }
-    return this.manual.listDay(date);
+  async manualDay(date: string): Promise<ManualRateUsed[]> {
+    if (this.tenantContext.getTenantId() === undefined) return [];
+    const rows: ManualExchangeRate[] = await this.manual.listDay(date);
+    return rows.map((row) => ({
+      id: row.id,
+      currency: row.currency,
+      rate: row.rate,
+      date: row.date,
+      effectiveFrom: row.effectiveFrom.toISOString(),
+    }));
   }
 
   /**
