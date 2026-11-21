@@ -1,5 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { EXCHANGE_RATE_SOURCES } from '../../../exchange/domain/exchange-rate-source';
+import {
+  EXCHANGE_RATE_SOURCES,
+  type ExchangeRateSource,
+} from '../../../exchange/domain/exchange-rate-source';
 
 /**
  * DX-513-bis: la tasa con que se convirtió la referencia de un ítem a la
@@ -25,7 +28,7 @@ export class ReferenceRateDto {
     description:
       'De dónde salió la tasa: del proveedor o la manual de la clínica.',
   })
-  source!: 'AUTOMATIC' | 'MANUAL';
+  source!: ExchangeRateSource;
 
   @ApiProperty({
     example: '2026-11-07',

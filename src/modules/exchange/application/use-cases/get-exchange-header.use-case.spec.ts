@@ -9,6 +9,7 @@ import {
 import type { ExchangeRateRepository } from '../../domain/ports/exchange-rate-repository.port';
 import type { ExchangeRateSource } from '../../domain/exchange-rate-source';
 import {
+  makeBcvRates,
   makeClinicCurrencies,
   makeManualRates,
   makeSettings,
@@ -62,6 +63,8 @@ interface Setup {
   manual?: Record<string, Record<string, number>>;
   texts?: Record<string, string>;
   fetchRates?: jest.Mock;
+  /** DX-585: las tasas del BCV guardadas (con `source: 'BCV'`). */
+  bcv?: Parameters<typeof makeBcvRates>[0];
 }
 
 function setup(options: Setup = {}) {
@@ -87,7 +90,9 @@ function setup(options: Setup = {}) {
             manualRateMaxAgeDays: options.manualRateMaxAgeDays ?? 3,
           },
         }
-      : {},
+      : options.source === 'BCV'
+        ? { [TENANT]: 'BCV' }
+        : {},
     ctx,
     {
       windows: {
@@ -112,6 +117,8 @@ function setup(options: Setup = {}) {
     ctx,
     new ProviderRatesGate(DEFAULT_PROVIDER_RATES_LIMITS, () => NOW),
     () => NOW,
+    undefined,
+    makeBcvRates(options.bcv ?? []),
   );
   const useCase = new GetExchangeHeaderUseCase(
     currencies,
@@ -150,6 +157,7 @@ describe('GetExchangeHeaderUseCase (DX-584)', () => {
           source: 'AUTOMATIC',
           date: TODAY_CARACAS,
           fetchedAt: FETCHED_AT.toISOString(),
+          valueDate: null,
         },
       ],
       acceptedCurrencies: ['USD', 'VES'],
@@ -200,6 +208,7 @@ describe('GetExchangeHeaderUseCase (DX-584)', () => {
           source: 'AUTOMATIC',
           date: TODAY_CARACAS,
           fetchedAt: null,
+          valueDate: null,
         },
       ],
     });
@@ -246,6 +255,7 @@ describe('GetExchangeHeaderUseCase (DX-584)', () => {
             source: 'MANUAL',
             date: TODAY_CARACAS,
             fetchedAt: null,
+            valueDate: null,
           },
         ],
       });
@@ -346,6 +356,97 @@ describe('GetExchangeHeaderUseCase (DX-584)', () => {
         visible: false,
         reference: null,
       });
+    });
+  });
+
+  // DX-585: fuente BCV.
+  describe('fuente BCV (DX-585)', () => {
+    const BCV_FETCHED_AT = new Date('2026-11-19T20:00:00.000Z');
+    // Hoy en Caracas es el viernes 20: rige la de fecha valor 20, aunque la
+    // del lunes 23 ya esté publicada.
+    const bcv = [
+      {
+        valueDate: '2026-11-20',
+        usdVes: 918.7662,
+        eurVes: 1011.17949056,
+        fetchedAt: BCV_FETCHED_AT,
+      },
+      {
+        valueDate: '2026-11-23',
+        usdVes: 925,
+        eurVes: 1020,
+        fetchedAt: new Date('2026-11-20T20:00:00Z'),
+      },
+    ];
+
+    it('USD contra VES: la del BCV, con su fecha valor y su hora de consulta, sin llamar al proveedor', async () => {
+      const { run, fetchRates } = setup({
+        source: 'BCV',
+        bcv,
+        currencies: { acceptedCurrencies: ['USD', 'VES'] },
+        texts: { VES: 'Bs.' },
+      });
+      const header = await run();
+      expect(header.rates).toEqual([
+        {
+          currency: 'USD',
+          perReference: 918.7662,
+          label: null,
+          source: 'BCV',
+          date: TODAY_CARACAS,
+          fetchedAt: BCV_FETCHED_AT.toISOString(),
+          valueDate: '2026-11-20',
+        },
+      ]);
+      expect(fetchRates).not.toHaveBeenCalled();
+    });
+
+    it('EUR contra VES: Bs. por EUR del BCV (cruzado vía USD)', async () => {
+      const { run } = setup({
+        source: 'BCV',
+        bcv,
+        currencies: { acceptedCurrencies: ['EUR', 'VES'] },
+      });
+      const [row] = (await run()).rates;
+      expect(row.currency).toBe('EUR');
+      expect(row.perReference).toBeCloseTo(1011.17949056, 4);
+      expect(row.valueDate).toBe('2026-11-20');
+    });
+
+    it('una moneda que no es del BCV contra USD sale del proveedor: sin fecha valor y con la hora del proveedor', async () => {
+      const { run } = setup({
+        source: 'BCV',
+        bcv,
+        currencies: {
+          acceptedCurrencies: ['GBP', 'USD'],
+          rateReferenceCurrency: 'USD',
+        },
+        snapshots: { [TODAY_CARACAS]: { GBP: 0.8, VES: 1 } },
+      });
+      expect((await run()).rates).toEqual([
+        expect.objectContaining({
+          currency: 'GBP',
+          source: 'BCV',
+          fetchedAt: FETCHED_AT.toISOString(),
+          valueDate: null,
+        }),
+      ]);
+    });
+
+    it('sin tasa del BCV: «Sin tasa hoy» (null), nunca la del proveedor', async () => {
+      const { run } = setup({
+        source: 'BCV',
+        currencies: { acceptedCurrencies: ['USD', 'VES'] },
+        snapshots: { [TODAY_CARACAS]: { VES: 917.62 } },
+      });
+      expect((await run()).rates).toEqual([
+        expect.objectContaining({
+          perReference: null,
+          source: 'BCV',
+          fetchedAt: null,
+          valueDate: null,
+        }),
+      ]);
     });
   });
 });

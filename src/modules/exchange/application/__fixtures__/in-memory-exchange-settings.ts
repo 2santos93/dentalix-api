@@ -24,6 +24,9 @@ import type {
   HeaderLocation,
 } from '../../domain/ports/clinic-currencies-repository.port';
 
+import type { BcvRateSnapshot } from '../../domain/bcv-rate';
+import type { BcvRateRepository } from '../../domain/ports/bcv-rate-repository.port';
+
 const NO_TENANT = 'sin-tenant';
 
 function tenantOf(ctx: TenantContextService): string {
@@ -294,6 +297,46 @@ export function makeClinicCurrencies(
       return Promise.resolve(
         found === undefined ? { timeZone: 'UTC', currency: 'USD' } : found,
       );
+    },
+  };
+}
+
+/**
+ * DX-585: `bcv_rate_snapshots` en memoria (global, sin clínica), con la misma
+ * regla que la BD: la tasa de un día es la de fecha valor <= ese día más
+ * reciente, no anterior a `oldest`.
+ */
+export function makeBcvRates(
+  initial: Array<
+    Omit<BcvRateSnapshot, 'fetchedAt' | 'origin'> &
+      Partial<Pick<BcvRateSnapshot, 'fetchedAt' | 'origin'>>
+  > = [],
+): BcvRateRepository & { all(): BcvRateSnapshot[] } {
+  const store = new Map<string, BcvRateSnapshot>(
+    initial.map((s) => [
+      s.valueDate,
+      {
+        fetchedAt: new Date(`${s.valueDate}T20:00:00.000Z`),
+        origin: 'BCV',
+        ...s,
+      },
+    ]),
+  );
+  const sorted = () =>
+    [...store.values()].sort((a, b) => b.valueDate.localeCompare(a.valueDate));
+  return {
+    all: sorted,
+    inForce: (date, oldest) =>
+      Promise.resolve(
+        sorted().find((s) => s.valueDate <= date && s.valueDate >= oldest) ??
+          null,
+      ),
+    latestUpTo: (valueDate) =>
+      Promise.resolve(sorted().find((s) => s.valueDate <= valueDate) ?? null),
+    latest: () => Promise.resolve(sorted()[0] ?? null),
+    upsert: (snapshot) => {
+      store.set(snapshot.valueDate, { ...snapshot });
+      return Promise.resolve();
     },
   };
 }

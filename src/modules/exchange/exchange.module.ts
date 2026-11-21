@@ -48,6 +48,12 @@ import {
 import { PROVIDER_RATES_BUDGET } from './application/provider-rates-budget';
 import { ProviderRatesCallerScope } from './application/provider-rates-caller-scope';
 import { PrismaProviderRatesBudget } from './infrastructure/repositories/prisma-provider-rates-budget';
+import { BCV_RATE_PROVIDER } from './domain/ports/bcv-rate-provider.port';
+import { BCV_RATE_REPOSITORY } from './domain/ports/bcv-rate-repository.port';
+import { BcvOfficialRateProvider } from './infrastructure/providers/bcv-rate.provider';
+import { PrismaBcvRateRepository } from './infrastructure/repositories/prisma-bcv-rate.repository';
+import { RefreshBcvRateUseCase } from './application/use-cases/refresh-bcv-rate.use-case';
+import { BcvRateJobs } from './application/jobs/bcv-rate.jobs';
 
 // ConfigModule (ConfigService, used by OpenExchangeRatesProvider) and
 // PrismaModule (PrismaService, used by PrismaExchangeRateRepository) are both
@@ -127,6 +133,12 @@ import { PrismaProviderRatesBudget } from './infrastructure/repositories/prisma-
       provide: EXCHANGE_RATE_REPOSITORY,
       useClass: PrismaExchangeRateRepository,
     },
+    // DX-585: la tasa oficial del BCV (fuente BCV): su consulta, su tabla y
+    // el trabajo programado que la guarda.
+    { provide: BCV_RATE_PROVIDER, useClass: BcvOfficialRateProvider },
+    { provide: BCV_RATE_REPOSITORY, useClass: PrismaBcvRateRepository },
+    RefreshBcvRateUseCase,
+    BcvRateJobs,
   ],
   // Exported so other modules (PaymentsModule -> RecordPayment/GetPlanBalance/
   // GetPaymentsTotals) can inject ConvertAmountUseCase to convert each

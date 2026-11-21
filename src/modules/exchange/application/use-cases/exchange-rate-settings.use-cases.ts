@@ -81,6 +81,12 @@ export class GetExchangeRateSettingsUseCase {
  * que los saldos de antes del cambio no se mueven. Guardar MANUAL otra vez
  * conserva el día. Volver a AUTOMATIC lo limpia.
  *
+ * DX-585: BCV (VES y EUR de la tasa oficial del BCV, el resto automático) se
+ * guarda como AUTOMATIC: `manualSince` null, mismos hooks de congelación y de
+ * abonos sin tasa y el mismo evento de auditoría (EXCHANGE_RATE_SOURCE con el
+ * antes y el después). Las tasas manuales registradas se conservan, pero con
+ * BCV no se usan.
+ *
  * DX-375 (BE-047): antes de cambiar la fuente se congela la tasa de todos los
  * abonos de la clínica que la esperaban, con la fuente de ANTES
  * (`ExchangeSourceChangeHooks`): un abono ya cobrado, también uno de hoy
@@ -170,7 +176,8 @@ export class UpdateExchangeRateSettingsUseCase {
             manualRateMaxAgeDays: days,
           }
         : {
-            source: 'AUTOMATIC',
+            // DX-585: BCV se comporta como AUTOMATIC: sin `manualSince`.
+            source,
             manualSince: null,
             manualRateMaxAgeDays: days,
           };

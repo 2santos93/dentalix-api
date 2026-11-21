@@ -7,6 +7,7 @@ import {
   DOC_TYPE_NAME_DESCRIPTION,
 } from '../../../patients/presentation/dto/doc-type-input';
 import { FrozenExchangeRateDto } from './frozen-exchange-rate.dto';
+import { EXCHANGE_RATE_SOURCES } from '../../../exchange/domain/exchange-rate-source';
 
 // Respuesta de GET /payments/:id/receipt y POST /payments/:id/receipt/print
 // (DX-136). Solo documenta el contrato para Swagger: el caso de uso ya
@@ -237,7 +238,7 @@ export class ReceiptChangeRateDto {
   toPerBase!: number;
 
   @ApiProperty({
-    enum: ['AUTOMATIC', 'MANUAL'],
+    enum: EXCHANGE_RATE_SOURCES,
     enumName: 'ExchangeRateSource',
   })
   source!: string;

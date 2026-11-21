@@ -5,6 +5,7 @@ import {
   type ExchangeRateSource,
 } from '../../domain/exchange-rate-source';
 import { headerCurrencies, perReference } from '../../domain/clinic-currencies';
+import { BCV_CURRENCIES } from '../../domain/bcv-rate';
 import {
   CLINIC_CURRENCIES_REPOSITORY,
   type ClinicCurrenciesRepository,
@@ -39,8 +40,17 @@ export interface ExchangeHeaderRate {
   source: ExchangeRateSource;
   /** Día civil de la tasa (AAAA-MM-DD): hoy en la sede o, con MANUAL y el plazo de DX-384, uno anterior. */
   date: string;
-  /** AUTOMATIC: cuándo se guardó la tasa del proveedor (ISO 8601). MANUAL o sin tasa: null. */
+  /**
+   * AUTOMATIC: cuándo se guardó la tasa del proveedor (ISO 8601). BCV: la de
+   * la fila del BCV (o la del proveedor si la fila no usa VES ni EUR). MANUAL
+   * o sin tasa: null.
+   */
   fetchedAt: string | null;
+  /**
+   * DX-585: con BCV, la «Fecha Valor» de la tasa del BCV que usa la fila (si
+   * la moneda o la referencia es VES o EUR). Si no, null.
+   */
+  valueDate: string | null;
 }
 
 export interface ExchangeHeader {
@@ -72,6 +82,10 @@ export interface ExchangeHeader {
  * proveedor no da la tasa (caído, caché negativa o presupuesto agotado), las
  * filas salen con `perReference: null` en vez de un error: el menú dice «Sin
  * tasa hoy». Con el indicador apagado no lee ninguna tasa.
+ *
+ * DX-585: con fuente BCV, `source` es BCV en todas las filas (la fuente de la
+ * clínica, la que congela un abono) y las que usan VES o EUR llevan la
+ * «Fecha Valor» y la hora de consulta de la tasa del BCV.
  */
 @Injectable()
 export class GetExchangeHeaderUseCase {
@@ -123,6 +137,12 @@ export class GetExchangeHeaderUseCase {
     const source = read?.source ?? (await this.settings.get()).source;
     const date = read?.rateDate ?? today;
     const fetchedAt = await this.fetchedAt(read, wanted);
+    // DX-585: una fila «del BCV» es la que usa VES o EUR con fuente BCV.
+    const bcv = read?.source === 'BCV' ? (read.bcv ?? null) : null;
+    const bcvOf = (currency: string) =>
+      BCV_CURRENCIES.includes(currency) || BCV_CURRENCIES.includes(reference)
+        ? bcv
+        : null;
     return {
       visible: true,
       reference,
@@ -137,7 +157,10 @@ export class GetExchangeHeaderUseCase {
           label: texts[currency] ?? null,
           source,
           date,
-          fetchedAt: value === null ? null : fetchedAt,
+          fetchedAt:
+            value === null ? null : (bcvOf(currency)?.fetchedAt ?? fetchedAt),
+          valueDate:
+            value === null ? null : (bcvOf(currency)?.valueDate ?? null),
         };
       }),
       acceptedCurrencies: clinic.acceptedCurrencies,
@@ -166,17 +189,24 @@ export class GetExchangeHeaderUseCase {
   }
 
   /**
-   * Con AUTOMATIC, el momento en que se guardó la tasa del proveedor de ese
-   * día (el más reciente de las monedas del indicador); con MANUAL, null.
+   * Con AUTOMATIC (y BCV, para las monedas que no son del BCV), el momento
+   * en que se guardó la tasa del proveedor de ese día (el más reciente de las
+   * monedas del indicador); con MANUAL, null.
    */
   private async fetchedAt(
     read: RatesForDate | null,
     currencies: string[],
   ): Promise<string | null> {
-    if (!read || read.source !== 'AUTOMATIC') return null;
+    if (!read || read.source === 'MANUAL') return null;
+    // DX-585: con BCV, VES y EUR no salen de la caché del proveedor.
+    const fromProvider =
+      read.source === 'BCV'
+        ? currencies.filter((c) => !BCV_CURRENCIES.includes(c))
+        : currencies;
+    if (fromProvider.length === 0) return null;
     const rows = await this.snapshots.findByDate(read.rateDate);
     const times = rows
-      .filter((r) => currencies.includes(r.currency))
+      .filter((r) => fromProvider.includes(r.currency))
       .map((r) => r.fetchedAt.getTime());
     return times.length > 0 ? new Date(Math.max(...times)).toISOString() : null;
   }

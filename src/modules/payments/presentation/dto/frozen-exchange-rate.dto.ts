@@ -1,5 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { EXCHANGE_RATE_SOURCES } from '../../../exchange/domain/exchange-rate-source';
+import {
+  EXCHANGE_RATE_SOURCES,
+  type ExchangeRateSource,
+} from '../../../exchange/domain/exchange-rate-source';
 
 export const EXCHANGE_RATE_STATUS_DESCRIPTION =
   'DX-375: la tasa del abono. NOT_NEEDED: está en la moneda de su destino. ' +
@@ -36,9 +39,9 @@ export class FrozenExchangeRateDto {
     enum: EXCHANGE_RATE_SOURCES,
     enumName: 'ExchangeRateSource',
     description:
-      'AUTOMATIC: la del proveedor; MANUAL: la que registró la clínica (para ese día o, DX-384, la última dentro del plazo de la clínica)',
+      'AUTOMATIC: la del proveedor; MANUAL: la que registró la clínica (para ese día o, DX-384, la última dentro del plazo de la clínica); BCV (DX-585): VES y EUR de la tasa oficial del BCV que regía ese día, el resto del proveedor',
   })
-  source!: 'AUTOMATIC' | 'MANUAL';
+  source!: ExchangeRateSource;
 
   @ApiProperty({
     example: '2026-10-30',

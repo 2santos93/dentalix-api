@@ -177,6 +177,68 @@ describe('Fuente de la tasa de la clínica (DX-374)', () => {
     expect(settings.settingsOf(TENANT).source).toBe('AUTOMATIC');
   });
 
+  // DX-585: la fuente BCV se comporta como AUTOMATIC (sin manualSince).
+  it('pasar a BCV deja manualSince null, congela antes, reintenta después y lo audita', async () => {
+    const order: string[] = [];
+    hooks.register(() => {
+      order.push(`antes:${settings.settingsOf(TENANT).source}`);
+      return Promise.resolve();
+    });
+    hooks.registerAfterRatesChange(() => {
+      order.push(`después:${settings.settingsOf(TENANT).source}`);
+      return Promise.resolve();
+    });
+    await expect(
+      inClinic(() => update().execute({ source: 'BCV' }, ctx)),
+    ).resolves.toMatchObject({ source: 'BCV', manualSince: null });
+    expect(settings.settingsOf(TENANT)).toEqual({
+      source: 'BCV',
+      manualSince: null,
+      manualRateMaxAgeDays: 3,
+    });
+    expect(order).toEqual(['antes:AUTOMATIC', 'después:BCV']);
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        resourceType: 'CLINIC_SETTINGS',
+        metadata: {
+          reason: 'EXCHANGE_RATE_SOURCE',
+          statusChange: { from: 'AUTOMATIC', to: 'BCV' },
+        },
+      }),
+    );
+  });
+
+  it('de MANUAL a BCV limpia el día de inicio; de BCV a MANUAL lo fija hoy', async () => {
+    await inClinic(() => update().execute({ source: 'MANUAL' }, ctx));
+    await expect(
+      inClinic(() => update().execute({ source: 'BCV' }, ctx)),
+    ).resolves.toMatchObject({ source: 'BCV', manualSince: null });
+    now = new Date(Date.UTC(2026, 10, 5, 15, 0));
+    await expect(
+      inClinic(() => update().execute({ source: 'MANUAL' }, ctx)),
+    ).resolves.toMatchObject({ source: 'MANUAL', manualSince: '2026-11-05' });
+    expect(
+      audit.record.mock.calls.map(
+        ([event]: [{ metadata: { statusChange: unknown } }]) =>
+          event.metadata.statusChange,
+      ),
+    ).toEqual([
+      { from: 'AUTOMATIC', to: 'MANUAL' },
+      { from: 'MANUAL', to: 'BCV' },
+      { from: 'BCV', to: 'MANUAL' },
+    ]);
+  });
+
+  it('guardar BCV otra vez no deja evento ni corre los hooks', async () => {
+    await inClinic(() => update().execute({ source: 'BCV' }, ctx));
+    audit.record.mockReset();
+    const before = jest.fn().mockResolvedValue(undefined);
+    hooks.register(before);
+    await inClinic(() => update().execute({ source: 'BCV' }, ctx));
+    expect(audit.record).not.toHaveBeenCalled();
+    expect(before).not.toHaveBeenCalled();
+  });
+
   it('una fuente desconocida es 400 en español y no escribe', async () => {
     const run = inClinic(() =>
       update().execute({ source: 'PROVIDER' as never }, ctx),
