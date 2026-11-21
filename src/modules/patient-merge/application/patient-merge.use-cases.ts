@@ -18,6 +18,8 @@ import type { MergeFieldChoices } from '../domain/merge-fields';
 import {
   PATIENT_MERGE_REPOSITORY,
   type DuplicatePair,
+  type MergeLeftover,
+  type MergeLeftoversResult,
   type MergePreview,
   type MergeResult,
   type PatientMergeRepository,
@@ -130,5 +132,44 @@ export class MergePatientsUseCase {
       this.now(),
       ctx,
     );
+  }
+}
+
+/**
+ * DX-266-bis: lo que quedó en los pacientes fusionados en `keptId` (una
+ * escritura que llegó en el mismo instante que la fusión). Solo los que
+ * tienen algo pendiente.
+ */
+@Injectable()
+export class ListMergeLeftoversUseCase {
+  constructor(
+    @Inject(PATIENT_MERGE_REPOSITORY)
+    private readonly repo: PatientMergeRepository,
+  ) {}
+
+  async execute(keptId: string): Promise<{ items: MergeLeftover[] }> {
+    const items = await this.repo.leftovers(keptId.toLowerCase());
+    if (!items) throw new NotFoundException(MERGE_PATIENT_NOT_FOUND_MESSAGE);
+    return { items };
+  }
+}
+
+/**
+ * DX-266-bis: «Volver a pasar al conservado». La misma fusión de la BD sobre
+ * un absorbido ya retirado; sin nada pendiente no hace nada (ni audita).
+ */
+@Injectable()
+export class MoveMergeLeftoversUseCase {
+  constructor(
+    @Inject(PATIENT_MERGE_REPOSITORY)
+    private readonly repo: PatientMergeRepository,
+    @Inject(PATIENT_MERGE_CLOCK) private readonly now: MergeClock,
+  ) {}
+
+  execute(
+    absorbedId: string,
+    ctx: AuditRequestContext,
+  ): Promise<MergeLeftoversResult> {
+    return this.repo.moveLeftovers(absorbedId.toLowerCase(), this.now(), ctx);
   }
 }

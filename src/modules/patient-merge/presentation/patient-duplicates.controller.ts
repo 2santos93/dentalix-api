@@ -38,11 +38,15 @@ import type { AuditRequestContext } from '../../audit/domain/audit-request-conte
 import {
   DismissDuplicatePairUseCase,
   ListDuplicatePatientsUseCase,
+  ListMergeLeftoversUseCase,
   MergePatientsUseCase,
+  MoveMergeLeftoversUseCase,
   PreviewPatientMergeUseCase,
   type DuplicatePage,
 } from '../application/patient-merge.use-cases';
 import type {
+  MergeLeftover,
+  MergeLeftoversResult,
   MergePreview,
   MergeResult,
 } from '../domain/patient-merge-repository.port';
@@ -50,10 +54,14 @@ import {
   DismissDuplicateDto,
   DuplicatePageDto,
   ListDuplicatesQueryDto,
+  MergeLeftoverListDto,
+  MergeLeftoversQueryDto,
+  MergeLeftoversResultDto,
   MergePatientsDto,
   MergePreviewDto,
   MergePreviewQueryDto,
   MergeResultDto,
+  MoveMergeLeftoversDto,
 } from './dto/patient-merge.dto';
 
 export const PATIENT_MERGE_FORBIDDEN_MESSAGE =
@@ -77,6 +85,8 @@ export class PatientDuplicatesController {
     private readonly dismissPair: DismissDuplicatePairUseCase,
     private readonly previewMerge: PreviewPatientMergeUseCase,
     private readonly mergePatients: MergePatientsUseCase,
+    private readonly listLeftovers: ListMergeLeftoversUseCase,
+    private readonly moveLeftovers: MoveMergeLeftoversUseCase,
     private readonly tenantContext: TenantContextService,
   ) {}
 
@@ -181,5 +191,54 @@ export class PatientDuplicatesController {
       },
       this.ctx(req),
     );
+  }
+
+  @Get('merge-leftovers')
+  @ApiOperation({
+    summary: 'Lo que quedó en los pacientes fusionados en este (solo ADMIN)',
+    description:
+      'DX-266-bis. Una escritura que validó al absorbido justo antes de la fusión y confirmó ' +
+      'justo después (p. ej. una cita creada en ese mismo segundo) queda en el absorbido. ' +
+      'Lista los pacientes fusionados en `keptId` que tienen algo así, con cuántas filas por ' +
+      'tabla y por categoría. Vacío casi siempre. Solo recuentos: ningún dato de las filas.',
+  })
+  @ApiOkResponse({ type: MergeLeftoverListDto })
+  @ApiBadRequestResponse({ description: 'Parámetros no válidos' })
+  @ApiNotFoundResponse({
+    description: 'El paciente no existe en la clínica o está archivado',
+  })
+  leftovers(
+    @Query() query: MergeLeftoversQueryDto,
+  ): Promise<{ items: MergeLeftover[] }> {
+    return this.listLeftovers.execute(query.keptId);
+  }
+
+  @Post('merge-leftovers')
+  @ApiOperation({
+    summary: 'Volver a pasar al conservado lo que llegó tarde (solo ADMIN)',
+    description:
+      'DX-266-bis. Sobre un paciente ya fusionado: la misma fusión de la BD (misma lista de ' +
+      'tablas, mismo orden de bloqueo, mismos bloqueos de negocio y «uno por paciente») pasa ' +
+      'al conservado lo que quedó en el absorbido y anula sus enlaces públicos vivos. ' +
+      'Idempotente: sin nada pendiente no cambia nada ni deja auditoría. Con algo, un ' +
+      'audit_event (UPDATE de PATIENT, `PATIENT_MERGE_LEFTOVERS_MOVED`) en cada paciente con ' +
+      'lo movido por tabla y cantidad.',
+  })
+  @ApiCreatedResponse({ type: MergeLeftoversResultDto })
+  @ApiBadRequestResponse({ description: 'Parámetros no válidos' })
+  @ApiNotFoundResponse({ description: 'El paciente no existe en la clínica' })
+  @ApiConflictResponse({
+    description:
+      'El paciente no está fusionado (`MERGE_PATIENT_NOT_MERGED`), el conservado está ' +
+      'archivado o se fusionó con otro mientras tanto (`MERGE_PATIENT_INACTIVE`), o lo que ' +
+      'quedó choca con el conservado (`MERGE_OVERLAPPING_APPOINTMENTS`, ' +
+      '`MERGE_OPENING_BALANCE_CONFLICT`, `MERGE_OPEN_PAYMENT_PROMISES`, ' +
+      '`MERGE_TWO_ACTIVE_ORTHO_CASES`).',
+  })
+  move(
+    @Body() dto: MoveMergeLeftoversDto,
+    @Req() req: AuditableRequest,
+  ): Promise<MergeLeftoversResult> {
+    return this.moveLeftovers.execute(dto.absorbedId, this.ctx(req));
   }
 }
