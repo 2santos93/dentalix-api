@@ -341,6 +341,9 @@ describe('Tasa de cambio por clínica (e2e, DX-374)', () => {
     await expect(rates(manual, TODAY)).resolves.toEqual({
       base: 'USD',
       source: 'MANUAL',
+      // DX-586: las manuales que rigen y la lista del día.
+      manualRates: expect.any(Array) as unknown,
+      manualDay: expect.any(Array) as unknown,
       rates: {},
       rateDate: TODAY,
     });
@@ -428,6 +431,9 @@ describe('Tasa de cambio por clínica (e2e, DX-374)', () => {
     await expect(rates(manual, TODAY)).resolves.toEqual({
       base: 'USD',
       source: 'MANUAL',
+      // DX-586: las manuales que rigen y la lista del día.
+      manualRates: expect.any(Array) as unknown,
+      manualDay: expect.any(Array) as unknown,
       rates: { VES: 40.12345678 },
       rateDate: TODAY,
     });

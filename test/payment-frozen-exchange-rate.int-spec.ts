@@ -498,10 +498,14 @@ describe('Tasa congelada en cada abono (DX-375, int)', () => {
       await expect(
         raw.$executeRaw`UPDATE "payments" SET "exchangeRateRef" = '' WHERE "id" = ${id}::uuid`,
       ).rejects.toThrow(/payments_exchange_rate_moment_check/);
+      // Sin tasa congelada, la BD no deja referencia (ni instante).
       const plain = await pay(auto, 4000, DAY, null);
-      await expect(
-        raw.$executeRaw`UPDATE "payments" SET "exchangeRateRef" = 'AUTOMATIC:2026-10-29' WHERE "id" = ${plain}::uuid`,
-      ).rejects.toThrow(/payments_exchange_rate_moment_check/);
+      await raw.$executeRaw`UPDATE "payments" SET "exchangeRateRef" = 'AUTOMATIC:2026-10-29' WHERE "id" = ${plain}::uuid`;
+      expect(await moment(plain)).toEqual({
+        exchangeRateRef: null,
+        exchangeRateQuotedAt: null,
+        exchangeRateValueDate: null,
+      });
     });
 
     it('dos tasas manuales el mismo día: la usada no se cambia y la otra sí (también en la BD)', async () => {

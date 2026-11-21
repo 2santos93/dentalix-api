@@ -15,7 +15,6 @@ import {
   ApiForbiddenResponse,
   ApiOkResponse,
   ApiOperation,
-  ApiServiceUnavailableResponse,
   ApiTags,
   ApiTooManyRequestsResponse,
 } from '@nestjs/swagger';
@@ -32,14 +31,13 @@ import {
   auditRequestContext,
   type AuditableRequest,
 } from '../../audit/presentation/audit-request-context';
-import type { ExchangeHeader } from '../application/use-cases/get-exchange-header.use-case';
 import {
   EXCHANGE_REFRESH_MANUAL_MESSAGE,
   ExchangeRefreshTooSoonError,
   RefreshExchangeRateUseCase,
+  type ExchangeRefreshResult,
 } from '../application/use-cases/refresh-exchange-rate.use-case';
-import { ExchangeHeaderDto } from './dto/exchange-header.dto';
-import { withProviderErrors } from './exchange-provider-errors';
+import { ExchangeRefreshDto } from './dto/exchange-header.dto';
 
 /**
  * DX-586: «Actualizar tasa» del indicador del menú. Quien cobra (ADMIN y
@@ -73,30 +71,29 @@ export class ExchangeRefreshController {
       '`EXCHANGE_RATE_REFRESH_MANUAL`. Una vez cada 5 minutos por clínica: ' +
       'antes, 429 `EXCHANGE_RATE_REFRESH_TOO_SOON` con «Vuelve a intentarlo ' +
       'en N min», `retryAfterSeconds` y `Retry-After`. El turno se gasta ' +
-      'aunque la consulta falle. Tras consultar, los abonos sin tasa se ' +
+      'aunque la consulta falle. Si sale bien, los abonos sin tasa se ' +
       'reintentan ya y queda el evento CLINIC_SETTINGS con reason ' +
-      'EXCHANGE_RATE_REFRESH. Devuelve el mismo cuerpo que GET ' +
-      '/exchange/header, ya recalculado.',
+      'EXCHANGE_RATE_REFRESH. Devuelve siempre 200 con el mismo cuerpo que ' +
+      'GET /exchange/header, ya recalculado, más `refresh`: `ok` o, si la ' +
+      'fuente no dio la tasa (caída, presupuesto agotado o cordura del BCV), ' +
+      '`ok: false` con `code` y `message` (como el indicador, nunca un 5xx ' +
+      'por la fuente).',
   })
-  @ApiOkResponse({ type: ExchangeHeaderDto })
+  @ApiOkResponse({ type: ExchangeRefreshDto })
   @ApiConflictResponse({ description: EXCHANGE_REFRESH_MANUAL_MESSAGE })
   @ApiTooManyRequestsResponse({
     description:
-      '`EXCHANGE_RATE_REFRESH_TOO_SOON` (una vez cada 5 min por clínica), `EXCHANGE_RATE_BUDGET_EXCEEDED` (AUTOMATIC: presupuesto del proveedor agotado) o el límite global de peticiones. Retry-After en segundos.',
-  })
-  @ApiServiceUnavailableResponse({
-    description:
-      '`EXCHANGE_RATE_UNAVAILABLE`: ni el BCV ni su respaldo (o el proveedor) dieron la tasa; `EXCHANGE_RATE_BCV_REJECTED`: la tasa leída no pasó la cordura.',
+      '`EXCHANGE_RATE_REFRESH_TOO_SOON` (una vez cada 5 min por clínica) o el límite global de peticiones. Retry-After en segundos.',
   })
   @ApiForbiddenResponse({ description: 'Rol que no cobra' })
   async refreshRates(
     @Req() req: AuditableRequest,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<ExchangeHeader> {
+  ): Promise<ExchangeRefreshResult> {
     const ctx = auditRequestContext(req, this.tenantContext);
     if (!ctx) throw new Error('Sin sesión de clínica detrás del RolesGuard');
     try {
-      return await withProviderErrors(res, () => this.refresh.execute(ctx));
+      return await this.refresh.execute(ctx);
     } catch (error) {
       if (error instanceof ExchangeRefreshTooSoonError) {
         res.setHeader('Retry-After', String(error.retryAfterSeconds));

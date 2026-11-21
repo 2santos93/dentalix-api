@@ -24,7 +24,10 @@ import { pinCatalogCurrency } from './support/catalog-currency';
 import { fixedSedeDay, SEDE_FIXTURE_ZONE } from './support/sede-clock';
 import { addCivilDays } from '../src/shared/time/civil-day';
 import { EXCHANGE_RATE_CLOCK } from '../src/modules/exchange/application/use-cases/manual-exchange-rates.use-cases';
-import { EXCHANGE_REFRESH_MANUAL_MESSAGE } from '../src/modules/exchange/application/use-cases/refresh-exchange-rate.use-case';
+import {
+  EXCHANGE_REFRESH_BCV_UNAVAILABLE_MESSAGE,
+  EXCHANGE_REFRESH_MANUAL_MESSAGE,
+} from '../src/modules/exchange/application/use-cases/refresh-exchange-rate.use-case';
 import { MANUAL_RATE_IN_USE_MESSAGE } from '../src/modules/exchange/domain/exchange-rate-source';
 
 // DX-586 por HTTP: la tasa «al momento». Un servidor falso en 127.0.0.1 hace
@@ -386,6 +389,7 @@ describe('Tasa al momento (e2e, DX-586)', () => {
       expect(res.body).toMatchObject({
         visible: true,
         reference: 'VES',
+        refresh: { ok: true, code: null, message: null },
         rates: [
           {
             currency: 'USD',
@@ -474,13 +478,29 @@ describe('Tasa al momento (e2e, DX-586)', () => {
       });
     });
 
-    it('el BCV y su respaldo caídos: 503 en español', async () => {
+    it('el BCV y su respaldo caídos: 200 con el indicador de siempre y refresh.ok false, sin auditar', async () => {
       await freeRefresh(bcvClinic);
       stubRoutes = { '/bcv/': { status: 500, body: 'caído' } };
+      const audits = () =>
+        raw.auditEvent.count({
+          where: {
+            tenantId: bcvClinic.tenantId,
+            metadata: { path: ['reason'], equals: 'EXCHANGE_RATE_REFRESH' },
+          },
+        });
+      const before = await audits();
       const res = await as(api().post(REFRESH), bcvClinic, reception)
         .send({})
-        .expect(503);
-      expect(res.body).toMatchObject({ code: 'EXCHANGE_RATE_UNAVAILABLE' });
+        .expect(200);
+      expect(res.body).toMatchObject({
+        visible: true,
+        refresh: {
+          ok: false,
+          code: 'EXCHANGE_RATE_UNAVAILABLE',
+          message: EXCHANGE_REFRESH_BCV_UNAVAILABLE_MESSAGE,
+        },
+      });
+      expect(await audits()).toBe(before);
     });
   });
 

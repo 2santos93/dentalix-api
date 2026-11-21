@@ -146,7 +146,13 @@ export class RegisterManualExchangeRateUseCase {
     if (date > today) {
       throw badRequest(MANUAL_RATE_FUTURE_DATE_MESSAGE, 'date');
     }
-    const effectiveFrom = this.effectiveFrom(input, date, today, now, timeZone);
+    const effectiveFrom = await this.effectiveFrom(
+      input,
+      { date, currency },
+      today,
+      now,
+      timeZone,
+    );
     let saved: ManualExchangeRate;
     try {
       saved = await this.repo.create({
@@ -179,18 +185,25 @@ export class RegisterManualExchangeRateUseCase {
   /**
    * DX-586: desde cuándo rige la tasa. La pedida tiene que ser un instante
    * con zona, no futuro y del mismo día civil `date` en la sede de
-   * referencia. Sin ella: ahora (hoy) o el inicio del día (uno anterior,
-   * como las tasas de antes de DX-586).
+   * referencia. Sin ella: ahora si es hoy y ya hay otra de esa moneda hoy (la
+   * nueva rige desde ya); si es la primera del día de esa moneda (o un día
+   * anterior), desde el inicio del día: así una clínica que registra una
+   * tasa al día sigue cubriendo el día entero, como antes de DX-586.
    */
-  private effectiveFrom(
+  private async effectiveFrom(
     input: RegisterManualExchangeRateInput,
-    date: string,
+    rate: { date: string; currency: string },
     today: string,
     now: Date,
     timeZone: string,
-  ): Date {
+  ): Promise<Date> {
+    const { date } = rate;
     if (input.effectiveFrom === undefined || input.effectiveFrom === null) {
-      return date === today ? now : zonedStartOfDay(date, timeZone);
+      if (date !== today) return zonedStartOfDay(date, timeZone);
+      const sameDay = await this.repo.listDay(date);
+      return sameDay.some((r) => r.currency === rate.currency)
+        ? now
+        : zonedStartOfDay(date, timeZone);
     }
     const instant = parseEffectiveFrom(input.effectiveFrom);
     if (!instant) {

@@ -18,7 +18,8 @@
 --    fecha valor solo con BCV.
 -- 2. Trigger payments_exchange_rate_quoted_at: al congelar (INSERT con
 --    "exchangeRateRef", o UPDATE que la pone) fija "exchangeRateQuotedAt" con
---    now() de la BD; después no cambia (y sin referencia, NULL). Una réplica anterior no escribe
+--    now() de la BD; después no cambia (y sin referencia, NULL). Si se quita
+--    la tasa congelada, se quitan también las tres. Una réplica anterior no escribe
 --    "exchangeRateRef": sus abonos quedan con las tres NULL, como antes. Abre
 --    la puerta de la fusión de pacientes (DX-266), como las demás guardas.
 -- 3. "manual_exchange_rates"."effectiveFrom" (TIMESTAMPTZ, NULL aquí; el
@@ -76,7 +77,12 @@ BEGIN
   END IF;
   -- El instante de la BD en UTC (DX-226: nunca la zona de la sesión), como
   -- TIMESTAMPTZ.
-  IF NEW."exchangeRateRef" IS NULL THEN
+  -- Sin tasa congelada no hay qué tasa ni cuándo (las tres van con ella).
+  IF NEW."exchangeRateFrom" IS NULL THEN
+    NEW."exchangeRateRef" := NULL;
+    NEW."exchangeRateValueDate" := NULL;
+    NEW."exchangeRateQuotedAt" := NULL;
+  ELSIF NEW."exchangeRateRef" IS NULL THEN
     NEW."exchangeRateQuotedAt" := NULL;
   ELSIF TG_OP = 'INSERT' OR OLD."exchangeRateRef" IS NULL THEN
     NEW."exchangeRateQuotedAt" := pg_catalog.timezone('UTC', pg_catalog.now()) AT TIME ZONE 'UTC';
@@ -88,7 +94,7 @@ END;
 $$;
 
 CREATE TRIGGER "payments_exchange_rate_quoted_at"
-  BEFORE INSERT OR UPDATE OF "exchangeRateRef", "exchangeRateQuotedAt" ON "payments"
+  BEFORE INSERT OR UPDATE OF "exchangeRateFrom", "exchangeRateRef", "exchangeRateQuotedAt" ON "payments"
   FOR EACH ROW EXECUTE FUNCTION public.dx_payment_exchange_rate_quoted_at();
 
 ALTER TABLE "manual_exchange_rates"

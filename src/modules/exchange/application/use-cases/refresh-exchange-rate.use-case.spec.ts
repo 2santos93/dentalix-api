@@ -1,4 +1,4 @@
-import { ConflictException, ServiceUnavailableException } from '@nestjs/common';
+import { ConflictException } from '@nestjs/common';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
 import type { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
 import type { ExchangeRateSource } from '../../domain/exchange-rate-source';
@@ -8,7 +8,10 @@ import {
   EXCHANGE_REFRESH_COOLDOWN_SECONDS,
   type RefreshClaim,
 } from '../../domain/ports/exchange-refresh-cooldown.port';
-import { ExchangeRateUnavailableError } from '../../domain/ports/exchange-rate-provider.port';
+import {
+  ExchangeRateBudgetExceededError,
+  ExchangeRateUnavailableError,
+} from '../../domain/ports/exchange-rate-provider.port';
 import type { ExchangeSourceChangeHooks } from '../exchange-source-change-hooks';
 import type {
   ExchangeHeader,
@@ -20,6 +23,7 @@ import {
   type RefreshBcvRateUseCase,
 } from './refresh-bcv-rate.use-case';
 import {
+  EXCHANGE_REFRESH_BCV_UNAVAILABLE_MESSAGE,
   EXCHANGE_REFRESH_MANUAL_MESSAGE,
   ExchangeRefreshTooSoonError,
   RefreshExchangeRateUseCase,
@@ -81,7 +85,10 @@ function setup(source: ExchangeRateSource, claim: RefreshClaim = { ok: true }) {
 describe('RefreshExchangeRateUseCase (DX-586)', () => {
   it('con BCV vuelve a consultar el BCV, reintenta los abonos sin tasa, audita y devuelve el indicador', async () => {
     const s = setup('BCV');
-    await expect(s.uc.execute(ctx)).resolves.toBe(HEADER);
+    await expect(s.uc.execute(ctx)).resolves.toEqual({
+      ...HEADER,
+      refresh: { ok: true, code: null, message: null },
+    });
     expect(s.cooldown.claim).toHaveBeenCalledWith(
       EXCHANGE_REFRESH_COOLDOWN_SECONDS,
     );
@@ -132,26 +139,40 @@ describe('RefreshExchangeRateUseCase (DX-586)', () => {
     expect(s.refreshBcv.execute).not.toHaveBeenCalled();
   });
 
-  it('el BCV y su respaldo caídos: se propaga (503 en la ruta) y no audita', async () => {
+  it('el BCV y su respaldo caídos: 200 con el indicador y refresh.ok false; sin auditar ni reintentar', async () => {
     const s = setup('BCV');
     s.refreshBcv.execute.mockRejectedValueOnce(
       new ExchangeRateUnavailableError('caído'),
     );
-    await expect(s.uc.execute(ctx)).rejects.toBeInstanceOf(
-      ExchangeRateUnavailableError,
-    );
+    await expect(s.uc.execute(ctx)).resolves.toEqual({
+      ...HEADER,
+      refresh: {
+        ok: false,
+        code: 'EXCHANGE_RATE_UNAVAILABLE',
+        message: EXCHANGE_REFRESH_BCV_UNAVAILABLE_MESSAGE,
+      },
+    });
     expect(s.audit.record).not.toHaveBeenCalled();
+    expect(s.hooks.afterRatesChange).not.toHaveBeenCalled();
   });
 
-  it('una tasa del BCV que no pasa la cordura: 503 EXCHANGE_RATE_BCV_REJECTED', async () => {
+  it('una tasa del BCV que no pasa la cordura: refresh EXCHANGE_RATE_BCV_REJECTED', async () => {
     const s = setup('BCV');
     s.refreshBcv.execute.mockRejectedValueOnce(
       new BcvRateRejectedError('variación'),
     );
-    const error = await s.uc.execute(ctx).catch((e: unknown) => e);
-    expect(error).toBeInstanceOf(ServiceUnavailableException);
-    expect((error as ServiceUnavailableException).getResponse()).toMatchObject({
-      code: 'EXCHANGE_RATE_BCV_REJECTED',
+    await expect(s.uc.execute(ctx)).resolves.toMatchObject({
+      refresh: { ok: false, code: 'EXCHANGE_RATE_BCV_REJECTED' },
+    });
+  });
+
+  it('AUTOMATIC con el presupuesto agotado: refresh EXCHANGE_RATE_BUDGET_EXCEEDED', async () => {
+    const s = setup('AUTOMATIC');
+    s.rates.refreshProviderRates.mockRejectedValueOnce(
+      new ExchangeRateBudgetExceededError('CLINIC', 60),
+    );
+    await expect(s.uc.execute(ctx)).resolves.toMatchObject({
+      refresh: { ok: false, code: 'EXCHANGE_RATE_BUDGET_EXCEEDED' },
     });
   });
 

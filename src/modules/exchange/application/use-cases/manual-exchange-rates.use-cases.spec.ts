@@ -33,6 +33,8 @@ describe('Tasas de cambio manuales (DX-374)', () => {
   // 2026-10-30 03:00 UTC: en la sede de A (UTC-4) todavía es el 29; en la de
   // B (UTC) ya es el 30.
   const NOW = new Date(Date.UTC(2026, 9, 30, 3, 0));
+  /** DX-586: una hora de ese día en la sede de A (antes de NOW). */
+  const AT = '2026-10-29T20:00:00-04:00';
   const tenantContext = new TenantContextService();
   let manual: ReturnType<typeof makeManualRates>;
   let hooks: ExchangeSourceChangeHooks;
@@ -75,13 +77,14 @@ describe('Tasas de cambio manuales (DX-374)', () => {
     });
     await inClinic(A, () =>
       register().execute(
-        { date: '2026-10-29', currency: 'VES', rate: 36 },
+        { date: '2026-10-29', currency: 'VES', rate: 36, effectiveFrom: AT },
         ADMIN,
       ),
     );
+    // DX-586: la misma moneda desde la misma hora.
     const duplicate = inClinic(A, () =>
       register().execute(
-        { date: '2026-10-29', currency: 'VES', rate: 37 },
+        { date: '2026-10-29', currency: 'VES', rate: 37, effectiveFrom: AT },
         ADMIN,
       ),
     );
@@ -89,8 +92,13 @@ describe('Tasas de cambio manuales (DX-374)', () => {
     expect(seen).toEqual([A]);
   });
 
-  it('una tasa ya registrada para ese día y moneda no se sobrescribe: 409 en español', async () => {
-    const input = { date: '2026-10-29', currency: 'VES', rate: 36 };
+  it('una tasa ya registrada para esa moneda desde esa hora no se sobrescribe: 409 en español', async () => {
+    const input = {
+      date: '2026-10-29',
+      currency: 'VES',
+      rate: 36,
+      effectiveFrom: AT,
+    };
     await inClinic(A, () => register().execute(input, ADMIN));
     const again = inClinic(A, () =>
       register().execute({ ...input, rate: 37 }, ADMIN),
@@ -363,10 +371,17 @@ describe('Varias tasas manuales el mismo día (DX-586)', () => {
     ]);
   });
 
-  it('sin hora: hoy rige desde ahora; un día anterior, desde su inicio en la sede', async () => {
-    const today = await run(() =>
+  it('sin hora: la primera del día rige desde su inicio, la siguiente desde ahora; un día anterior, desde su inicio', async () => {
+    const first = await run(() =>
       register().execute(
         { date: '2026-11-20', currency: 'VES', rate: 918.77 },
+        ADMIN,
+      ),
+    );
+    expect(first.effectiveFrom.toISOString()).toBe('2026-11-20T04:00:00.000Z');
+    const today = await run(() =>
+      register().execute(
+        { date: '2026-11-20', currency: 'VES', rate: 920.1 },
         ADMIN,
       ),
     );
