@@ -49,6 +49,7 @@ describe('GET /public/subdomains/:slug/availability (e2e)', () => {
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(createAppValidationPipe());
     await app.init();
+    await app.listen(0, '127.0.0.1');
     await cleanup();
     for (const sub of [TAKEN, RETIRED]) {
       await registerVerified(

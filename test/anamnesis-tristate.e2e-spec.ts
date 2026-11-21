@@ -108,6 +108,7 @@ describe('Anamnesis: hábitos y embarazo tri-estado (e2e)', () => {
     app.setGlobalPrefix('api/v1');
     app.useGlobalPipes(createAppValidationPipe());
     await app.init();
+    await app.listen(0, '127.0.0.1');
     await purgeTenantsBySubdomain(raw, [SUB]);
     await raw.user.deleteMany({ where: { email: EMAIL } });
     const reg = await registerVerified(
