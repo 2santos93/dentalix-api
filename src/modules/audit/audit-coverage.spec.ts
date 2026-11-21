@@ -2515,9 +2515,10 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // DX-374: CLINIC_SETTINGS con EXCHANGE_RATE_SOURCE y el antes y el después;
   // sin evento si no cambia. DX-384: el plazo de la última tasa registrada
   // deja EXCHANGE_RATE_MAX_AGE con configChange antes/después, escrito por el
-  // repositorio en la misma transacción.
+  // repositorio en la misma transacción. DX-584: las monedas de la clínica
+  // dejan CLINIC_CURRENCIES con configChange antes/después, en la transacción.
   'PUT /exchange/settings':
-    'exchange-rate-settings.use-cases.spec.ts y exchange-rate-source.e2e-spec.ts',
+    'exchange-rate-settings.use-cases.spec.ts, exchange-rate-source.e2e-spec.ts y clinic-currencies.e2e-spec.ts',
   // DX-274: VIEW si se abre en el navegador, EXPORT si se descarga (la acción
   // depende de la query, que el decorador no lee).
   'GET /expenses/:id/attachment/url':

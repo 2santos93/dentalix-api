@@ -406,7 +406,13 @@ export class ConfirmPaymentReportUseCase {
     };
 
     try {
-      const options = { proof: proof ?? null, afterInsertInTx: hook };
+      // DX-584: la moneda la fijó el enlace y el paciente ya pagó: confirmar
+      // no mira las monedas que acepta hoy la clínica.
+      const options = {
+        proof: proof ?? null,
+        afterInsertInTx: hook,
+        anyCurrency: true,
+      };
       const payment = report.link.treatmentPlanId
         ? await this.recordPayment.execute(
             report.link.treatmentPlanId,

@@ -194,6 +194,13 @@ function throttlers(
         staffActorRateLimitKey(name, request(context).headers.authorization),
     },
     {
+      // DX-584: la tasa del menú, un balde por clínica + usuario (suave:
+      // la web la refresca cada 5 min, al volver el foco y por evento).
+      ...strict('exchange-header'),
+      generateKey: (context, _ip, name) =>
+        staffActorRateLimitKey(name, request(context).headers.authorization),
+    },
+    {
       // DX-555: la marca por host del render de servidor, por IP + host
       // normalizado (la ruta va FUERA del global con @SkipThrottle). Sus
       // FALLOS, por IP, los cuenta BrandingMissLimitInterceptor.

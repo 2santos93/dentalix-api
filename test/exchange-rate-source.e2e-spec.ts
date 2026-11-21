@@ -184,6 +184,9 @@ describe('Tasa de cambio por clínica (e2e, DX-374)', () => {
       manualSince: null,
       manualRateMaxAgeDays: 3,
       baseCurrency: 'USD',
+      acceptedCurrencies: [],
+      rateReferenceCurrency: null,
+      showRateInHeader: null,
     });
     await expect(rates(manual, TODAY)).resolves.toEqual({
       base: 'USD',
@@ -298,6 +301,9 @@ describe('Tasa de cambio por clínica (e2e, DX-374)', () => {
         manualSince: TODAY,
         manualRateMaxAgeDays: 3,
         baseCurrency: 'USD',
+        acceptedCurrencies: [],
+        rateReferenceCurrency: null,
+        showRateInHeader: null,
       });
     await inManual(api().put(SETTINGS))
       .send({ source: 'MANUAL' })
@@ -483,6 +489,9 @@ describe('Tasa de cambio por clínica (e2e, DX-374)', () => {
         manualSince: null,
         manualRateMaxAgeDays: 3,
         baseCurrency: 'USD',
+        acceptedCurrencies: [],
+        rateReferenceCurrency: null,
+        showRateInHeader: null,
       });
     await expect(rates(manual, TODAY)).resolves.toMatchObject({
       source: 'AUTOMATIC',
