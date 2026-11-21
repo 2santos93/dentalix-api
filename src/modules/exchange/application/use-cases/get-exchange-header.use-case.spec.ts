@@ -152,6 +152,7 @@ describe('GetExchangeHeaderUseCase (DX-584)', () => {
           fetchedAt: FETCHED_AT.toISOString(),
         },
       ],
+      acceptedCurrencies: ['USD', 'VES'],
       updatedAt: NOW.toISOString(),
     });
   });
@@ -285,6 +286,7 @@ describe('GetExchangeHeaderUseCase (DX-584)', () => {
         reference: 'VES',
         referenceLabel: null,
         rates: [],
+        acceptedCurrencies: [],
         updatedAt: NOW.toISOString(),
       });
       expect(fetchRates).not.toHaveBeenCalled();
@@ -304,7 +306,11 @@ describe('GetExchangeHeaderUseCase (DX-584)', () => {
         },
         snapshots: { [TODAY_CARACAS]: { VES: 918.77 } },
       });
-      await expect(run()).resolves.toMatchObject({ visible: false, rates: [] });
+      await expect(run()).resolves.toMatchObject({
+        visible: false,
+        rates: [],
+        acceptedCurrencies: ['USD', 'VES'],
+      });
       expect(repo.reads).toEqual([]);
     });
 

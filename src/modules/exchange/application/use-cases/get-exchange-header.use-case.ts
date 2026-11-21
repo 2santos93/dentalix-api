@@ -51,6 +51,13 @@ export interface ExchangeHeader {
   /** Texto propio de la de referencia (DX-517, p. ej. «Bs.»); null = el código ISO. */
   referenceLabel: string | null;
   rates: ExchangeHeaderRate[];
+  /**
+   * Monedas en que la clínica acepta cobros, en su orden (vacía = cualquiera).
+   * Para filtrar el selector de moneda del cobro con cualquier rol: el ajuste
+   * completo (GET /exchange/settings) es solo ADMIN. Va siempre, también
+   * con el indicador oculto.
+   */
+  acceptedCurrencies: string[];
   /** Cuándo se calculó esta respuesta (ISO 8601). */
   updatedAt: string;
 }
@@ -96,6 +103,7 @@ export class GetExchangeHeaderUseCase {
       reference,
       referenceLabel: null,
       rates: [],
+      acceptedCurrencies: clinic.acceptedCurrencies,
       updatedAt,
     });
     if (clinic.showRateInHeader === false || !location || !reference) {
@@ -132,6 +140,7 @@ export class GetExchangeHeaderUseCase {
           fetchedAt: value === null ? null : fetchedAt,
         };
       }),
+      acceptedCurrencies: clinic.acceptedCurrencies,
       updatedAt,
     };
   }

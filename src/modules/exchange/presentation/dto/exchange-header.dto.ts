@@ -81,6 +81,14 @@ export class ExchangeHeaderDto {
   rates!: ExchangeHeaderRateDto[];
 
   @ApiProperty({
+    type: [String],
+    example: ['USD', 'VES'],
+    description:
+      'Monedas en que la clínica acepta cobros, en su orden (vacía = cualquiera): para filtrar el selector de moneda del cobro con cualquier rol. Va siempre, también con `visible: false`.',
+  })
+  acceptedCurrencies!: string[];
+
+  @ApiProperty({
     type: String,
     format: 'date-time',
     description: 'Cuándo se calculó la respuesta.',

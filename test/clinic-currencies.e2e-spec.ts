@@ -49,6 +49,7 @@ interface HeaderBody {
     date: string;
     fetchedAt: string | null;
   }[];
+  acceptedCurrencies: string[];
   updatedAt: string;
 }
 
@@ -324,6 +325,11 @@ describe('Monedas de la clínica y tasa del menú (e2e, DX-584)', () => {
     await expect(header(b)).resolves.toMatchObject({
       visible: false,
       rates: [],
+      acceptedCurrencies: [],
+    });
+    // Recepción lee la lista entera (con la de referencia) para el cobro.
+    await expect(header(a, tokens.RECEPTION)).resolves.toMatchObject({
+      acceptedCurrencies: ['USD', 'VES'],
     });
   });
 
