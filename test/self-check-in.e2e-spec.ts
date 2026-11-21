@@ -118,11 +118,13 @@ describe('«Ya llegué» (e2e, DX-265)', () => {
     token: string,
     body: { documentNumber: string; birthDate: string },
     host = clinic.host,
-  ) =>
-    api()
+    ip?: string,
+  ) => {
+    const r = api()
       .post(`/api/v1/public/check-in/${token}`)
-      .set('X-Tenant-Host', host)
-      .send(body);
+      .set('X-Tenant-Host', host);
+    return (ip ? r.set('X-Forwarded-For', ip) : r).send(body);
+  };
 
   async function patient(
     firstName: string,
@@ -196,6 +198,12 @@ describe('«Ya llegué» (e2e, DX-265)', () => {
 
   beforeAll(async () => {
     app = await createE2eApp();
+    // Un salto de proxy de confianza, como en producción: cada «cliente» de
+    // las pruebas de bloqueo es una IP distinta por X-Forwarded-For (sin la
+    // cabecera, la de supertest).
+    (
+      app.getHttpAdapter().getInstance() as { set(k: string, v: number): void }
+    ).set('trust proxy', 1);
     await resetDatabase(raw);
     clinic = await registerClinic(app, 'dx265-e2e');
     other = await registerClinic(app, 'dx265-e2e-otra');
@@ -436,6 +444,7 @@ describe('«Ya llegué» (e2e, DX-265)', () => {
 
   describe('con el QR de la sede', () => {
     let qrChacao: string;
+    let secondQr: string;
 
     it('solo ADMIN gestiona los ajustes y el QR; el token sale una vez y en la BD queda su hash', async () => {
       await as(
@@ -624,7 +633,7 @@ describe('«Ya llegué» (e2e, DX-265)', () => {
           .status,
       ).toBe('SCHEDULED');
       // Otra sede de la misma clínica no está bloqueada para esta IP.
-      const secondQr = (
+      secondQr = (
         (
           await as(
             api().post(`/api/v1/locations/${altamira}/check-in-settings/qr`),
@@ -636,6 +645,75 @@ describe('«Ya llegué» (e2e, DX-265)', () => {
         documentNumber: 'V-13131313',
         birthDate: '1992-02-02',
       }).expect(400);
+    });
+
+    it('acertar con los datos propios no rehabilita los intentos: el siguiente fallo de esa IP es el quinto y bloquea', async () => {
+      const ip = '203.0.113.71';
+      const own = await patient('Andrés', 'V-31313131', '1988-08-08');
+      await bookToday(own, altamira, 0);
+      for (let i = 0; i < 4; i++) {
+        await qrIdentify(
+          secondQr,
+          { documentNumber: `V-4040404${i}`, birthDate: '1970-01-01' },
+          clinic.host,
+          ip,
+        ).expect(400);
+      }
+      await qrIdentify(
+        secondQr,
+        { documentNumber: 'V-31313131', birthDate: '1988-08-08' },
+        clinic.host,
+        ip,
+      ).expect(200);
+      const res = await qrIdentify(
+        secondQr,
+        { documentNumber: 'V-40404049', birthDate: '1970-01-01' },
+        clinic.host,
+        ip,
+      ).expect(429);
+      expect(res.body).toMatchObject({ code: 'CHECK_IN_LOCKED' });
+    });
+
+    it('bloqueo por documento: rotar de IP contra un mismo paciente bloquea al quinto fallo, también su intento bueno', async () => {
+      const target = await patient('Beatriz', 'V-24242424', '1979-03-03');
+      const appt = await bookToday(target, altamira, 0);
+      for (let i = 0; i < 4; i++) {
+        await qrIdentify(
+          secondQr,
+          { documentNumber: 'V-24242424', birthDate: `1979-03-1${i}` },
+          clinic.host,
+          `198.51.100.${10 + i}`,
+        ).expect(400);
+      }
+      // Quinto fallo, sin la letra (cuenta igual): bloquea el documento.
+      await qrIdentify(
+        secondQr,
+        { documentNumber: '24242424', birthDate: '1979-03-19' },
+        clinic.host,
+        '198.51.100.20',
+      ).expect(429);
+      // Desde otra IP y con los datos buenos: sigue bloqueado.
+      await qrIdentify(
+        secondQr,
+        { documentNumber: 'V-24242424', birthDate: '1979-03-03' },
+        clinic.host,
+        '198.51.100.21',
+      ).expect(429);
+      expect(
+        (await raw.appointment.findUniqueOrThrow({ where: { id: appt.id } }))
+          .status,
+      ).toBe('SCHEDULED');
+      // Otro documento desde esa IP no está bloqueado (misma respuesta de siempre).
+      expect(
+        (
+          await qrIdentify(
+            secondQr,
+            { documentNumber: 'V-50505050', birthDate: '1990-01-01' },
+            clinic.host,
+            '198.51.100.21',
+          ).expect(400)
+        ).body,
+      ).toEqual(NO_MATCH);
     });
   });
 });

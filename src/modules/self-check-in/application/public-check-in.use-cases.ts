@@ -52,6 +52,8 @@ import {
   CHECK_IN_QR_INACTIVE_MESSAGE,
   CHECK_IN_RESPONSE_FLOOR_MS,
   checkInClientKey,
+  checkInDocumentKey,
+  type CheckInAttemptState,
   documentMatches,
   lockedUntil,
   normalizeCheckInDocument,
@@ -282,19 +284,33 @@ export class PublicCheckInUseCases {
       location.locationId,
       request?.ip ? normalizeIp(request.ip) : null,
     );
-    const now = this.clock();
-    // El intento se anota ANTES de comparar: una ráfaga a la vez no compara
-    // más de CHECK_IN_MAX_FAILURES datos; pasado el tope, 429 sin comparar.
-    const attempt = await this.repo.reserveAttempt(
+    // DX-265 (revisión): también por documento, para frenar a quien rota de
+    // IP contra un mismo paciente. Clave = SHA-256 del documento normalizado
+    // (exista o no el paciente: misma respuesta y mismo trabajo).
+    const documentKey = checkInDocumentKey(
+      tenantId,
       location.locationId,
-      clientKey,
-      {
-        maxAttempts: CHECK_IN_MAX_FAILURES,
-        lockMinutes: CHECK_IN_LOCK_MINUTES,
-        windowMinutes: CHECK_IN_FAILURE_WINDOW_MINUTES,
-      },
+      input.documentNumber,
     );
-    const lock = lockedUntil(attempt, now);
+    const keys = [clientKey, documentKey];
+    const now = this.clock();
+    // Cada intento se anota ANTES de comparar, en los dos contadores (una
+    // sentencia atómica cada uno): una ráfaga a la vez no compara más de
+    // CHECK_IN_MAX_FAILURES datos; pasado el tope, 429 sin comparar.
+    const attempts: CheckInAttemptState[] = [];
+    for (const key of keys) {
+      attempts.push(
+        await this.repo.reserveAttempt(location.locationId, key, {
+          maxAttempts: CHECK_IN_MAX_FAILURES,
+          lockMinutes: CHECK_IN_LOCK_MINUTES,
+          windowMinutes: CHECK_IN_FAILURE_WINDOW_MINUTES,
+        }),
+      );
+    }
+    const lock = attempts
+      .map((a) => lockedUntil(a, now))
+      .filter((d): d is Date => d !== null)
+      .sort((x, y) => y.getTime() - x.getTime())[0];
     if (lock) {
       await floor();
       throw locked(retryAfterSeconds(lock, now));
@@ -303,19 +319,29 @@ export class PublicCheckInUseCases {
     const matches = await this.matchToday(location, input, now);
     if (matches.length === 0) {
       await floor();
-      if (attempt.failedAttempts >= CHECK_IN_MAX_FAILURES) {
-        // El quinto fallo bloquea ya (y lo dice), como los siguientes.
-        const until = await this.repo.lockClient(
-          location.locationId,
-          clientKey,
-          CHECK_IN_LOCK_MINUTES,
-        );
+      // El quinto fallo (por IP o por documento) bloquea ya, y lo dice.
+      const reached = keys.filter(
+        (_, n) => attempts[n].failedAttempts >= CHECK_IN_MAX_FAILURES,
+      );
+      if (reached.length > 0) {
+        let until = now;
+        for (const key of reached) {
+          const d = await this.repo.lockClient(
+            location.locationId,
+            key,
+            CHECK_IN_LOCK_MINUTES,
+          );
+          if (d.getTime() > until.getTime()) until = d;
+        }
         throw locked(retryAfterSeconds(until, now));
       }
       throw noMatch();
     }
-    // Acertar devuelve solo este intento: no limpia fallos anteriores.
-    await this.repo.refundAttempt(location.locationId, clientKey);
+    // Acertar devuelve solo este intento: nunca limpia fallos anteriores ni un
+    // bloqueo (los fallos solo caducan con su ventana).
+    for (const key of keys) {
+      await this.repo.refundAttempt(location.locationId, key);
+    }
 
     // Varias citas hoy en la sede (raro): la que ya está en curso, si no la
     // que se puede marcar, si no la más próxima.

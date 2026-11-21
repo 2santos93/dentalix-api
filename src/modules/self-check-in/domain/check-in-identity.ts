@@ -82,6 +82,26 @@ export function checkInClientKey(
     .digest('hex');
 }
 
+/**
+ * Clave del contador por DOCUMENTO en la sede: SHA-256 de la clínica, la sede
+ * y la clave del documento escrito (DX-107, sin la letra de tipo para que
+ * «V-12345678» y «12345678» cuenten juntos). Nunca se guarda el documento.
+ * Lo que no es un documento válido cuenta en su propio balde.
+ */
+export function checkInDocumentKey(
+  tenantId: string,
+  locationId: string,
+  documentNumber: unknown,
+): string {
+  const key = normalizeCheckInDocument(documentNumber);
+  const bucket = key
+    ? `doc:${withoutLetterPrefix(key)}`
+    : `invalid:${typeof documentNumber === 'string' ? documentNumber.trim().toUpperCase().slice(0, CHECK_IN_DOCUMENT_MAX) : ''}`;
+  return createHash('sha256')
+    .update(`check-in-doc:${tenantId}:${locationId}:${bucket}`)
+    .digest('hex');
+}
+
 export interface CheckInAttemptState {
   failedAttempts: number;
   firstFailedAt: Date;

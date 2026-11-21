@@ -1,5 +1,6 @@
 import {
   checkInClientKey,
+  checkInDocumentKey,
   documentMatches,
   lockedUntil,
   normalizeCheckInDocument,
@@ -55,5 +56,15 @@ describe('DX-265 · identificación con el QR', () => {
     expect(lockedUntil(null, now)).toBeNull();
     expect(retryAfterSeconds(until, now)).toBe(900);
     expect(retryAfterSeconds(now, now)).toBe(1);
+  });
+
+  it('la clave por documento cuenta igual con o sin la letra, separa sedes y no lleva el documento', () => {
+    const a = checkInDocumentKey('t1', 'l1', 'V-12.345.678');
+    expect(checkInDocumentKey('t1', 'l1', '12345678')).toBe(a);
+    expect(checkInDocumentKey('t1', 'l2', '12345678')).not.toBe(a);
+    expect(checkInDocumentKey('t1', 'l1', 'V-12345679')).not.toBe(a);
+    expect(a).toMatch(/^[0-9a-f]{64}$/);
+    expect(a).not.toContain('12345678');
+    expect(checkInDocumentKey('t1', 'l1', '--')).not.toBe(a);
   });
 });
