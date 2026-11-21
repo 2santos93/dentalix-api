@@ -99,6 +99,19 @@ export class BcvOfficialRateProvider implements BcvRateProvider {
     }
   }
 
+  /** DX-586: solo el respaldo (arranque en frío, ver el puerto). */
+  async fetchFallback(): Promise<BcvRateSnapshot> {
+    try {
+      return await this.fallback();
+    } catch (error) {
+      const reason = failureReason(error);
+      this.logger.warn({ event: 'exchange.bcv_fallback_failed', reason });
+      throw new ExchangeRateUnavailableError(
+        `Sin tasa del respaldo del BCV (${reason})`,
+      );
+    }
+  }
+
   private async official(): Promise<BcvRateSnapshot> {
     const base = trimSlash(
       this.config.get<string>('BCV_BASE_URL') || DEFAULT_BCV_BASE_URL,

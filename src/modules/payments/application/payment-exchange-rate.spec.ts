@@ -362,6 +362,8 @@ describe('tasa congelada de un abono (DX-375)', () => {
         source: 'AUTOMATIC',
         date: DAY,
         quotedOn: DAY,
+        ref: `AUTOMATIC:${DAY}`,
+        valueDate: null,
       });
       expect(b).toEqual({
         currency: 'USD',
@@ -370,6 +372,8 @@ describe('tasa congelada de un abono (DX-375)', () => {
         source: 'MANUAL',
         date: DAY,
         quotedOn: DAY,
+        ref: expect.stringMatching(/^MANUAL:[0-9a-f-]{36}$/) as string,
+        valueDate: null,
       });
 
       const amountWith = (tenant: string, frozenRate: FrozenExchangeRate) =>
@@ -459,6 +463,8 @@ describe('tasa congelada de un abono (DX-375)', () => {
         source: 'MANUAL',
         date: FRI,
         quotedOn: SAT,
+        ref: expect.stringMatching(/^MANUAL:[0-9a-f-]{36}$/) as string,
+        valueDate: null,
       });
     });
 
@@ -476,6 +482,7 @@ describe('tasa congelada de un abono (DX-375)', () => {
           date: SAT,
           currency: 'VES',
           rate: 40,
+          effectiveFrom: new Date(`${SAT}T00:00:00.000Z`),
           createdById: 'admin-1',
         }),
       );

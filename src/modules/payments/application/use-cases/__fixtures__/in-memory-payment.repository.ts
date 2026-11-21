@@ -2,7 +2,10 @@ import type { SiteToday } from '../../../domain/paid-at-window';
 import { collectedAmount } from '../../../../payment-methods/domain/payment-adjustments';
 import { Payment } from '../../../domain/entities/payment.entity';
 import type { PaymentProofAttachment } from '../../../domain/payment-proof';
-import { exchangeRateStatus } from '../../../domain/payment-exchange-rate';
+import {
+  exchangeRateStatus,
+  paymentRateUsed,
+} from '../../../domain/payment-exchange-rate';
 import type { IdempotentPayment } from '../../../domain/idempotency';
 import {
   CashRegisterPage,
@@ -33,7 +36,11 @@ import { toCents } from '../../../../../shared/money/money';
 // prisma-payment.repository.ts).
 type StoredPayment = Omit<
   Payment,
-  'paidOn' | 'receiptNumber' | 'exchangeRateStatus' | 'duplicateReferenceOf'
+  | 'paidOn'
+  | 'receiptNumber'
+  | 'exchangeRateStatus'
+  | 'duplicateReferenceOf'
+  | 'rateUsed'
 > & {
   locationId: string;
   referenceNormalized: string | null;
@@ -141,6 +148,7 @@ export class InMemoryPaymentRepository implements PaymentRepository {
       receiptNumber: null,
       exchangeRateCurrency: row.exchangeRateCurrency,
       frozenRate: row.frozenRate,
+      rateUsed: paymentRateUsed(row.currency, row.frozenRate),
       exchangeRateStatus: exchangeRateStatus(row),
       adjustments: row.adjustments,
       collectedAmount: row.collectedAmount,

@@ -6,7 +6,11 @@ import {
   DOC_TYPE_LABEL_PROPERTY,
   DOC_TYPE_NAME_DESCRIPTION,
 } from '../../../patients/presentation/dto/doc-type-input';
-import { FrozenExchangeRateDto } from './frozen-exchange-rate.dto';
+import {
+  FrozenExchangeRateDto,
+  PaymentRateUsedDto,
+  RATE_USED_DESCRIPTION,
+} from './frozen-exchange-rate.dto';
 import { EXCHANGE_RATE_SOURCES } from '../../../exchange/domain/exchange-rate-source';
 
 // Respuesta de GET /payments/:id/receipt y POST /payments/:id/receipt/print
@@ -423,6 +427,15 @@ export class ReceiptExchangeRateDto {
       'La tasa congelada (moneda de destino, fuente y día); null si no la congeló.',
   })
   rate!: FrozenExchangeRateDto | null;
+
+  @ApiProperty({
+    type: PaymentRateUsedDto,
+    nullable: true,
+    description:
+      RATE_USED_DESCRIPTION +
+      ' El recibo la enseña como «Tasa usada: 918,77 Bs. por USD (BCV, fecha valor 20/11/2026)».',
+  })
+  rateUsed!: PaymentRateUsedDto | null;
 
   @ApiProperty({
     type: Number,

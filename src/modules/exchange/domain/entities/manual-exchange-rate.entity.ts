@@ -1,5 +1,6 @@
 /**
- * DX-374: tasa de cambio que una clínica fijó para un día civil y una moneda.
+ * DX-374: tasa de cambio que una clínica fijó para un día civil y una moneda
+ * (DX-586: desde una hora de ese día).
  * Como `ExchangeRateSnapshot`, `rate` son unidades de `currency` por 1 USD y
  * va como `number` (Prisma devuelve `Decimal`).
  */
@@ -10,6 +11,11 @@ export interface ManualExchangeRate {
   /** ISO 4217, nunca USD. */
   currency: string;
   rate: number;
+  /**
+   * DX-586: desde qué instante del día `date` rige. Varias el mismo día:
+   * cada abono usa la de mayor `effectiveFrom` ≤ su instante.
+   */
+  effectiveFrom: Date;
   createdBy: {
     userId: string;
     /** `null` si el usuario ya no es resoluble. */

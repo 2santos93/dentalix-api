@@ -6,6 +6,11 @@ import { documentText } from '../../../patients/domain/document-type';
 import type { RegionalFormat } from '../../../../shared/format/regional-format';
 import { moneyWithCode } from '../../../../shared/format/money-with-code';
 import { changeRateText } from '../../domain/cash-change';
+import type { PaymentRateUsed } from '../../domain/payment-exchange-rate';
+import {
+  currencyTextFor,
+  type CurrencyTexts,
+} from '../../../../shared/format/currency-text';
 
 const METHOD_LABELS: Record<PaymentMethod, string> = {
   CASH: 'Efectivo',
@@ -123,7 +128,53 @@ export function receiptEmailVars(
     ...(snapshot.cashChange
       ? { cashChange: cashChangeVars(snapshot.cashChange, money, fmt) }
       : {}),
+    // DX-586: solo si alguna tasa se congeló con su referencia.
+    ...rateUsedVars(receipt, timeZone, fmt),
   };
+}
+
+const RATE_SOURCE_LABELS: Record<PaymentRateUsed['source'], string> = {
+  AUTOMATIC: 'automática',
+  MANUAL: 'manual',
+  BCV: 'BCV',
+};
+
+/**
+ * DX-586: «918,77 Bs. por USD (BCV, fecha valor 20/11/2026)»; sin fecha
+ * valor, la fecha y hora de la cotización en la sede del recibo.
+ */
+export function rateUsedLabel(
+  rate: PaymentRateUsed,
+  timeZone: string,
+  fmt: RegionalFormat,
+  texts: CurrencyTexts | null | undefined,
+): string {
+  const label = (code: string) => currencyTextFor(texts, code) ?? code;
+  const value = fmt.number(rate.rate, { min: 2, max: 2 });
+  const when = rate.valueDate
+    ? `fecha valor ${fmt.civilDate(rate.valueDate)}`
+    : fmt.dateTime(new Date(rate.quotedAt), timeZone);
+  return `${value} ${label(rate.currency)} por ${label(rate.unit)} (${RATE_SOURCE_LABELS[rate.source]}, ${when})`;
+}
+
+function rateUsedVars(
+  receipt: PaymentReceiptView,
+  timeZone: string,
+  fmt: RegionalFormat,
+): Pick<PaymentReceiptEmailVars, 'rateUsedLabels'> {
+  const rates = receipt.split
+    ? receipt.split.lines.map((line) => line.exchangeRate?.rateUsed ?? null)
+    : [receipt.exchangeRate?.rateUsed ?? null];
+  const labels = [
+    ...new Set(
+      rates.flatMap((rate) =>
+        rate
+          ? [rateUsedLabel(rate, timeZone, fmt, receipt.snapshot.currencyTexts)]
+          : [],
+      ),
+    ),
+  ];
+  return labels.length > 0 ? { rateUsedLabels: labels } : {};
 }
 
 /** DX-570: recibido, aplicado y cada línea del vuelto, formateados. */

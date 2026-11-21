@@ -242,6 +242,9 @@ describe('Fechas de /exchange/rates y /exchange/convert (e2e, BE-049, DX-383)', 
     expect(todayRates.body).toEqual({
       base: 'USD',
       source: 'MANUAL',
+      // DX-586: las manuales que rigen y la lista del día.
+      manualRates: expect.any(Array) as unknown,
+      manualDay: expect.any(Array) as unknown,
       rates: { VES: 4100 },
       rateDate: today,
     });

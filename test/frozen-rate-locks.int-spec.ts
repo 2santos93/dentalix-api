@@ -41,9 +41,12 @@ const MANUAL_RATES = '/api/v1/exchange/manual-rates';
 
 // Las sentencias de los dos candados, SIN la cláusula FOR: quitar el candado
 // de producción deja el int en rojo por la espera que no llega, no colgado.
+// DX-586: el alta lee las tasas por el id de su referencia (`"id" = ANY`) y
+// la corrección lee día y moneda de la suya: se distinguen por lo que leen.
 const READ_RATES_TO_FREEZE =
-  /FROM "manual_exchange_rates"[\s\S]*"currency" = ANY/;
-const LOCK_RATE_TO_CORRECT = /FROM "manual_exchange_rates"[\s\S]*"id" =/;
+  /SELECT "currency", "rate" FROM "manual_exchange_rates"[\s\S]*= ANY/;
+const LOCK_RATE_TO_CORRECT =
+  /SELECT to_char\("date", 'YYYY-MM-DD'\) AS "date", "currency"\s+FROM "manual_exchange_rates"/;
 
 // Las transacciones pausadas viven más que la espera de 5 s del helper: con
 // el tope por defecto (5 s) un runner lento las deshacería («Transaction
@@ -63,11 +66,19 @@ describe('tasa manual congelada: alta de abono frente a corrección (DX-397, int
       .set('X-Tenant-Host', clinic.host)
       .set('Authorization', `Bearer ${clinic.adminToken}`);
 
-  /** Una tasa manual de hoy; cada caso usa una moneda propia. */
+  /**
+   * Una tasa manual de hoy; cada caso usa una moneda propia. DX-586: desde
+   * el inicio del día (el abono va a las 11:59 y la API cree que son las 12:00).
+   */
   async function registerRate(currency: string, rate: number) {
     return (
       await as(api().post(MANUAL_RATES))
-        .send({ date: TODAY, currency, rate })
+        .send({
+          date: TODAY,
+          currency,
+          rate,
+          effectiveFrom: `${TODAY}T00:00:00-04:00`,
+        })
         .expect(201)
     ).body as { id: string };
   }

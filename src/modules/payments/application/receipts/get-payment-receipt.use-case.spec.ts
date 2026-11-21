@@ -320,6 +320,8 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
       expect(view.exchangeRate).toEqual({
         status: 'FROZEN',
         rate: FROZEN,
+        // DX-586: congelada antes de la referencia: sin «tasa usada».
+        rateUsed: null,
         equivalentAmount: 50,
       });
     });
@@ -339,6 +341,7 @@ describe('GetPaymentReceiptUseCase (DX-136)', () => {
       expect(view.exchangeRate).toEqual({
         status: 'MISSING',
         rate: null,
+        rateUsed: null,
         equivalentAmount: null,
       });
     });

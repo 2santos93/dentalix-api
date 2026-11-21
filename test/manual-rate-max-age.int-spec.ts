@@ -90,6 +90,9 @@ async function seedClinic(
     data: {
       tenantId: tenant.id,
       date: new Date(`${FRIDAY}T00:00:00Z`),
+
+      effectiveFrom: new Date(`${FRIDAY}T00:00:00Z`),
+
       currency: 'VES',
       rate: new Prisma.Decimal('36.5'),
       createdById: user.id,
@@ -162,7 +165,12 @@ describe('plazo de la última tasa manual (DX-384, int)', () => {
 
   it('RLS: la lectura por rango de una clínica no ve las tasas de la otra', async () => {
     await tenantContext.run(exact.tenantId, async () => {
-      await manualRepo.ratesBetween('2026-10-01', '2026-11-30');
+      await manualRepo.ratesBetween(
+        '2026-10-01',
+        '2026-11-30',
+        undefined,
+        new Date(),
+      );
     });
     // Una tasa solo de `exact` el sábado: la clínica de 3 días no la ve.
     const membership = await raw.clinicMembership.findFirstOrThrow({
@@ -172,6 +180,9 @@ describe('plazo de la última tasa manual (DX-384, int)', () => {
       data: {
         tenantId: exact.tenantId,
         date: new Date(`${SATURDAY}T00:00:00Z`),
+
+        effectiveFrom: new Date(`${SATURDAY}T00:00:00Z`),
+
         currency: 'EUR',
         rate: new Prisma.Decimal('0.9'),
         createdById: exact.userId,
@@ -179,16 +190,21 @@ describe('plazo de la última tasa manual (DX-384, int)', () => {
       },
     });
     const seenByDefaults = await tenantContext.run(defaults.tenantId, () =>
-      manualRepo.ratesBetween('2026-10-01', '2026-11-30'),
+      manualRepo.ratesBetween(
+        '2026-10-01',
+        '2026-11-30',
+        undefined,
+        new Date(),
+      ),
     );
     expect(seenByDefaults).toEqual([
-      { date: FRIDAY, currency: 'VES', rate: 36.5 },
+      expect.objectContaining({ date: FRIDAY, currency: 'VES', rate: 36.5 }),
     ]);
     const seenByExact = await tenantContext.run(exact.tenantId, () =>
-      manualRepo.ratesBetween('2026-10-01', '2026-11-30', ['EUR']),
+      manualRepo.ratesBetween('2026-10-01', '2026-11-30', ['EUR'], new Date()),
     );
     expect(seenByExact).toEqual([
-      { date: SATURDAY, currency: 'EUR', rate: 0.9 },
+      expect.objectContaining({ date: SATURDAY, currency: 'EUR', rate: 0.9 }),
     ]);
   });
 

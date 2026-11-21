@@ -1,6 +1,13 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
 import { toRateColumn } from '../../../../shared/money/rate-conversion';
-import { bcvSanityProblem, type BcvRateSnapshot } from '../../domain/bcv-rate';
+import { civilDateIn } from '../../../../shared/time/civil-day';
+import {
+  BCV_TIME_ZONE,
+  bcvOldestValueDate,
+  bcvSanityProblem,
+  type BcvRateSnapshot,
+} from '../../domain/bcv-rate';
+import { EXCHANGE_RATE_CLOCK } from './manual-exchange-rates.use-cases';
 import {
   BCV_RATE_PROVIDER,
   type BcvRateProvider,
@@ -51,17 +58,55 @@ export class RefreshBcvRateUseCase {
   constructor(
     @Inject(BCV_RATE_PROVIDER) private readonly provider: BcvRateProvider,
     @Inject(BCV_RATE_REPOSITORY) private readonly repo: BcvRateRepository,
+    @Optional()
+    @Inject(EXCHANGE_RATE_CLOCK)
+    private readonly now: () => Date = () => new Date(),
   ) {}
 
   async execute(): Promise<BcvRefreshOutcome> {
-    const raw = await this.provider.fetchLatest();
-    // Con los 8 decimales de la columna: así «la misma cifra» compara igual
-    // con la guardada aunque el respaldo traiga más decimales.
-    const fetched: BcvRateSnapshot = {
-      ...raw,
-      usdVes: toRateColumn(raw.usdVes),
-      eurVes: toRateColumn(raw.eurVes),
-    };
+    const fetched = normalized(await this.provider.fetchLatest());
+    await this.coldStart(fetched);
+    return this.save(fetched);
+  }
+
+  /**
+   * DX-586, arranque en frío: el BCV publica por la tarde la tasa del día
+   * hábil siguiente (fecha valor futura). Si es lo primero que se guarda (o
+   * la última guardada es demasiado vieja), hoy no tendría tasa hasta mañana.
+   * En ese caso se guarda también la vigente de hoy desde el respaldo
+   * (dolarapi, `fechaActualizacion` ≤ hoy en Caracas), con origen FALLBACK.
+   * Nunca falla la consulta: si el respaldo no la da (o no pasa la cordura),
+   * se deja un aviso y sigue.
+   */
+  private async coldStart(fetched: BcvRateSnapshot): Promise<void> {
+    const today = civilDateIn(this.now(), BCV_TIME_ZONE);
+    if (fetched.valueDate <= today || !this.provider.fetchFallback) return;
+    if (await this.repo.inForce(today, bcvOldestValueDate(today))) return;
+    try {
+      const current = normalized(await this.provider.fetchFallback());
+      if (current.valueDate > today) {
+        this.logger.warn({
+          event: 'exchange.bcv_cold_start_skipped',
+          reason: 'el respaldo también trae una fecha valor futura',
+          valueDate: current.valueDate,
+        });
+        return;
+      }
+      const outcome = await this.save({ ...current, origin: 'FALLBACK' });
+      this.logger.log({
+        event: 'exchange.bcv_cold_start',
+        kind: outcome.kind,
+        valueDate: current.valueDate,
+      });
+    } catch (error) {
+      this.logger.warn({
+        event: 'exchange.bcv_cold_start_failed',
+        error: error instanceof Error ? error.name : 'unknown',
+      });
+    }
+  }
+
+  private async save(fetched: BcvRateSnapshot): Promise<BcvRefreshOutcome> {
     const previous = await this.repo.latestUpTo(fetched.valueDate);
     if (
       previous?.valueDate === fetched.valueDate &&
@@ -98,4 +143,16 @@ export class RefreshBcvRateUseCase {
     });
     return { kind, snapshot: fetched };
   }
+}
+
+/**
+ * Con los 8 decimales de la columna: así «la misma cifra» compara igual con
+ * la guardada aunque el respaldo traiga más decimales.
+ */
+function normalized(raw: BcvRateSnapshot): BcvRateSnapshot {
+  return {
+    ...raw,
+    usdVes: toRateColumn(raw.usdVes),
+    eurVes: toRateColumn(raw.eurVes),
+  };
 }

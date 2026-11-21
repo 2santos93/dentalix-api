@@ -6,6 +6,7 @@ import type { LocationRegionalSettings } from '../../../../shared/locations/loca
 import type {
   FrozenExchangeRate,
   PaymentExchangeRateStatus,
+  PaymentRateUsed,
 } from '../payment-exchange-rate';
 
 /**
@@ -16,6 +17,11 @@ import type {
 export interface ReceiptExchangeRate {
   status: Exclude<PaymentExchangeRateStatus, 'NOT_NEEDED'>;
   rate: FrozenExchangeRate | null;
+  /**
+   * DX-586: la tasa usada tal como se enseña («Tasa usada: …»); `null` si no
+   * congeló o la congeló antes de DX-586 (esos recibos no cambian).
+   */
+  rateUsed: PaymentRateUsed | null;
   /** El abono en `rate.currency`, con la tasa congelada. */
   equivalentAmount: number | null;
 }

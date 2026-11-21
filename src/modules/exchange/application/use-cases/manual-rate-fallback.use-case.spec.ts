@@ -226,6 +226,7 @@ describe('tasa manual de respaldo hasta N días (DX-384)', () => {
       await expect(as(WITH_3, () => rates.forRequest(SAT))).resolves.toEqual({
         base: 'USD',
         source: 'MANUAL',
+        manualRates: expect.any(Array) as unknown,
         rates: {},
         rateDate: SAT,
       });
@@ -238,6 +239,7 @@ describe('tasa manual de respaldo hasta N días (DX-384)', () => {
       ).resolves.toEqual({
         base: 'USD',
         source: 'MANUAL',
+        manualRates: expect.any(Array) as unknown,
         rates: { VES: 36.5 },
         rateDate: FRI,
       });
@@ -246,6 +248,7 @@ describe('tasa manual de respaldo hasta N días (DX-384)', () => {
       ).resolves.toEqual({
         base: 'USD',
         source: 'MANUAL',
+        manualRates: expect.any(Array) as unknown,
         rates: {},
         rateDate: SAT,
       });
