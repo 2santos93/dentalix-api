@@ -5,6 +5,20 @@ const DEFAULT_COLOR = '#0F5E9C';
 const PRODUCT_NAME = 'Dentalix';
 const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
 
+// Paleta neutra de DESIGN.md (dentalix-web): el único color de marca es el de
+// la clínica; todo lo demás, neutros fijos para que cualquier marca encaje.
+const CANVAS = '#F1F5F8';
+const SUNKEN = '#F7F9FC';
+const BORDER = '#D8DFE6';
+const BORDER_SUBTLE = '#E5E9EE';
+const INK = '#151C26';
+const BODY = '#2B3440';
+const MUTED = '#5B6472';
+const FAINT = '#6D7582';
+/** Fuentes del sistema: los clientes de correo no cargan Inter. */
+const FONT_STACK =
+  "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif";
+
 /** Un párrafo del cuerpo: texto plano (se escapa al pintarlo). */
 export interface EmailBlock {
   kind: 'paragraph' | 'note';
@@ -125,11 +139,11 @@ function cellUrl(cell: EmailTableCell): string | null {
   return url;
 }
 
-function tableHtml(table: EmailTable, color: string): string {
+function tableHtml(table: EmailTable, linkColor: string): string {
   const head = table.columns
     .map(
       (column, i) =>
-        `<th style="padding:6px 8px;border-bottom:1px solid #e4e7eb;font-size:12px;font-weight:600;color:#5b6472;text-align:${i === 0 ? 'left' : 'right'}">${escapeHtml(column)}</th>`,
+        `<th style="padding:8px 10px;background:${SUNKEN};border-bottom:1px solid ${BORDER};font-size:12px;font-weight:600;letter-spacing:0.02em;color:${MUTED};text-align:${i === 0 ? 'left' : 'right'}">${escapeHtml(column)}</th>`,
     )
     .join('');
   const rows = table.rows
@@ -139,20 +153,20 @@ function tableHtml(table: EmailTable, color: string): string {
           const url = cellUrl(cell);
           const text = escapeHtml(cell.text);
           const content = url
-            ? `<a href="${escapeHtml(url)}" style="color:${color};text-decoration:none">${text}</a>`
+            ? `<a href="${escapeHtml(url)}" style="color:${linkColor};font-weight:600;text-decoration:none">${text}</a>`
             : text;
           const note =
             i === 0 && row.note
-              ? `<br /><span style="font-size:12px;color:#b45309">${escapeHtml(row.note)}</span>`
+              ? `<br /><span style="font-size:12px;color:#834B14">${escapeHtml(row.note)}</span>`
               : '';
-          return `<td style="padding:6px 8px;border-bottom:1px solid #f0f2f4;font-size:14px;line-height:1.4;color:#1f2933;text-align:${i === 0 ? 'left' : 'right'};${i === 0 ? '' : 'white-space:nowrap;'}vertical-align:top">${content}${note}</td>`;
+          return `<td style="padding:9px 10px;border-bottom:1px solid ${BORDER_SUBTLE};font-size:14px;line-height:1.45;color:${INK};text-align:${i === 0 ? 'left' : 'right'};${i === 0 ? '' : 'white-space:nowrap;font-variant-numeric:tabular-nums;'}vertical-align:top">${content}${note}</td>`;
         })
         .join('');
       return `<tr>${cells}</tr>`;
     })
     .join('\n');
-  return `<h2 style="margin:24px 0 8px;font-size:16px;line-height:1.3;color:#1f2933">${escapeHtml(table.title)}</h2>
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse">
+  return `<h2 style="margin:28px 0 10px;font-size:16px;line-height:1.3;font-weight:600;color:${INK}">${escapeHtml(table.title)}</h2>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:separate;border:1px solid ${BORDER};border-radius:10px;overflow:hidden">
 <tr>${head}</tr>
 ${rows}
 </table>`;
@@ -193,11 +207,59 @@ function tableText(table: EmailTable): string[] {
   return lines;
 }
 
+/** Luminancia relativa (WCAG 2.x) de un `#RRGGBB` ya validado. */
+function luminance(hex: string): number {
+  const channel = (i: number) => {
+    const c = parseInt(hex.slice(i, i + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * channel(1) + 0.7152 * channel(3) + 0.0722 * channel(5);
+}
+
+/** Contraste WCAG entre dos colores `#RRGGBB`. */
+function contrast(a: string, b: string): number {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
 /**
- * Esqueleto común de los emails: cabecera con la marca de la clínica (logo si
- * tiene uno usable, si no su nombre), título, párrafos, botón y pie. HTML
- * sencillo con estilos en línea (lo único que respetan los clientes de
- * correo) y versión de texto equivalente. Todo lo variable se escapa aquí.
+ * Colores legibles a partir del de la clínica: el texto sobre el botón (blanco
+ * o tinta, el que más contraste dé) y el de los enlaces sobre blanco (el de la
+ * clínica si llega a 4,5:1; si es muy claro, tinta).
+ */
+function brandPalette(color: string): { onColor: string; link: string } {
+  const onColor =
+    contrast(color, '#FFFFFF') >= contrast(color, INK) ? '#FFFFFF' : INK;
+  const link = contrast(color, '#FFFFFF') >= 4.5 ? color : INK;
+  return { onColor, link };
+}
+
+/** La inicial del remitente para el monograma (sin logo). */
+function initial(name: string): string {
+  const first = [...name.trim()][0] ?? 'D';
+  return first.toLocaleUpperCase('es');
+}
+
+/** Texto de vista previa (la línea gris de la bandeja), recortado. */
+const PREHEADER_MAX = 140;
+function preheaderText(blocks: EmailBlock[]): string {
+  const first = blocks[0] ? blockLines(blocks[0]).join(' ') : '';
+  const chars = [...first];
+  return chars.length > PREHEADER_MAX
+    ? `${chars
+        .slice(0, PREHEADER_MAX - 1)
+        .join('')
+        .trimEnd()}…`
+    : first;
+}
+
+/**
+ * Esqueleto común de los emails: franja con el color de la clínica, cabecera
+ * con su marca (logo si tiene uno usable; si no, monograma y nombre), título,
+ * párrafos, botón «a prueba de balas» (tabla, funciona en Outlook) y pie.
+ * Estilos en línea (lo único que respetan los clientes de correo), solo modo
+ * claro (sin inversión automática que rompa el color de la marca) y versión
+ * de texto equivalente. Todo lo variable se escapa aquí.
  */
 export function renderLayout(input: EmailLayoutInput): RenderedEmail {
   const senderName = singleLine(input.brand?.clinicName ?? PRODUCT_NAME);
@@ -206,6 +268,7 @@ export function renderLayout(input: EmailLayoutInput): RenderedEmail {
     input.brand?.primaryColor && HEX_COLOR.test(input.brand.primaryColor)
       ? input.brand.primaryColor
       : DEFAULT_COLOR;
+  const { onColor, link: linkColor } = brandPalette(color);
   const logoUrl = safeUrl(input.brand?.logoUrl);
   const actionUrl = input.action ? safeUrl(input.action.url) : null;
   if (input.action && !actionUrl) {
@@ -217,20 +280,23 @@ export function renderLayout(input: EmailLayoutInput): RenderedEmail {
   }
 
   const header = logoUrl
-    ? `<img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(senderName)}" style="max-height:48px;max-width:200px;border:0" />`
-    : `<span style="font-size:20px;font-weight:600;color:${color}">${escapeHtml(senderName)}</span>`;
+    ? `<img src="${escapeHtml(logoUrl)}" alt="${escapeHtml(senderName)}" height="44" style="display:block;max-height:44px;max-width:200px;height:auto;border:0;outline:none" />`
+    : `<table role="presentation" cellpadding="0" cellspacing="0"><tr>
+<td width="40" height="40" align="center" valign="middle" bgcolor="${color}" style="width:40px;height:40px;background:${color};border-radius:10px;font-size:18px;font-weight:700;line-height:40px;color:${onColor};text-align:center">${escapeHtml(initial(senderName))}</td>
+<td style="padding-left:12px;vertical-align:middle"><span style="font-size:17px;font-weight:600;line-height:1.3;color:${INK}">${escapeHtml(senderName)}</span></td>
+</tr></table>`;
 
   const blockHtml = (block: EmailBlock) =>
     block.kind === 'note'
-      ? `<p style="margin:16px 0 0;font-size:13px;line-height:1.5;color:#5b6472">${blockContent(block)}</p>`
-      : `<p style="margin:0 0 12px;font-size:15px;line-height:1.6;color:#1f2933">${blockContent(block)}</p>`;
+      ? `<p style="margin:20px 0 0;padding:12px 16px;background:${SUNKEN};border-radius:10px;font-size:13px;line-height:1.55;color:${MUTED}">${blockContent(block)}</p>`
+      : `<p style="margin:0 0 14px;font-size:16px;line-height:1.6;color:${BODY}">${blockContent(block)}</p>`;
   const body = input.blocks.map(blockHtml).join('\n');
   const closing = input.closingBlocks ?? [];
 
   const button =
     input.action && actionUrl
-      ? `<p style="margin:24px 0"><a href="${escapeHtml(actionUrl)}" style="display:inline-block;background:${color};color:#ffffff;text-decoration:none;font-weight:600;padding:12px 20px;border-radius:8px">${escapeHtml(input.action.label)}</a></p>
-<p style="margin:0 0 12px;font-size:13px;line-height:1.5;color:#5b6472">${escapeHtml(chrome.buttonFallback)}<br /><span style="word-break:break-all">${escapeHtml(actionUrl)}</span></p>`
+      ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:28px 0 0"><tr><td align="center" bgcolor="${color}" style="border-radius:10px;background:${color}"><a href="${escapeHtml(actionUrl)}" style="display:inline-block;padding:14px 28px;border-radius:10px;background:${color};color:${onColor};font-size:16px;font-weight:600;line-height:1.2;text-decoration:none">${escapeHtml(input.action.label)}</a></td></tr></table>
+<p style="margin:16px 0 0;font-size:12px;line-height:1.5;color:${FAINT}">${escapeHtml(chrome.buttonFallback)}<br /><span style="word-break:break-all;color:${MUTED}">${escapeHtml(actionUrl)}</span></p>`
       : '';
 
   const links = (input.links?.items ?? []).map((item) => {
@@ -241,10 +307,10 @@ export function renderLayout(input: EmailLayoutInput): RenderedEmail {
   });
   const linksHtml =
     input.links && links.length > 0
-      ? `<p style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#1f2933">${escapeHtml(input.links.lead)} ${links
+      ? `<p style="margin:20px 0 0;font-size:14px;line-height:1.6;color:${BODY}">${escapeHtml(input.links.lead)} ${links
           .map(
             (l) =>
-              `<a href="${escapeHtml(l.url)}" style="color:${color};font-weight:600">${escapeHtml(l.label)}</a>`,
+              `<a href="${escapeHtml(l.url)}" style="color:${linkColor};font-weight:600;text-decoration:underline">${escapeHtml(l.label)}</a>`,
           )
           .join(' · ')}</p>`
       : '';
@@ -255,13 +321,12 @@ export function renderLayout(input: EmailLayoutInput): RenderedEmail {
   }
   const calloutHtml =
     input.callout && calloutUrl
-      ? `<p style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#1f2933">${escapeHtml(input.callout.lead)}<br /><a href="${escapeHtml(calloutUrl)}" style="color:${color};font-weight:600">${escapeHtml(input.callout.label)}</a></p>`
+      ? `<p style="margin:20px 0 0;padding:14px 16px;border:1px solid ${BORDER};border-radius:10px;font-size:14px;line-height:1.6;color:${BODY}">${escapeHtml(input.callout.lead)}<br /><a href="${escapeHtml(calloutUrl)}" style="color:${linkColor};font-weight:600;text-decoration:underline">${escapeHtml(input.callout.label)}</a></p>`
       : '';
 
   const tables = input.tables ?? [];
-  // Sin tablas, el HTML queda byte a byte como antes de DX-568.
   const tablesHtml = [
-    ...tables.map((t) => tableHtml(t, color)),
+    ...tables.map((t) => tableHtml(t, linkColor)),
     ...closing.map(blockHtml),
   ]
     .map((html) => `${html}\n`)
@@ -273,27 +338,35 @@ export function renderLayout(input: EmailLayoutInput): RenderedEmail {
   const footer = escapeHtml(footerText);
   const footerLink =
     input.footerLink && footerUrl
-      ? `<p style="margin:8px 0 0;font-size:12px;color:#7b8794">${escapeHtml(input.footerLink.lead)} <a href="${escapeHtml(footerUrl)}" style="color:#5b6472">${escapeHtml(input.footerLink.label)}</a></p>`
+      ? `<p style="margin:8px 0 0;font-size:12px;line-height:1.5;color:${FAINT}">${escapeHtml(input.footerLink.lead)} <a href="${escapeHtml(footerUrl)}" style="color:${MUTED};text-decoration:underline">${escapeHtml(input.footerLink.label)}</a></p>`
       : '';
+
+  const preheader = escapeHtml(preheaderText(input.blocks));
 
   const html = `<!doctype html>
 <html lang="${escapeHtml(chrome.htmlLang)}">
-<head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><title>${escapeHtml(singleLine(input.subject))}</title></head>
-<body style="margin:0;padding:0;background:#f4f6f8;font-family:Arial,Helvetica,sans-serif">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f8;padding:24px 12px">
-<tr><td align="center">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;padding:28px">
-<tr><td style="padding-bottom:20px;border-bottom:1px solid #e4e7eb">${header}</td></tr>
-<tr><td style="padding-top:20px">
-<h1 style="margin:0 0 16px;font-size:20px;line-height:1.3;color:#1f2933">${escapeHtml(input.heading)}</h1>
+<head><meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" /><meta name="color-scheme" content="light only" /><meta name="supported-color-schemes" content="light" /><title>${escapeHtml(singleLine(input.subject))}</title></head>
+<body style="margin:0;padding:0;background:${CANVAS};font-family:${FONT_STACK};-webkit-font-smoothing:antialiased">
+<div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">${preheader}&#8203;&#160;&#8203;&#160;&#8203;&#160;&#8203;&#160;</div>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${CANVAS}">
+<tr><td align="center" style="padding:32px 12px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:580px;background:#FFFFFF;border:1px solid ${BORDER_SUBTLE};border-radius:16px;overflow:hidden">
+<tr><td height="6" style="height:6px;background:${color};font-size:0;line-height:0">&#160;</td></tr>
+<tr><td style="padding:28px 32px 0">${header}</td></tr>
+<tr><td style="padding:24px 32px 32px">
+<h1 style="margin:0 0 16px;font-size:24px;line-height:1.25;font-weight:700;letter-spacing:-0.01em;color:${INK}">${escapeHtml(input.heading)}</h1>
 ${body}
 ${tablesHtml}${button}
 ${calloutHtml}
 ${linksHtml}
 </td></tr>
 </table>
-<p style="margin:16px 0 0;font-size:12px;color:#7b8794">${footer}</p>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:580px">
+<tr><td align="center" style="padding:20px 24px 0;text-align:center">
+<p style="margin:0;font-size:12px;line-height:1.5;color:${FAINT}">${footer}</p>
 ${footerLink}
+</td></tr>
+</table>
 </td></tr>
 </table>
 </body>

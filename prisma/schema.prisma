@@ -118,6 +118,19 @@ model Tenant {
   /// importe. Solo ADMIN (PATCH /clinic/settings, auditado).
   catalogCurrency                         String?                          @db.Char(3)
   catalogCurrencyRef                      Currency?                        @relation("TenantCatalogCurrency", fields: [catalogCurrency], references: [code], onDelete: Restrict, map: "tenants_catalog_currency_fkey")
+  /// DX-584: monedas en que la clínica acepta cobros (ISO 4217 de `currencies`,
+  /// en el orden del ADMIN, sin repetidas, 0..8; CHECK). '{}' = cualquiera (lo
+  /// de antes). Con alguna, el alta de un abono (suelto, dividido y las líneas
+  /// del vuelto) rechaza otra moneda; los abonos ya hechos no cambian. Solo
+  /// ADMIN (PUT /exchange/settings, auditado).
+  acceptedCurrencies                      String[]                         @default([]) @db.Char(3)
+  /// DX-584: moneda contra la que el menú muestra las equivalencias («1 USD =
+  /// N Bs.»). NULL = la de la sede activa. FK a currencies.
+  rateReferenceCurrency                   String?                          @db.Char(3)
+  rateReferenceCurrencyRef                Currency?                        @relation("TenantRateReferenceCurrency", fields: [rateReferenceCurrency], references: [code], onDelete: Restrict, map: "tenants_rate_reference_currency_fkey")
+  /// DX-584: mostrar la tasa en el menú. NULL = automático (si hay alguna
+  /// moneda aceptada distinta de la de referencia); true/false = forzado.
+  showRateInHeader                        Boolean?
   /// DX-019: datos fiscales y de contacto de la clínica (Ajustes › Datos de
   /// la clínica, solo ADMIN, PATCH /clinic/settings, auditado). Texto libre,
   /// sin formato por país; NULL = sin dato. CHECK de longitud y una línea.
@@ -3007,6 +3020,25 @@ enum ExchangeRateSource {
   AUTOMATIC
   /// De `manual_exchange_rates`: la que registra la clínica para cada día.
   MANUAL
+  /// DX-585: VES y EUR de la tasa oficial del BCV (`bcv_rate_snapshots`); el
+  /// resto de monedas, del proveedor externo (como AUTOMATIC).
+  BCV
+}
+
+/// DX-585: la tasa oficial del Banco Central de Venezuela, una fila por «Fecha
+/// Valor». Tabla GLOBAL (sin tenantId ni RLS), como `exchange_rate_snapshots`.
+/// La tasa del día D es la de la fecha valor <= D más reciente.
+model BcvRateSnapshot {
+  valueDate DateTime @id @db.Date
+  /// Bolívares por 1 USD.
+  usdVes    Decimal  @db.Decimal(18, 8)
+  /// Bolívares por 1 EUR.
+  eurVes    Decimal  @db.Decimal(18, 8)
+  fetchedAt DateTime @db.Timestamptz(3)
+  /// BCV (página oficial) o FALLBACK (respaldo). CHECK en la BD.
+  origin    String
+
+  @@map("bcv_rate_snapshots")
 }
 
 /// DX-374: tasa de cambio que la clínica fija para un día civil y una moneda,
@@ -3081,6 +3113,8 @@ model Currency {
   treatmentPlanItemReferences TreatmentPlanItem[]         @relation("TreatmentPlanItemReferenceCurrency")
   // DX-502-bis: clínicas con el catálogo de precios en esa moneda.
   tenantCatalogs              Tenant[]                    @relation("TenantCatalogCurrency")
+  // DX-584: clínicas que muestran las equivalencias contra esa moneda.
+  tenantRateReferences        Tenant[]                    @relation("TenantRateReferenceCurrency")
   // DX-262: saldos migrados en esa moneda.
   openingBalances             OpeningBalance[]
   // DX-279: importe sugerido de la política de cancelación en esa moneda.

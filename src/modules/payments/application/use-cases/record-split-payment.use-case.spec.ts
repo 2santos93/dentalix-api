@@ -20,6 +20,9 @@ import { PLAN_WITHOUT_OPTIONS } from '../../../treatment-plans/application/use-c
 import type { ReceiptPlanBalanceCalculator } from '../receipts/receipt-plan-balance';
 import type { GetPlanBalanceUseCase } from './get-plan-balance.use-case';
 import { RecordPaymentUseCase } from './record-payment.use-case';
+import { AcceptedCurrenciesGate } from '../../../exchange/application/accepted-currencies-gate';
+import { makeClinicCurrencies } from '../../../exchange/application/__fixtures__/in-memory-exchange-settings';
+import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
   PAID_AT_AFTER_SITE_TODAY_MESSAGE,
   PAID_AT_IN_FUTURE_MESSAGE,
@@ -121,7 +124,11 @@ class FakeConvertAmount {
   }
 }
 
-function makeUseCase(now: Date = new Date('2026-10-31T15:00:00.000Z')) {
+function makeUseCase(
+  now: Date = new Date('2026-10-31T15:00:00.000Z'),
+  /** DX-584: la puerta de monedas aceptadas (sin ella, como antes). */
+  accepted?: AcceptedCurrenciesGate,
+) {
   const repo = new InMemoryPaymentRepository();
   let plan: TreatmentPlanDetail | null = makePlan();
   const getPlan = {
@@ -188,6 +195,7 @@ function makeUseCase(now: Date = new Date('2026-10-31T15:00:00.000Z')) {
     () => now,
     // DX-570: sin vuelto en estas pruebas.
     null as never,
+    accepted,
   );
   const uc = new RecordSplitPaymentUseCase(
     repo,
@@ -656,6 +664,44 @@ describe('RecordSplitPaymentUseCase (DX-390)', () => {
       ).rejects.toThrow(
         new BadRequestException(IDEMPOTENCY_KEY_INVALID_MESSAGE),
       );
+    });
+  });
+
+  describe('DX-584: monedas que acepta la clínica', () => {
+    const TENANT = '58458458-4584-4584-8584-584584584584';
+    const withAccepted = (accepted: string[]) => {
+      const ctx = new TenantContextService();
+      const gate = new AcceptedCurrenciesGate(
+        makeClinicCurrencies(
+          { [TENANT]: { acceptedCurrencies: accepted } },
+          ctx,
+        ),
+        ctx,
+      );
+      return {
+        ...makeUseCase(undefined, gate),
+        inClinic: <T>(fn: () => Promise<T>) => ctx.run(TENANT, fn),
+      };
+    };
+
+    it('una línea en una moneda no aceptada: 400 CURRENCY_NOT_ACCEPTED y no se registra ninguna', async () => {
+      const { uc, repo, inClinic } = withAccepted(['VES']);
+      const error = await inClinic(() =>
+        uc.execute('plan-1', twoLines(), 'user-1', KEY),
+      ).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect((error as BadRequestException).getResponse()).toMatchObject({
+        code: 'CURRENCY_NOT_ACCEPTED',
+        currency: 'USD',
+      });
+      expect(repo.lastSplitInput).toBeNull();
+    });
+
+    it('todas las líneas aceptadas: se registra', async () => {
+      const { uc, inClinic } = withAccepted(['USD', 'VES']);
+      await expect(
+        inClinic(() => uc.execute('plan-1', twoLines(), 'user-1', KEY)),
+      ).resolves.toMatchObject({ total: 300_000 });
     });
   });
 });

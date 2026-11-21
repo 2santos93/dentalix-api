@@ -1,4 +1,8 @@
-import type { DiscountReason, TreatmentPlanStatus } from '@prisma/client';
+import type {
+  DiscountReason,
+  ExchangeRateSource,
+  TreatmentPlanStatus,
+} from '@prisma/client';
 import type { DiscountReportRowView } from './use-cases/get-discount-report.use-case';
 import {
   csvAmount,
@@ -69,9 +73,11 @@ export const DISCOUNT_REASON_LABELS: Record<DiscountReason, string> = {
   OTHER: 'Otro',
 };
 
-const RATE_SOURCE_LABELS: Record<'AUTOMATIC' | 'MANUAL', string> = {
+const RATE_SOURCE_LABELS: Record<ExchangeRateSource, string> = {
   AUTOMATIC: 'Automática',
   MANUAL: 'Manual',
+  // DX-585: la oficial del Banco Central de Venezuela.
+  BCV: 'BCV',
 };
 
 const UNKNOWN_CATALOG_CURRENCY = '(moneda del catálogo desconocida)';

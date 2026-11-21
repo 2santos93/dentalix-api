@@ -71,6 +71,11 @@ const PLATFORM_TABLES: Record<string, string> = {
   // (exchange_provider_clinic_budgets). Ver exchange-provider-budget.int-spec.
   exchange_provider_budget:
     'contador global del presupuesto del proveedor de tasas',
+  // DX-585: la tasa oficial del BCV, una fila por fecha valor. Dato de
+  // referencia GLOBAL (como exchange_rate_snapshots): el mismo para todas las
+  // clínicas. dentalix_app lee, inserta y actualiza; no borra.
+  bcv_rate_snapshots:
+    'tasa oficial del BCV por fecha valor (referencia global)',
 };
 
 /**

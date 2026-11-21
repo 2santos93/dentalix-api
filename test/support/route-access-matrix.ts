@@ -461,6 +461,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   // los cuatro roles; la fuente y las tasas manuales, solo el ADMIN.
   'GET /exchange/rates': EVERY_ROLE,
   'GET /exchange/convert': EVERY_ROLE,
+  // DX-584: la tasa del menú, para cualquier miembro (todos cobran).
+  'GET /exchange/header': EVERY_ROLE,
   'GET /exchange/settings': ADMIN_ONLY,
   'PUT /exchange/settings': ADMIN_ONLY,
   // DX-517: texto propio de cada moneda de la clínica, solo ADMIN.
