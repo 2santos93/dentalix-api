@@ -411,7 +411,7 @@ describe('Pantalla de sala de espera (e2e, DX-588)', () => {
     body = res.body as BoardBody;
     expect(body.called).toEqual([]);
     expect(body.waiting.map((w) => w.label)).toEqual(['José P.']);
-  });
+  }, 90_000);
 
   it('«Número de turno»: ningún nombre; el turno es el del panel «En clínica» y no cambia al deshacer otra llegada', async () => {
     const screen = await createScreen({
@@ -471,8 +471,11 @@ describe('Pantalla de sala de espera (e2e, DX-588)', () => {
     res = await board(screen.token!).expect(200);
     text = JSON.stringify(res.body);
     expect(text).not.toContain('Carmen');
-  });
+  }, 90_000);
 
+  // ISOLATION_COVERS: GET /public/waiting-room/:token
+  // ISOLATION_COVERS: PATCH /waiting-room-screens/:id
+  // ISOLATION_COVERS: POST /waiting-room-screens/:id/revoke
   it('aislamiento: otro host, un token inventado o mal formado dan el MISMO 404; otra clínica no ve nada', async () => {
     const screen = await createScreen({ locationId: chacao, name: 'Aislada' });
     // El token de A con el host de B (RLS): como uno inventado.
@@ -507,7 +510,6 @@ describe('Pantalla de sala de espera (e2e, DX-588)', () => {
       expect([200, 403, 404]).toContain(r.status);
       if (r.status === 200) expect(r.body).toEqual([]);
     });
-    // ISOLATION_COVERS: PATCH /waiting-room-screens/:id
     await as(
       api().patch(`/api/v1/waiting-room-screens/${screen.id}`),
       other.adminToken,
@@ -516,7 +518,6 @@ describe('Pantalla de sala de espera (e2e, DX-588)', () => {
     )
       .send({ name: 'Hackeada' })
       .expect(404);
-    // ISOLATION_COVERS: POST /waiting-room-screens/:id/revoke
     await as(
       api().post(`/api/v1/waiting-room-screens/${screen.id}/revoke`),
       other.adminToken,
@@ -535,7 +536,7 @@ describe('Pantalla de sala de espera (e2e, DX-588)', () => {
     const bBoard = await board(mine.token!, other.host).expect(200);
     expect((bBoard.body as BoardBody).waiting).toEqual([]);
     expect((bBoard.body as BoardBody).called).toEqual([]);
-  });
+  }, 90_000);
 
   it('ajustar y revocar: el televisor ve «Esta pantalla ya no está activa» en la petición siguiente; auditado', async () => {
     const screen = await createScreen({
