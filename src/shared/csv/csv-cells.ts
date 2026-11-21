@@ -6,7 +6,7 @@
  */
 
 import { CLDR_ZERO_FORMAT_DIGITS } from '../format/cldr-format-digits';
-import { amountText } from '../money/money';
+import { amountText, decimalAmountText, isWholeDecimal } from '../money/money';
 const FORMULA_START = /^[\s]*[=+\-@]|^[\t\r]/;
 
 export function csvText(value: string | null): string {
@@ -28,6 +28,22 @@ export function csvAmount(value: number, currency: string): string {
     CLDR_ZERO_FORMAT_DIGITS.has(currency.toUpperCase()) &&
     Number.isInteger(value);
   return amountText(value, zero ? 0 : 2);
+}
+
+/**
+ * DX-053: `csvAmount` para un importe que llega como texto de NUMERIC (la
+ * exportación de la clínica, que no lo convierte a number): mismos
+ * decimales de la pantalla, exacto. Sin moneda, 2.
+ */
+export function csvDecimalAmount(
+  value: string,
+  currency: string | null,
+): string {
+  const zero =
+    currency !== null &&
+    CLDR_ZERO_FORMAT_DIGITS.has(currency.trim().toUpperCase()) &&
+    isWholeDecimal(value);
+  return decimalAmountText(value, zero ? 0 : 2);
 }
 
 export const CSV_BOM = '\uFEFF';
