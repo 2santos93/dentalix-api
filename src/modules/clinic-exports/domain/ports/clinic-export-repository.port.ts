@@ -63,9 +63,11 @@ export interface ClinicExportRepository {
   request(
     ctx: AuditRequestContext,
     staleBefore: Date,
+    /** `staleIds`: las que se acaban de cerrar como STALE (su fichero se purga). */
     afterInsert: (
       exportId: string,
       tx: Prisma.TransactionClient,
+      staleIds: string[],
     ) => Promise<void>,
   ): Promise<RequestOutcome>;
 
@@ -84,6 +86,12 @@ export interface ClinicExportRepository {
 
   /** PENDING/RUNNING → RUNNING; null si ya terminó (READY/FAILED) o no existe. */
   start(id: string, now: Date): Promise<StartedExport | null>;
+
+  /**
+   * Antes de subir el ZIP: la fila RUNNING guarda su clave y `afterUpdate`
+   * programa el borrado (misma transacción). false si ya no está RUNNING.
+   */
+  reserveFile(id: string, fileKey: string, afterUpdate: InTx): Promise<boolean>;
 
   /** RUNNING → READY con `afterUpdate` (emails, borrado diferido) en la misma transacción. */
   complete(

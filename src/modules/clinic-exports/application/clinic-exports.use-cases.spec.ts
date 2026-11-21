@@ -9,6 +9,7 @@ import {
   CLINIC_EXPORT_ALREADY_DOWNLOADED_MESSAGE,
   CLINIC_EXPORT_BREAK_GLASS_MESSAGE,
   CLINIC_EXPORT_BUILD_JOB,
+  CLINIC_EXPORT_PURGE_JOB,
   CLINIC_EXPORT_EXPIRED_MESSAGE,
   CLINIC_EXPORT_FORBIDDEN_MESSAGE,
   CLINIC_EXPORT_IN_PROGRESS_MESSAGE,
@@ -66,10 +67,10 @@ function setup(download: DownloadOutcome = { kind: 'NOT_FOUND' }) {
     async (
       _ctx: unknown,
       staleBefore: Date,
-      after: (id: string, tx: never) => Promise<void>,
+      after: (id: string, tx: never, staleIds: string[]) => Promise<void>,
     ) => {
       expect(staleBefore.toISOString()).toBe('2026-11-21T06:00:00.000Z');
-      await after(ID, {} as never);
+      await after(ID, {} as never, ['stale-1']);
       return { kind: 'CREATED' as const, id: ID };
     },
   );
@@ -103,6 +104,11 @@ describe('ClinicExportsUseCases (DX-053)', () => {
     });
     expect(t.enqueued).toEqual([
       { name: CLINIC_EXPORT_BUILD_JOB, key: `clinic-export:${ID}` },
+      // La colgada que se cerró como STALE: su fichero se purga ya.
+      {
+        name: CLINIC_EXPORT_PURGE_JOB,
+        key: 'clinic-export-purge-stale:stale-1',
+      },
     ]);
   });
 

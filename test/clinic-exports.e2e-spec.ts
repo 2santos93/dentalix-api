@@ -2,6 +2,7 @@ import { INestApplication } from '@nestjs/common';
 import { ClinicRole, Prisma, PrismaClient } from '@prisma/client';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import { JobQueue } from '../src/modules/jobs/application/job-queue.service';
 import { JobWorker } from '../src/modules/jobs/application/job-worker.service';
 import { MAILER } from '../src/modules/notifications/email/domain/ports/mailer.port';
 import {
@@ -378,9 +379,12 @@ describe('Exportación de los datos de la clínica (e2e, DX-053)', () => {
         payload: { equals: { exportId: exportA } },
       },
     });
+    // Programado ANTES de subir el ZIP (red de seguridad): 7 días desde
+    // entonces, unos segundos antes de READY.
     const days =
       (purge.runAt.getTime() - row.completedAt!.getTime()) / 86_400_000;
-    expect(days).toBeCloseTo(7, 5);
+    expect(days).toBeGreaterThan(6.99);
+    expect(days).toBeLessThanOrEqual(7);
     await raw.job.update({
       where: { id: purge.id },
       data: { runAt: new Date(Date.now() - 1000) },
@@ -393,7 +397,8 @@ describe('Exportación de los datos de la clínica (e2e, DX-053)', () => {
     expect(after.fileDeletedAt).not.toBeNull();
   });
 
-  it('una en curso colgada de hace horas no bloquea: se cierra FAILED STALE y la nueva se crea', async () => {
+  it('una en curso colgada de hace horas no bloquea: se cierra FAILED STALE, la nueva se crea y lo que hubiera subido se borra', async () => {
+    const storage = app.get<FileStoragePort>(FILE_STORAGE);
     const stuck = await raw.clinicExport.create({
       data: {
         tenantId: other.tenantId,
@@ -402,6 +407,13 @@ describe('Exportación de los datos de la clínica (e2e, DX-053)', () => {
         requestedAt: new Date(Date.now() - 7 * 3600_000),
       },
     });
+    // El worker murió tras subir: la fila ya nombraba el fichero.
+    const key = `clinic-exports/${other.tenantId}/${stuck.id}.zip`;
+    await raw.clinicExport.update({
+      where: { id: stuck.id },
+      data: { fileKey: key },
+    });
+    await storage.save(key, Buffer.from('volcado a medias'), 'application/zip');
     const res = await requestExport(other).expect(201);
     expect((res.body as ExportBody).id).not.toBe(stuck.id);
     const closed = await raw.clinicExport.findUniqueOrThrow({
@@ -413,6 +425,43 @@ describe('Exportación de los datos de la clínica (e2e, DX-053)', () => {
     );
     expect(states).toContain('FAILED');
     await drain();
+    expect(await storage.stat(key)).toBeNull();
+    expect(
+      (await raw.clinicExport.findUniqueOrThrow({ where: { id: stuck.id } }))
+        .fileDeletedAt,
+    ).not.toBeNull();
+  });
+
+  it('el borrado encuentra un ZIP de una exportación que nunca llegó a READY', async () => {
+    const storage = app.get<FileStoragePort>(FILE_STORAGE);
+    const orphan = await raw.clinicExport.create({
+      data: {
+        tenantId: clinic.tenantId,
+        requestedById: clinic.adminUserId,
+        status: 'FAILED',
+        errorCode: 'BUILD_FAILED',
+        completedAt: new Date(),
+      },
+    });
+    const key = `clinic-exports/${clinic.tenantId}/${orphan.id}.zip`;
+    await raw.clinicExport.update({
+      where: { id: orphan.id },
+      data: { fileKey: key },
+    });
+    await storage.save(key, Buffer.from('huérfano'), 'application/zip');
+    await app
+      .get(JobQueue)
+      .enqueue(
+        CLINIC_EXPORT_PURGE_JOB,
+        { exportId: orphan.id },
+        { tenantId: clinic.tenantId },
+      );
+    await drain();
+    expect(await storage.stat(key)).toBeNull();
+    const after = await raw.clinicExport.findUniqueOrThrow({
+      where: { id: orphan.id },
+    });
+    expect(after.fileDeletedAt).not.toBeNull();
   });
 
   it('id mal formado → 400', async () => {

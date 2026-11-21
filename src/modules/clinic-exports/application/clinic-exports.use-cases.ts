@@ -13,6 +13,7 @@ import {
   CLINIC_EXPORT_ALREADY_DOWNLOADED_MESSAGE,
   CLINIC_EXPORT_BREAK_GLASS_MESSAGE,
   CLINIC_EXPORT_BUILD_JOB,
+  CLINIC_EXPORT_PURGE_JOB,
   CLINIC_EXPORT_EXPIRED_MESSAGE,
   CLINIC_EXPORT_FAILED_MESSAGE,
   CLINIC_EXPORT_FORBIDDEN_MESSAGE,
@@ -89,12 +90,21 @@ export class ClinicExportsUseCases {
     const outcome = await this.repo.request(
       actor.ctx,
       new Date(now.getTime() - STALE_AFTER_HOURS * HOUR_MS),
-      async (exportId, tx) => {
+      async (exportId, tx, staleIds) => {
         await this.queue.enqueue(
           CLINIC_EXPORT_BUILD_JOB,
           { exportId },
           { tx, idempotencyKey: `clinic-export:${exportId}` },
         );
+        // Las colgadas que se acaban de cerrar: si alcanzaron a subir algo,
+        // se borra ya (sin esperar a los 7 días).
+        for (const staleId of staleIds) {
+          await this.queue.enqueue(
+            CLINIC_EXPORT_PURGE_JOB,
+            { exportId: staleId },
+            { tx, idempotencyKey: `clinic-export-purge-stale:${staleId}` },
+          );
+        }
       },
     );
     if (outcome.kind === 'IN_PROGRESS') {

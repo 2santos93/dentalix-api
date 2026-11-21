@@ -54,12 +54,11 @@ export class ClinicExportJobs implements OnModuleInit {
         });
       },
       // DX-422: el último intento se quedó a medias (el worker murió).
+      // Se cierra FAILED y, si alcanzó a subir el ZIP, se borra ya.
       onExhausted: async (payload) => {
-        await this.repo.fail(
-          exportIdOf(CLINIC_EXPORT_BUILD_JOB, payload),
-          'LEASE_EXPIRED',
-          this.clock(),
-        );
+        const exportId = exportIdOf(CLINIC_EXPORT_BUILD_JOB, payload);
+        await this.repo.fail(exportId, 'LEASE_EXPIRED', this.clock());
+        await this.builder.purge(exportId);
       },
     });
     this.registry.register({

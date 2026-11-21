@@ -118,6 +118,7 @@ export class PrismaClinicExportRepository implements ClinicExportRepository {
     afterInsert: (
       exportId: string,
       tx: Prisma.TransactionClient,
+      staleIds: string[],
     ) => Promise<void>,
   ): Promise<RequestOutcome> {
     const tenantId = this.tenantId();
@@ -125,12 +126,17 @@ export class PrismaClinicExportRepository implements ClinicExportRepository {
       return await this.prisma.runWithTenant(tenantId, async (tx) => {
         // Una en curso que lleva horas: su trabajo murió sin cerrarla. Se
         // cierra para que la clínica no quede bloqueada con 409 para siempre.
-        await tx.clinicExport.updateMany({
+        const stale = await tx.clinicExport.findMany({
           where: {
             tenantId,
             status: { in: [...ACTIVE] },
             requestedAt: { lt: staleBefore },
           },
+          select: { id: true },
+        });
+        const staleIds = stale.map((r) => r.id);
+        await tx.clinicExport.updateMany({
+          where: { tenantId, id: { in: staleIds } },
           data: {
             status: 'FAILED',
             errorCode: 'STALE' satisfies ClinicExportErrorCode,
@@ -141,7 +147,7 @@ export class PrismaClinicExportRepository implements ClinicExportRepository {
           data: { tenantId, requestedById: ctx.actor.userId },
           select: { id: true },
         });
-        await afterInsert(created.id, tx);
+        await afterInsert(created.id, tx, staleIds);
         await writeAuditEvent(
           tx,
           auditDraftFromContext(
@@ -279,6 +285,23 @@ export class PrismaClinicExportRepository implements ClinicExportRepository {
         where: { id, tenantId },
         select: { requestedById: true, requestedAt: true },
       });
+    });
+  }
+
+  async reserveFile(
+    id: string,
+    fileKey: string,
+    afterUpdate: InTx,
+  ): Promise<boolean> {
+    const tenantId = this.tenantId();
+    return this.prisma.runWithTenant(tenantId, async (tx) => {
+      const moved = await tx.clinicExport.updateMany({
+        where: { id, tenantId, status: 'RUNNING' },
+        data: { fileKey },
+      });
+      if (moved.count === 0) return false;
+      await afterUpdate(tx);
+      return true;
     });
   }
 

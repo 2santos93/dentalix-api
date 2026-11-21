@@ -97,6 +97,7 @@ export class ClinicExportBuilder {
     );
     const fileKey = exportFileKey(context.tenantId, exportId);
     let uploaded = false;
+    let completed = false;
     try {
       const { sizeBytes, rowCounts } = await this.writeZip(
         tempFile,
@@ -104,8 +105,29 @@ export class ClinicExportBuilder {
         context.signal,
       );
       assertLeaseHeld(context.signal);
-      await this.storage.saveFile(fileKey, tempFile, 'application/zip');
+      // Red de seguridad ANTES de subir: la fila ya nombra la clave y el
+      // borrado a los 7 días queda programado (outbox). Aunque el proceso
+      // muera entre la subida y READY, el trabajo de borrado encuentra el
+      // fichero y lo quita: nunca queda un volcado sin dueño.
+      const reserved = await this.repo.reserveFile(exportId, fileKey, (tx) =>
+        this.queue
+          .enqueue(
+            CLINIC_EXPORT_PURGE_JOB,
+            { exportId },
+            {
+              tx,
+              runAt: new Date(
+                this.clock().getTime() + FILE_RETENTION_DAYS * 24 * HOUR_MS,
+              ),
+              idempotencyKey: `clinic-export-purge:${exportId}`,
+            },
+          )
+          .then(() => undefined),
+      );
+      if (!reserved) return 'SKIPPED';
+      assertLeaseHeld(context.signal);
       uploaded = true;
+      await this.storage.saveFile(fileKey, tempFile, 'application/zip');
 
       const completedAt = this.clock();
       const downloadExpiresAt = new Date(
@@ -118,7 +140,7 @@ export class ClinicExportBuilder {
         downloadExpiresAt,
       });
       assertLeaseHeld(context.signal);
-      const done = await this.repo.complete(
+      completed = await this.repo.complete(
         exportId,
         {
           fileKey,
@@ -130,20 +152,9 @@ export class ClinicExportBuilder {
         },
         async (tx) => {
           for (const email of emails) await email.insert(tx);
-          await this.queue.enqueue(
-            CLINIC_EXPORT_PURGE_JOB,
-            { exportId },
-            {
-              tx,
-              runAt: new Date(
-                completedAt.getTime() + FILE_RETENTION_DAYS * 24 * HOUR_MS,
-              ),
-              idempotencyKey: `clinic-export-purge:${exportId}`,
-            },
-          );
         },
       );
-      if (!done) return 'SKIPPED';
+      if (!completed) return 'SKIPPED';
       for (const email of emails) email.kick();
       this.logger.log({
         event: 'clinic_export.ready',
@@ -162,12 +173,6 @@ export class ClinicExportBuilder {
           tooLarge ? 'TOO_LARGE' : 'BUILD_FAILED',
           this.clock(),
         );
-        // Subido pero sin READY (falló la transacción final): que no quede
-        // un volcado huérfano en el almacén.
-        if (uploaded) {
-          // eslint-disable-next-line no-restricted-syntax -- DX-053: objeto del almacén (el ZIP huérfano), no una fila de la BD.
-          await this.storage.delete(fileKey).catch(() => undefined);
-        }
         this.logger.warn({
           event: 'clinic_export.failed',
           tenantId: context.tenantId,
@@ -180,6 +185,26 @@ export class ClinicExportBuilder {
       throw error;
     } finally {
       await removeLocalFile(tempFile);
+      // Subido (o a medio subir) y sin READY, salga por donde salga (error,
+      // reserva perdida, `complete` que no cambió nada): fuera del almacén ya.
+      // Un reintento lo vuelve a subir. Nunca tapa el error original.
+      if (uploaded && !completed) await this.discardUpload(exportId, fileKey);
+    }
+  }
+
+  /** Borra el ZIP no completado; si falla, queda el borrado programado. */
+  private async discardUpload(
+    exportId: string,
+    fileKey: string,
+  ): Promise<void> {
+    try {
+      // eslint-disable-next-line no-restricted-syntax -- DX-053: objeto del almacén (el ZIP huérfano), no una fila de la BD.
+      await this.storage.delete(fileKey);
+    } catch {
+      this.logger.warn({
+        event: 'clinic_export.orphan_delete_failed',
+        exportId,
+      });
     }
   }
 

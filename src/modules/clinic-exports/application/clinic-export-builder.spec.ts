@@ -58,6 +58,7 @@ function patientRows(n: number): ExportRow[] {
 
 function setup(options: { patients?: number; started?: boolean } = {}) {
   const patients = patientRows(options.patients ?? 0);
+  const order: string[] = [];
   const storageDelete = jest.fn(() => Promise.resolve());
   const markFileDeleted = jest.fn(() => Promise.resolve());
   const pageCalls: { file: string; after: string | null; limit: number }[] = [];
@@ -89,6 +90,11 @@ function setup(options: { patients?: number; started?: boolean } = {}) {
     fail: jest.fn((_id: string, code: string) => {
       failed.push(code);
       return Promise.resolve();
+    }),
+    reserveFile: jest.fn(async (_id: string, key: string, after: InTx) => {
+      order.push(`reserve:${key}`);
+      await after({} as never);
+      return true;
     }),
     fileToPurge: jest.fn(() => Promise.resolve('clinic-exports/x/y.zip')),
     markFileDeleted,
@@ -125,6 +131,7 @@ function setup(options: { patients?: number; started?: boolean } = {}) {
   };
   const storage = {
     saveFile: jest.fn((key: string, file: string) => {
+      order.push(`save:${key}`);
       saved.push({ key, bytes: readFileSync(file) });
       return Promise.resolve();
     }),
@@ -174,6 +181,7 @@ function setup(options: { patients?: number; started?: boolean } = {}) {
     storageDelete,
     markFileDeleted,
     prepareInTx,
+    order,
   };
 }
 
@@ -270,15 +278,56 @@ describe('ClinicExportBuilder (DX-053)', () => {
     expect(t.failed).toEqual(['BUILD_FAILED']);
   });
 
-  it('si falla tras subir el fichero, en el último intento lo borra del almacén', async () => {
+  it('la fila nombra el fichero y el borrado queda programado ANTES de subirlo', async () => {
     const t = setup();
-    (t.repo.complete as jest.Mock).mockRejectedValue(new Error('BD caída'));
-    await expect(
-      t.builder.build(EXPORT_ID, { ...t.ctx, attempt: 3 }),
-    ).rejects.toThrow('BD caída');
+    await t.builder.build(EXPORT_ID, t.ctx);
+    const key = `clinic-exports/${TENANT}/${EXPORT_ID}.zip`;
+    expect(t.order).toEqual([`reserve:${key}`, `save:${key}`]);
+    expect(t.enqueued.map((e) => e.name)).toEqual([CLINIC_EXPORT_PURGE_JOB]);
+    // Lo listo no se borra.
+    expect(t.storageDelete).not.toHaveBeenCalled();
+  });
+
+  it.each([1, 3])(
+    'error tras subir (intento %i): el ZIP se borra del almacén y el error original sale',
+    async (attempt) => {
+      const t = setup();
+      (t.repo.complete as jest.Mock).mockRejectedValue(new Error('BD caída'));
+      t.storageDelete.mockRejectedValueOnce(new Error('S3 caído al borrar'));
+      await expect(
+        t.builder.build(EXPORT_ID, { ...t.ctx, attempt }),
+      ).rejects.toThrow('BD caída');
+      expect(t.storageDelete).toHaveBeenCalledWith(
+        `clinic-exports/${TENANT}/${EXPORT_ID}.zip`,
+      );
+    },
+  );
+
+  it('complete sin efecto (ya no estaba RUNNING): SKIPPED y el ZIP se borra', async () => {
+    const t = setup();
+    (t.repo.complete as jest.Mock).mockResolvedValue(false);
+    await expect(t.builder.build(EXPORT_ID, t.ctx)).resolves.toBe('SKIPPED');
     expect(t.storageDelete).toHaveBeenCalledWith(
       `clinic-exports/${TENANT}/${EXPORT_ID}.zip`,
     );
+    expect(t.kicks).toEqual([]);
+  });
+
+  it('la subida falla a medias: también se borra lo que haya llegado', async () => {
+    const t = setup();
+    (t.storage.saveFile as jest.Mock).mockRejectedValue(new Error('S3 caído'));
+    await expect(t.builder.build(EXPORT_ID, t.ctx)).rejects.toThrow('S3 caído');
+    expect(t.storageDelete).toHaveBeenCalledWith(
+      `clinic-exports/${TENANT}/${EXPORT_ID}.zip`,
+    );
+  });
+
+  it('sin reserva (ya no estaba RUNNING): no sube nada', async () => {
+    const t = setup();
+    (t.repo.reserveFile as jest.Mock).mockResolvedValue(false);
+    await expect(t.builder.build(EXPORT_ID, t.ctx)).resolves.toBe('SKIPPED');
+    expect(t.saved).toHaveLength(0);
+    expect(t.storageDelete).not.toHaveBeenCalled();
   });
 
   it('demasiado grande: FAILED TOO_LARGE sin reintentar', async () => {
