@@ -27,7 +27,8 @@ export class ExchangeHeaderRateDto {
   @ApiProperty({
     enum: ExchangeRateSource,
     enumName: 'ExchangeRateSource',
-    description: 'De dónde sale la tasa: AUTOMATIC (proveedor) o MANUAL.',
+    description:
+      'De dónde sale la tasa (la fuente de la clínica): AUTOMATIC (proveedor), MANUAL o BCV (DX-585: VES y EUR del BCV, el resto del proveedor).',
   })
   source!: ExchangeRateSource;
 
@@ -43,9 +44,18 @@ export class ExchangeHeaderRateDto {
     format: 'date-time',
     nullable: true,
     description:
-      'Con AUTOMATIC, cuándo se guardó la tasa del proveedor. null con MANUAL o sin tasa.',
+      'Con AUTOMATIC, cuándo se guardó la tasa del proveedor. Con BCV, cuándo se consultó la tasa del BCV si la fila usa VES o EUR (si no, la del proveedor). null con MANUAL o sin tasa.',
   })
   fetchedAt!: string | null;
+
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    example: '2026-11-24',
+    description:
+      'DX-585: con BCV y una fila que usa VES o EUR (como moneda o como referencia), la «Fecha Valor» (AAAA-MM-DD) de la tasa del BCV: la más reciente que no es posterior a `date` (un fin de semana o feriado, la del último día hábil). null en cualquier otro caso.',
+  })
+  valueDate!: string | null;
 }
 
 /** Respuesta de GET /exchange/header (DX-584). */

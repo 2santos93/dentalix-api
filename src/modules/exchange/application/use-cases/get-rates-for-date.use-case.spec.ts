@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { toRateColumn } from '../../../../shared/money/rate-conversion';
 import { GetRatesForDateUseCase } from './get-rates-for-date.use-case';
 import { ExchangeRateRepository } from '../../domain/ports/exchange-rate-repository.port';
 import {
@@ -13,6 +14,7 @@ import {
 import { ExchangeRateSnapshot } from '../../domain/entities/exchange-rate-snapshot.entity';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import {
+  makeBcvRates,
   makeManualRates,
   makeSettings,
 } from '../__fixtures__/in-memory-exchange-settings';
@@ -84,6 +86,9 @@ function makeUseCase(
     new TenantContextService(),
   );
 }
+
+/** EUR por USD con 8 decimales, como `bcvRatesPerUsd`. */
+const toEur = (usdVes: number, eurVes: number) => toRateColumn(usdVes / eurVes);
 
 describe('GetRatesForDateUseCase', () => {
   it('returns cached rates without calling the provider (cache hit)', async () => {
@@ -459,6 +464,140 @@ describe('GetRatesForDateUseCase', () => {
   });
 
   // SEC-054: la cuota del proveedor es una sola para toda la plataforma.
+  // DX-585: con BCV, VES y EUR del BCV (fecha valor <= día); el resto, del proveedor.
+  describe('fuente BCV (DX-585)', () => {
+    const T = '33333333-3333-4333-8333-333333333333';
+    // Jueves 20 publica la del viernes 21; viernes 21 publica la del lunes 24.
+    const BCV = [
+      {
+        valueDate: '2026-11-21',
+        usdVes: 917.62,
+        eurVes: 1009.5,
+        fetchedAt: new Date('2026-11-20T21:00:00Z'),
+      },
+      {
+        valueDate: '2026-11-24',
+        usdVes: 918.7662,
+        eurVes: 1011.17949056,
+        fetchedAt: new Date('2026-11-21T19:00:00Z'),
+      },
+    ];
+
+    function setup(bcv = makeBcvRates(BCV)) {
+      const repo = makeInMemoryRepo();
+      repo.seed('2026-11-22', { GBP: 0.79, VES: 900, EUR: 0.95 });
+      repo.seed('2026-11-24', { GBP: 0.8, VES: 901, EUR: 0.96 });
+      const fetchRates = jest.fn().mockResolvedValue({
+        base: 'USD',
+        rates: { GBP: 0.78, VES: 899, EUR: 0.94 },
+      });
+      const tenantContext = new TenantContextService();
+      const uc = new GetRatesForDateUseCase(
+        repo,
+        makeProvider(fetchRates),
+        makeSettings({ [T]: 'BCV' }, tenantContext),
+        makeManualRates({ [T]: { '2026-11-22': { VES: 1 } } }, tenantContext),
+        tenantContext,
+        undefined,
+        undefined,
+        undefined,
+        bcv,
+      );
+      const run = <R>(fn: () => Promise<R>) => tenantContext.run(T, fn);
+      return { uc, fetchRates, run };
+    }
+
+    it('VES y EUR salen del BCV (EUR = Bs./USD ÷ Bs./EUR) y el resto del proveedor', async () => {
+      const { uc, run } = setup();
+      await expect(run(() => uc.execute('2026-11-24'))).resolves.toEqual({
+        base: 'USD',
+        source: 'BCV',
+        rates: { GBP: 0.8, VES: 918.7662, EUR: 0.90860842 },
+        rateDate: '2026-11-24',
+        bcv: { valueDate: '2026-11-24', fetchedAt: '2026-11-21T19:00:00.000Z' },
+      });
+    });
+
+    it('fin de semana: el domingo usa la del último día hábil (fecha valor 21), no la del lunes ya publicada', async () => {
+      const { uc, run } = setup();
+      const read = await run(() => uc.execute('2026-11-22'));
+      expect(read.rates).toEqual({
+        GBP: 0.79,
+        VES: 917.62,
+        EUR: toEur(917.62, 1009.5),
+      });
+      expect(read.bcv).toEqual({
+        valueDate: '2026-11-21',
+        fetchedAt: '2026-11-20T21:00:00.000Z',
+      });
+      // Las tasas manuales de la clínica no se usan con BCV.
+      expect(read.rates.VES).not.toBe(1);
+    });
+
+    it('solo monedas del BCV (o USD): no llama al proveedor ni lee su caché', async () => {
+      const { uc, run, fetchRates } = setup();
+      const read = await run(() =>
+        uc.execute('2026-11-23', { currencies: ['USD', 'VES', 'EUR'] }),
+      );
+      expect(read.rates).toEqual({ VES: 917.62, EUR: toEur(917.62, 1009.5) });
+      expect(fetchRates).not.toHaveBeenCalled();
+    });
+
+    it('con otra moneda pide al proveedor (como AUTOMATIC) y aun así VES y EUR son del BCV', async () => {
+      const { uc, run, fetchRates } = setup();
+      const read = await run(() =>
+        uc.execute('2026-11-23', { currencies: ['VES', 'GBP'] }),
+      );
+      expect(fetchRates).toHaveBeenCalledWith('2026-11-23');
+      expect(read.rates).toEqual({
+        GBP: 0.78,
+        VES: 917.62,
+        EUR: toEur(917.62, 1009.5),
+      });
+    });
+
+    it('sin tasa del BCV que rija: VES y EUR NO aparecen (nunca las del proveedor) y bcv es null', async () => {
+      const { uc, run } = setup(makeBcvRates([]));
+      await expect(run(() => uc.execute('2026-11-24'))).resolves.toEqual({
+        base: 'USD',
+        source: 'BCV',
+        rates: { GBP: 0.8 },
+        rateDate: '2026-11-24',
+        bcv: null,
+      });
+    });
+
+    it('una fecha valor de más de 7 días no vale («sin tasa»); la de hace 7 sí', async () => {
+      const { uc, run } = setup();
+      const eightDays = await run(() =>
+        uc.execute('2026-12-02', { currencies: ['VES'] }),
+      );
+      expect(eightDays.rates).toEqual({});
+      expect(eightDays.bcv).toBeNull();
+      const sevenDays = await run(() =>
+        uc.execute('2026-12-01', { currencies: ['VES'] }),
+      );
+      expect(sevenDays.rates.VES).toBe(918.7662);
+    });
+
+    it('un día anterior a toda fecha valor guardada: sin tasa del BCV', async () => {
+      const { uc, run } = setup();
+      const read = await run(() =>
+        uc.execute('2026-11-20', { currencies: ['VES'] }),
+      );
+      expect(read).toMatchObject({ rates: {}, bcv: null, source: 'BCV' });
+    });
+
+    it('stored() (enlace público) con solo VES no llama al proveedor', async () => {
+      const { uc, run, fetchRates } = setup();
+      const read = await run(() =>
+        uc.stored('2026-11-25', { currencies: ['VES'] }),
+      );
+      expect(read?.rates).toEqual({ VES: 918.7662, EUR: 0.90860842 });
+      expect(fetchRates).not.toHaveBeenCalled();
+    });
+  });
+
   describe('cuota del proveedor (SEC-054)', () => {
     const A = '33333333-3333-4333-8333-333333333333';
     const M = '44444444-4444-4444-8444-444444444444';

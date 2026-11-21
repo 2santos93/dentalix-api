@@ -7,10 +7,12 @@ import {
   type RatesLookupOptions,
 } from './get-rates-for-date.use-case';
 import {
+  MissingBcvRateError,
   MissingExchangeRateError,
   UnsupportedCurrencyRateError,
 } from '../../domain/missing-exchange-rate.error';
 import { BASE_CURRENCY } from '../../domain/exchange-rate-source';
+import { BCV_CURRENCIES } from '../../domain/bcv-rate';
 import { AMOUNT_NON_NEGATIVE_MESSAGE } from '../../../../shared/money/currency-messages';
 import {
   convertWithQuote,
@@ -133,9 +135,13 @@ export class ConvertAmountUseCase implements AmountConverter {
       if (currency === BASE_CURRENCY) return 1;
       const rate = rates[currency];
       if (rate !== undefined) return rate;
-      throw source === 'MANUAL'
-        ? new MissingExchangeRateError(currency, date)
-        : new UnsupportedCurrencyRateError(currency, date);
+      if (source === 'MANUAL')
+        throw new MissingExchangeRateError(currency, date);
+      // DX-585: con BCV, VES y EUR solo salen del BCV.
+      if (source === 'BCV' && BCV_CURRENCIES.includes(currency)) {
+        throw new MissingBcvRateError(currency, date);
+      }
+      throw new UnsupportedCurrencyRateError(currency, date);
     };
     const fromPerBase = perBase(from);
     const toPerBase = perBase(to);

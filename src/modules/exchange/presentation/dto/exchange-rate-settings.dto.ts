@@ -49,7 +49,7 @@ export class UpdateExchangeRateSettingsDto {
     enumName: 'ExchangeRateSource',
     example: 'MANUAL',
     description:
-      'AUTOMATIC: la tasa del día sale del proveedor (por defecto). MANUAL: desde hoy, la que registra la clínica para cada día y moneda; sin ella, la moneda queda «sin tasa» (salvo el plazo de `manualRateMaxAgeDays`). Los días anteriores al paso a MANUAL siguen con la automática. Sin este campo la fuente no cambia.',
+      'AUTOMATIC: la tasa del día sale del proveedor (por defecto). MANUAL: desde hoy, la que registra la clínica para cada día y moneda; sin ella, la moneda queda «sin tasa» (salvo el plazo de `manualRateMaxAgeDays`). Los días anteriores al paso a MANUAL siguen con la automática. BCV (DX-585): VES y EUR de la tasa oficial del Banco Central de Venezuela (la de la «Fecha Valor» que rige el día); el resto de monedas, del proveedor; `manualSince` queda null, como con AUTOMATIC. Sin este campo la fuente no cambia.',
   })
   @IsOptional()
   @IsIn(EXCHANGE_RATE_SOURCES, { message: EXCHANGE_RATE_SOURCE_MESSAGE })
@@ -112,7 +112,7 @@ export class ExchangeRateSettingsDto {
     enumName: 'ExchangeRateSource',
     example: 'MANUAL',
     description:
-      'De dónde sale la tasa del día: AUTOMATIC (proveedor) o MANUAL (la que registra la clínica).',
+      'De dónde sale la tasa del día: AUTOMATIC (proveedor), MANUAL (la que registra la clínica) o BCV (DX-585: VES y EUR del BCV, el resto del proveedor).',
   })
   source!: ExchangeRateSource;
 
@@ -121,7 +121,7 @@ export class ExchangeRateSettingsDto {
     nullable: true,
     example: '2026-10-30',
     description:
-      'Día civil (sede principal) desde el que rige la fuente MANUAL: los días anteriores se convierten con la tasa automática. Null con AUTOMATIC.',
+      'Día civil (sede principal) desde el que rige la fuente MANUAL: los días anteriores se convierten con la tasa automática. Null con AUTOMATIC y con BCV.',
   })
   manualSince!: string | null;
 

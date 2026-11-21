@@ -8,14 +8,17 @@ export type { ExchangeRateSource };
  * defecto, lo de siempre): el proveedor, cacheado en `exchange_rate_snapshots`.
  * MANUAL: la tasa que registra el ADMIN para cada día y moneda; sin ella, la
  * moneda queda «sin tasa» y nunca se pide al proveedor.
+ * DX-585: BCV: VES y EUR de la tasa oficial del Banco Central de Venezuela
+ * (la de la «Fecha Valor» que rige el día); el resto, como AUTOMATIC.
  */
 export const EXCHANGE_RATE_SOURCES: readonly ExchangeRateSource[] = [
   'AUTOMATIC',
   'MANUAL',
+  'BCV',
 ];
 
 export const EXCHANGE_RATE_SOURCE_MESSAGE =
-  'Elige de dónde sale la tasa: automática o manual.';
+  'Elige de dónde sale la tasa: automática, manual o BCV oficial.';
 
 /** Moneda base de todas las tasas: su tasa siempre es 1 y no se registra. */
 export const BASE_CURRENCY = 'USD';
