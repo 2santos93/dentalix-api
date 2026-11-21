@@ -20,7 +20,8 @@
 -- Reglas en la BD (la API responde antes con 400/404/409 en español):
 --   * FK directa a tenants ON DELETE RESTRICT y FK COMPUESTA (tenantId,
 --     locationId) → locations en las dos tablas nuevas, dentro del CREATE
---     TABLE (nacen vacías, DX-134): la sede es de la MISMA clínica.
+--     TABLE (nacen vacías, DX-134): la sede es de la MISMA clínica. La del
+--     contador es ON DELETE CASCADE (dato derivado de la sede).
 --   * revokedAt y revokedById van juntos; mensajes sin NULL, como mucho 5 y
 --     ninguno vacío ni de más de 140 (la longitud total acota cada uno junto
 --     con la API; la API valida cada mensaje).
@@ -102,9 +103,12 @@ CREATE TABLE "location_turn_counters" (
     CONSTRAINT "location_turn_counters_pkey" PRIMARY KEY ("tenantId", "locationId", "day"),
     CONSTRAINT "location_turn_counters_tenantId_fkey"
       FOREIGN KEY ("tenantId") REFERENCES "tenants"("id") ON DELETE RESTRICT ON UPDATE CASCADE,
+    -- CASCADE (no RESTRICT): el contador es un dato derivado, sin valor sin
+    -- su sede. La app nunca borra sedes (se retiran); quien las borra como
+    -- owner (pruebas, purga) no debe toparse con contadores de turnos.
     CONSTRAINT "location_turn_counters_tenantId_locationId_fkey"
       FOREIGN KEY ("tenantId", "locationId") REFERENCES "locations"("tenantId", "id")
-      ON DELETE RESTRICT ON UPDATE CASCADE,
+      ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "location_turn_counters_last_number_check" CHECK ("lastNumber" >= 1)
 );
 
