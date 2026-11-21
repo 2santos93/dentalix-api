@@ -101,18 +101,28 @@ export interface CheckInRepository {
   ): Promise<CheckInAttemptState | null>;
 
   /**
-   * Suma un fallo (atómico: INSERT … ON CONFLICT DO UPDATE … RETURNING). Los
-   * fallos de más de `windowMinutes` o tras un bloqueo vencido empiezan de
-   * cero; al llegar a `maxFailures` bloquea `lockMinutes`.
+   * Anota un intento ANTES de comparar (atómico: INSERT … ON CONFLICT DO
+   * UPDATE … RETURNING). Los de más de `windowMinutes` o tras un bloqueo
+   * vencido empiezan de cero; pasado `maxAttempts`, bloquea `lockMinutes`.
    */
-  recordFailure(
+  reserveAttempt(
     locationId: string,
     clientKey: string,
-    rules: { maxFailures: number; lockMinutes: number; windowMinutes: number },
+    rules: { maxAttempts: number; lockMinutes: number; windowMinutes: number },
   ): Promise<CheckInAttemptState>;
 
-  /** Un acierto borra el contador del cliente en la sede. */
-  clearAttempts(locationId: string, clientKey: string): Promise<void>;
+  /** El fallo que llega al tope bloquea al cliente; devuelve hasta cuándo. */
+  lockClient(
+    locationId: string,
+    clientKey: string,
+    lockMinutes: number,
+  ): Promise<Date>;
+
+  /**
+   * Un acierto devuelve SOLO su propio intento (nunca borra el contador ni un
+   * bloqueo): acertar con los datos propios no limpia los fallos ajenos.
+   */
+  refundAttempt(locationId: string, clientKey: string): Promise<void>;
 
   pendingFacts(
     patientIds: readonly string[],

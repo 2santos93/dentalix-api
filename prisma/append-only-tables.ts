@@ -183,9 +183,10 @@ export const NO_APP_DELETE = [
   'waiting_room_screens',
   'location_turn_counters',
   // DX-265: los ajustes de «Ya llegué» de una sede no se borran (el QR se
-  // retira dejando su hash a NULL). Los intentos del QR sí se borran: son un
-  // contador efímero.
+  // retira dejando su hash a NULL); el contador de intentos del QR se reinicia
+  // al vencer su ventana, nunca se borra.
   'location_check_in_settings',
+  'location_check_in_attempts',
 ] as const;
 
 /**

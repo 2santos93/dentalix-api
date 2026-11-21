@@ -278,16 +278,18 @@ export class PrismaCheckInRepository implements CheckInRepository {
     });
   }
 
-  recordFailure(
+  reserveAttempt(
     locationId: string,
     clientKey: string,
-    rules: { maxFailures: number; lockMinutes: number; windowMinutes: number },
+    rules: { maxAttempts: number; lockMinutes: number; windowMinutes: number },
   ): Promise<CheckInAttemptState> {
     const tenantId = this.requireTenantId();
     return this.prisma.runWithTenant(async (tx) => {
-      // Una sola sentencia: la fila queda bloqueada hasta el COMMIT, así que
-      // dos fallos a la vez suman dos. «Empieza de cero» = el bloqueo venció
-      // o el primer fallo es de hace más de la ventana. Reloj de la BD.
+      // Una sola sentencia ANTES de comparar: la fila queda bloqueada hasta el
+      // COMMIT, así que N peticiones a la vez reciben 1..N y las que pasan del
+      // tope ni se comparan. «Empieza de cero» = el bloqueo venció o el primer
+      // intento es de hace más de la ventana. Pasado el tope, bloquea. Reloj
+      // de la BD.
       const rows = await tx.$queryRaw<CheckInAttemptState[]>`
         WITH now_utc AS (SELECT timezone('UTC', now()) AS t)
         INSERT INTO "location_check_in_attempts" AS a
@@ -295,7 +297,7 @@ export class PrismaCheckInRepository implements CheckInRepository {
                 "firstFailedAt", "lockedUntil", "updatedAt")
         SELECT ${tenantId}::uuid, ${locationId}::uuid, ${clientKey}, 1,
                n.t,
-               CASE WHEN 1 >= ${rules.maxFailures}::int
+               CASE WHEN 1 > ${rules.maxAttempts}::int
                     THEN n.t + make_interval(mins => ${rules.lockMinutes}::int) END,
                n.t
           FROM now_utc n
@@ -320,7 +322,7 @@ export class PrismaCheckInRepository implements CheckInRepository {
                            OR (a."lockedUntil" IS NULL
                                AND a."firstFailedAt" < EXCLUDED."updatedAt" - make_interval(mins => ${rules.windowMinutes}::int))
                          THEN 1
-                         ELSE a."failedAttempts" + 1 END) >= ${rules.maxFailures}::int
+                         ELSE a."failedAttempts" + 1 END) > ${rules.maxAttempts}::int
                  THEN EXCLUDED."updatedAt" + make_interval(mins => ${rules.lockMinutes}::int)
                  ELSE NULL END,
                "updatedAt" = EXCLUDED."updatedAt"
@@ -329,12 +331,36 @@ export class PrismaCheckInRepository implements CheckInRepository {
     });
   }
 
-  async clearAttempts(locationId: string, clientKey: string): Promise<void> {
-    await this.prisma.runWithTenant((tx) =>
-      // eslint-disable-next-line no-restricted-syntax -- contador efímero de fallos (DX-265), no un dato: la migración concede DELETE solo aquí
-      tx.locationCheckInAttempt.deleteMany({
-        where: { locationId, clientKey },
-      }),
+  async lockClient(
+    locationId: string,
+    clientKey: string,
+    lockMinutes: number,
+  ): Promise<Date> {
+    return this.prisma.runWithTenant(async (tx) => {
+      const rows = await tx.$queryRaw<{ lockedUntil: Date }[]>`
+        UPDATE "location_check_in_attempts"
+           SET "lockedUntil" = GREATEST(
+                 COALESCE("lockedUntil", timezone('UTC', now())),
+                 timezone('UTC', now()) + make_interval(mins => ${lockMinutes}::int)),
+               "updatedAt" = timezone('UTC', now())
+         WHERE "locationId" = ${locationId}::uuid
+           AND "clientKey" = ${clientKey}
+        RETURNING "lockedUntil"`;
+      return (
+        rows[0]?.lockedUntil ?? new Date(Date.now() + lockMinutes * 60_000)
+      );
+    });
+  }
+
+  async refundAttempt(locationId: string, clientKey: string): Promise<void> {
+    await this.prisma.runWithTenant(
+      (tx) => tx.$executeRaw`
+        UPDATE "location_check_in_attempts"
+           SET "failedAttempts" = GREATEST("failedAttempts" - 1, 0),
+               "updatedAt" = timezone('UTC', now())
+         WHERE "locationId" = ${locationId}::uuid
+           AND "clientKey" = ${clientKey}
+           AND "lockedUntil" IS NULL`,
     );
   }
 

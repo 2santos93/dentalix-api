@@ -197,7 +197,7 @@ describe('DX-265 · «Ya llegué» en la BD (int)', () => {
     ).toBeNull();
   });
 
-  it('permisos: la app no borra ajustes; los intentos sí (efímeros)', async () => {
+  it('permisos: la app no borra ajustes', async () => {
     await expect(
       appDb.$transaction(async (tx) => {
         await tx.$executeRaw`SELECT set_config('app.current_tenant', ${a.tenantId}, true)`;
@@ -206,31 +206,58 @@ describe('DX-265 · «Ya llegué» en la BD (int)', () => {
     ).rejects.toThrow(/permission denied/);
   });
 
-  it('el contador de fallos es atómico: 8 a la vez suman 8 y bloquean al quinto', async () => {
+  const RULES = {
+    maxAttempts: CHECK_IN_MAX_FAILURES,
+    lockMinutes: CHECK_IN_LOCK_MINUTES,
+    windowMinutes: CHECK_IN_FAILURE_WINDOW_MINUTES,
+  };
+
+  it('el intento se anota antes de comparar y es atómico: 8 a la vez suman 8 y los que pasan del tope ya van bloqueados', async () => {
     const key = checkInClientKey(a.tenantId, a.chacao, '203.0.113.50');
-    const rules = {
-      maxFailures: CHECK_IN_MAX_FAILURES,
-      lockMinutes: CHECK_IN_LOCK_MINUTES,
-      windowMinutes: CHECK_IN_FAILURE_WINDOW_MINUTES,
-    };
     const results = await Promise.all(
       Array.from({ length: 8 }, () =>
-        asA(() => repo.recordFailure(a.chacao, key, rules)),
+        asA(() => repo.reserveAttempt(a.chacao, key, RULES)),
       ),
     );
     const counts = results.map((r) => r.failedAttempts).sort((x, y) => x - y);
     expect(counts).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
-    expect(results.filter((r) => r.lockedUntil === null)).toHaveLength(4);
+    // Solo los 5 primeros llegan a comparar.
+    expect(results.filter((r) => r.lockedUntil === null)).toHaveLength(
+      CHECK_IN_MAX_FAILURES,
+    );
     const state = await asA(() => repo.findAttempts(a.chacao, key));
     expect(state?.failedAttempts).toBe(8);
     expect(state?.lockedUntil!.getTime()).toBeGreaterThan(Date.now());
-    // Otra clínica no ve (ni puede borrar) el contador de A.
+    // Un acierto no quita un bloqueo ni lo devuelve.
+    await asA(() => repo.refundAttempt(a.chacao, key));
+    expect(
+      (await asA(() => repo.findAttempts(a.chacao, key)))?.failedAttempts,
+    ).toBe(8);
+    // Otra clínica no ve ni toca el contador de A.
     expect(await asB(() => repo.findAttempts(a.chacao, key))).toBeNull();
-    await asB(() => repo.clearAttempts(a.chacao, key));
-    expect(await asA(() => repo.findAttempts(a.chacao, key))).not.toBeNull();
-    // Un acierto lo borra.
-    await asA(() => repo.clearAttempts(a.chacao, key));
-    expect(await asA(() => repo.findAttempts(a.chacao, key))).toBeNull();
+  });
+
+  it('un acierto devuelve solo su intento (no limpia los fallos de antes); el fallo en el tope bloquea', async () => {
+    const key = checkInClientKey(a.tenantId, a.chacao, '203.0.113.60');
+    for (let i = 0; i < 4; i++) {
+      await asA(() => repo.reserveAttempt(a.chacao, key, RULES));
+    }
+    // 5.º intento acertado: vuelve a 4, no a 0.
+    await asA(() => repo.reserveAttempt(a.chacao, key, RULES));
+    await asA(() => repo.refundAttempt(a.chacao, key));
+    expect(
+      (await asA(() => repo.findAttempts(a.chacao, key)))?.failedAttempts,
+    ).toBe(4);
+    // 5.º fallo: bloquea.
+    const fifth = await asA(() => repo.reserveAttempt(a.chacao, key, RULES));
+    expect(fifth.lockedUntil).toBeNull();
+    const until = await asA(() =>
+      repo.lockClient(a.chacao, key, CHECK_IN_LOCK_MINUTES),
+    );
+    expect(until.getTime()).toBeGreaterThan(Date.now() + 14 * MIN);
+    expect(
+      (await asA(() => repo.findAttempts(a.chacao, key)))?.lockedUntil,
+    ).toEqual(until);
   });
 
   it('un bloqueo vencido empieza de cero', async () => {
@@ -240,20 +267,23 @@ describe('DX-265 · «Ya llegué» en la BD (int)', () => {
         tenantId: a.tenantId,
         locationId: a.altamira,
         clientKey: key,
-        failedAttempts: 5,
+        failedAttempts: 6,
         firstFailedAt: new Date(Date.now() - 40 * MIN),
         lockedUntil: new Date(Date.now() - 20 * MIN),
       },
     });
-    const state = await asA(() =>
-      repo.recordFailure(a.altamira, key, {
-        maxFailures: CHECK_IN_MAX_FAILURES,
-        lockMinutes: CHECK_IN_LOCK_MINUTES,
-        windowMinutes: CHECK_IN_FAILURE_WINDOW_MINUTES,
-      }),
-    );
+    const state = await asA(() => repo.reserveAttempt(a.altamira, key, RULES));
     expect(state.failedAttempts).toBe(1);
     expect(state.lockedUntil).toBeNull();
+  });
+
+  it('permisos: la app no borra los intentos (ni los ajustes)', async () => {
+    await expect(
+      appDb.$transaction(async (tx) => {
+        await tx.$executeRaw`SELECT set_config('app.current_tenant', ${a.tenantId}, true)`;
+        await tx.$executeRaw`DELETE FROM "location_check_in_attempts"`;
+      }),
+    ).rejects.toThrow(/permission denied/);
   });
 
   it('CHECK de actor: admite la llegada del paciente sin usuario y nada más', async () => {

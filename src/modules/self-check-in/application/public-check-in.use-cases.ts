@@ -8,6 +8,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { AppointmentArrivalSource, AppointmentStatus } from '@prisma/client';
+import { normalizeIp } from '@nestjs/throttler';
 import type { HourCycle } from '../../../shared/format/regional-format';
 import {
   hashPublicLinkToken,
@@ -274,16 +275,26 @@ export class PublicCheckInUseCases {
       }
     };
     const tenantId = this.tenantContext.getTenantId()!;
+    // IPv6 por /64 (como el limitador): rotar la dirección dentro del mismo
+    // prefijo no reinicia el contador.
     const clientKey = checkInClientKey(
       tenantId,
       location.locationId,
-      request?.ip ?? null,
+      request?.ip ? normalizeIp(request.ip) : null,
     );
     const now = this.clock();
-    const lock = lockedUntil(
-      await this.repo.findAttempts(location.locationId, clientKey),
-      now,
+    // El intento se anota ANTES de comparar: una ráfaga a la vez no compara
+    // más de CHECK_IN_MAX_FAILURES datos; pasado el tope, 429 sin comparar.
+    const attempt = await this.repo.reserveAttempt(
+      location.locationId,
+      clientKey,
+      {
+        maxAttempts: CHECK_IN_MAX_FAILURES,
+        lockMinutes: CHECK_IN_LOCK_MINUTES,
+        windowMinutes: CHECK_IN_FAILURE_WINDOW_MINUTES,
+      },
     );
+    const lock = lockedUntil(attempt, now);
     if (lock) {
       await floor();
       throw locked(retryAfterSeconds(lock, now));
@@ -291,20 +302,20 @@ export class PublicCheckInUseCases {
 
     const matches = await this.matchToday(location, input, now);
     if (matches.length === 0) {
-      const state = await this.repo.recordFailure(
-        location.locationId,
-        clientKey,
-        {
-          maxFailures: CHECK_IN_MAX_FAILURES,
-          lockMinutes: CHECK_IN_LOCK_MINUTES,
-          windowMinutes: CHECK_IN_FAILURE_WINDOW_MINUTES,
-        },
-      );
       await floor();
-      const until = lockedUntil(state, now);
-      throw until ? locked(retryAfterSeconds(until, now)) : noMatch();
+      if (attempt.failedAttempts >= CHECK_IN_MAX_FAILURES) {
+        // El quinto fallo bloquea ya (y lo dice), como los siguientes.
+        const until = await this.repo.lockClient(
+          location.locationId,
+          clientKey,
+          CHECK_IN_LOCK_MINUTES,
+        );
+        throw locked(retryAfterSeconds(until, now));
+      }
+      throw noMatch();
     }
-    await this.repo.clearAttempts(location.locationId, clientKey);
+    // Acertar devuelve solo este intento: no limpia fallos anteriores.
+    await this.repo.refundAttempt(location.locationId, clientKey);
 
     // Varias citas hoy en la sede (raro): la que ya está en curso, si no la
     // que se puede marcar, si no la más próxima.

@@ -16,9 +16,10 @@
 --                                el token solo viaja en el cartel). Sin fila =
 --                                valores por defecto y sin QR.
 --   location_check_in_attempts   fallos de identificación con el QR por sede e
---                                IP (SHA-256 de sede + IP, nunca la IP): el
---                                quinto bloquea 15 minutos. Contador atómico
---                                (INSERT … ON CONFLICT DO UPDATE … RETURNING).
+--                                IP (SHA-256 de sede + IP con IPv6 por /64,
+--                                nunca la IP): cada intento se anota ANTES de
+--                                comparar (INSERT … ON CONFLICT DO UPDATE …
+--                                RETURNING) y el quinto fallo bloquea 15 min.
 --   audit_events_actor_check     UNIÓN EXACTA del de main (20270115140200,
 --                                DX-101-bis) y el UPDATE de APPOINTMENT sin
 --                                usuario, origen PATIENT_LINK o SEDE_QR y
@@ -138,12 +139,13 @@ CREATE POLICY tenant_isolation ON "location_check_in_attempts"
   USING ("tenantId" = NULLIF(current_setting('app.current_tenant', true), '')::uuid)
   WITH CHECK ("tenantId" = NULLIF(current_setting('app.current_tenant', true), '')::uuid);
 
--- Los ajustes no se borran (el QR se revoca poniendo el hash a NULL). Los
--- intentos son efímeros: un acierto borra la fila de su sede e IP.
+-- Nada se borra desde la app: el QR se revoca poniendo el hash a NULL; el
+-- contador de un cliente se reinicia solo al vencer su ventana o su bloqueo
+-- (un acierto solo devuelve su propio intento).
 GRANT SELECT, INSERT, UPDATE ON "location_check_in_settings" TO dentalix_app;
 REVOKE DELETE, TRUNCATE ON "location_check_in_settings" FROM dentalix_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON "location_check_in_attempts" TO dentalix_app;
-REVOKE TRUNCATE ON "location_check_in_attempts" FROM dentalix_app;
+GRANT SELECT, INSERT, UPDATE ON "location_check_in_attempts" TO dentalix_app;
+REVOKE DELETE, TRUNCATE ON "location_check_in_attempts" FROM dentalix_app;
 
 -- ---------------------------------------------------------------------------
 -- 5. CHECK de actor de audit_events
