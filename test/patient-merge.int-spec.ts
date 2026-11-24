@@ -83,16 +83,29 @@ function inTenant<T>(tenantId: string, fn: () => Promise<T>): Promise<T> {
   return tenantContext.run(tenantId, fn);
 }
 
-/** `fn` como la app con la clínica fijada; siempre se deshace. */
+/** La cadena «todas en una» fusiona toda la demo en UNA transacción. */
+const CHAIN_TX = { timeout: 60_000 };
+
+/**
+ * `fn` como la app con la clínica fijada; siempre se deshace. `timeout`: solo
+ * para la cadena que fusiona TODA la demo en una transacción (decenas de
+ * fusiones seguidas); la app fusiona una pareja por transacción con el tope
+ * normal (TENANT_TX_TIMEOUT_MS, 5 s), que esa cadena roza en CI.
+ */
 async function rolledBack(
   tenantId: string,
   fn: (tx: Prisma.TransactionClient) => Promise<void>,
+  options?: { timeout: number },
 ): Promise<void> {
   await expect(
-    prisma.runWithTenant(tenantId, async (tx) => {
-      await fn(tx);
-      throw new Rollback();
-    }),
+    prisma.runWithTenant(
+      tenantId,
+      async (tx) => {
+        await fn(tx);
+        throw new Rollback();
+      },
+      options,
+    ),
   ).rejects.toBeInstanceOf(Rollback);
 }
 
@@ -344,38 +357,42 @@ describe('DX-266 · fusionar las parejas de la demo', () => {
     const versions = await owner.medicalHistoryVersion.count({
       where: { tenantId: demoTenant, deletedAt: null },
     });
-    await rolledBack(demoTenant, async (tx) => {
-      const before = await balanceByCurrency(tx, ids);
-      // Encadenadas: a → b, luego b → c…: la última recibe todo.
-      let kept = ids[0];
-      const absorbedOnes: string[] = [];
-      for (const next of ids.slice(1)) {
-        await tx.$executeRaw`SAVEPOINT chain`;
-        try {
-          await tx.$queryRaw`SELECT dx_merge_patients(${kept}::uuid, ${next}::uuid, ${demoAdmin}::uuid)`;
-          absorbedOnes.push(kept);
-          kept = next;
-        } catch {
-          await tx.$executeRaw`ROLLBACK TO SAVEPOINT chain`;
+    await rolledBack(
+      demoTenant,
+      async (tx) => {
+        const before = await balanceByCurrency(tx, ids);
+        // Encadenadas: a → b, luego b → c…: la última recibe todo.
+        let kept = ids[0];
+        const absorbedOnes: string[] = [];
+        for (const next of ids.slice(1)) {
+          await tx.$executeRaw`SAVEPOINT chain`;
+          try {
+            await tx.$queryRaw`SELECT dx_merge_patients(${kept}::uuid, ${next}::uuid, ${demoAdmin}::uuid)`;
+            absorbedOnes.push(kept);
+            kept = next;
+          } catch {
+            await tx.$executeRaw`ROLLBACK TO SAVEPOINT chain`;
+          }
         }
-      }
-      expect(absorbedOnes.length).toBeGreaterThan(5);
-      expect(await balanceByCurrency(tx, ids)).toEqual(before);
-      const pointers = await tx.$queryRaw<{ target: string }[]>`
+        expect(absorbedOnes.length).toBeGreaterThan(5);
+        expect(await balanceByCurrency(tx, ids)).toEqual(before);
+        const pointers = await tx.$queryRaw<{ target: string }[]>`
         SELECT DISTINCT "mergedIntoId"::text AS target FROM "patients"
          WHERE "id" = ANY (${absorbedOnes}::uuid[])`;
-      expect(pointers).toEqual([{ target: kept }]);
-      const numbers = await tx.$queryRaw<{ version: number }[]>`
+        expect(pointers).toEqual([{ target: kept }]);
+        const numbers = await tx.$queryRaw<{ version: number }[]>`
         SELECT "version" FROM "medical_history_versions"
          WHERE "patientId" = ${kept}::uuid AND "deletedAt" IS NULL
          ORDER BY "createdAt", "version"`;
-      expect(numbers.map((n) => n.version)).toEqual(
-        numbers.map((_, i) => i + 1),
-      );
-      const [{ total }] = await tx.$queryRaw<{ total: number }[]>`
+        expect(numbers.map((n) => n.version)).toEqual(
+          numbers.map((_, i) => i + 1),
+        );
+        const [{ total }] = await tx.$queryRaw<{ total: number }[]>`
         SELECT count(*)::int AS total FROM "medical_history_versions" WHERE "deletedAt" IS NULL`;
-      expect(total).toBe(versions);
-    });
+        expect(total).toBe(versions);
+      },
+      CHAIN_TX,
+    );
   }, 120_000);
 });
 
