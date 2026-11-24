@@ -1,0 +1,4 @@
+{
+  "$comment": "DX-419 (TST-051): los ÚNICOS tests que la CI puede reintentar (una vez). Cada entrada: file (ruta desde la raíz), test (fullName de Jest: describe + it separados por espacio), ticket (DX-NNN), clickup (https://app.clickup.com/t/<id>), expires (AAAA-MM-DD, como mucho 90 días) y reason. Caducada = CI en rojo. Antes de añadir una, intenta arreglar la causa. Detalles en la cabecera de test/flaky/flaky-list.ts.",
+  "entries": []
+}
