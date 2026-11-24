@@ -1,0 +1,11 @@
+-- DX-260: «Retención» atribuye cada paciente a la sede Y al profesional de su
+-- última cita ATENDIDA. Es el índice de DX-145
+-- (appointments_tenant_patient_completed_idx) con "providerId" también en el
+-- INCLUDE: la pasada por todas las atendidas de la clínica (60k pacientes,
+-- 500k citas) sale entera del índice, en orden de paciente y sin ordenar ni
+-- volver a la tabla por cita. El de DX-145 se queda: es más pequeño y lo
+-- usan la cartera, el recall y la agenda de contingencia.
+-- "appointments" es tabla caliente (DX-148): CONCURRENTLY, sola en su fichero.
+-- Aditiva. IF NOT EXISTS: idempotente.
+-- Vuelta atrás: DROP INDEX CONCURRENTLY "appointments_tenant_patient_completed_provider_idx".
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "appointments_tenant_patient_completed_provider_idx" ON "appointments" ("tenantId", "patientId", "start" DESC, "id" DESC) INCLUDE ("locationId", "providerId") WHERE "status" = 'COMPLETED' AND "deletedAt" IS NULL;
