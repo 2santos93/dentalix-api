@@ -1,0 +1,326 @@
+{
+  "about": "DX-398 (TST-050): vectores del abono en otra moneda compartidos por la API (src/modules/payments/application/payment-rate-vectors.json) y la web (src/lib/payments/payment-rate-vectors.json, copia byte a byte). Cada vector: el abono (amount en from), las tasas del día en unidades por 1 USD (ratesPerUsd, como GET /exchange/rates) y lo pendiente del plan en to antes del abono (pendingBefore). Esperado: la tasa congelada con los 8 decimales de su columna (rate; null = «sin tasa», también si una tasa redondea a 0), el equivalente en to (from → USD → to, redondeado a céntimos solo al final) y lo pendiente tras el abono (pendingAfter; negativo = saldo a favor). Fijan la regla vigente, que redondea a céntimos también las monedas sin decimales (JPY); cambiarla es DX-340.",
+  "version": 1,
+  "base": "USD",
+  "conversions": [
+    {
+      "name": "VES→USD a 36,5 Bs./USD",
+      "amount": 3600,
+      "from": "VES",
+      "to": "USD",
+      "ratesPerUsd": {
+        "VES": 36.5
+      },
+      "pendingBefore": 150,
+      "rate": {
+        "fromPerBase": 36.5,
+        "toPerBase": 1
+      },
+      "equivalent": 98.63,
+      "pendingAfter": 51.37
+    },
+    {
+      "name": "USD→VES a 36,5",
+      "amount": 100,
+      "from": "USD",
+      "to": "VES",
+      "ratesPerUsd": {
+        "VES": 36.5
+      },
+      "pendingBefore": 10000,
+      "rate": {
+        "fromPerBase": 1,
+        "toPerBase": 36.5
+      },
+      "equivalent": 3650,
+      "pendingAfter": 6350
+    },
+    {
+      "name": "VES→USD, tasa del proveedor con más de 8 decimales (se recorta como la columna)",
+      "amount": 1000,
+      "from": "VES",
+      "to": "USD",
+      "ratesPerUsd": {
+        "VES": 36.123456789
+      },
+      "pendingBefore": 50,
+      "rate": {
+        "fromPerBase": 36.12345679,
+        "toPerBase": 1
+      },
+      "equivalent": 27.68,
+      "pendingAfter": 22.32
+    },
+    {
+      "name": "EUR→VES, cruzada por USD",
+      "amount": 50,
+      "from": "EUR",
+      "to": "VES",
+      "ratesPerUsd": {
+        "VES": 36.5,
+        "EUR": 0.92
+      },
+      "pendingBefore": 5000,
+      "rate": {
+        "fromPerBase": 0.92,
+        "toPerBase": 36.5
+      },
+      "equivalent": 1983.7,
+      "pendingAfter": 3016.3
+    },
+    {
+      "name": "VES→EUR, cruzada por USD",
+      "amount": 1983.7,
+      "from": "VES",
+      "to": "EUR",
+      "ratesPerUsd": {
+        "VES": 36.5,
+        "EUR": 0.92
+      },
+      "pendingBefore": 80,
+      "rate": {
+        "fromPerBase": 36.5,
+        "toPerBase": 0.92
+      },
+      "equivalent": 50,
+      "pendingAfter": 30
+    },
+    {
+      "name": "USD→VES que paga de más: saldo a favor",
+      "amount": 500,
+      "from": "USD",
+      "to": "VES",
+      "ratesPerUsd": {
+        "VES": 36.5
+      },
+      "pendingBefore": 10000,
+      "rate": {
+        "fromPerBase": 1,
+        "toPerBase": 36.5
+      },
+      "equivalent": 18250,
+      "pendingAfter": -8250
+    },
+    {
+      "name": "equivalente que redondea a 0",
+      "amount": 0.01,
+      "from": "VES",
+      "to": "USD",
+      "ratesPerUsd": {
+        "VES": 36.5
+      },
+      "pendingBefore": 25,
+      "rate": {
+        "fromPerBase": 36.5,
+        "toPerBase": 1
+      },
+      "equivalent": 0,
+      "pendingAfter": 25
+    },
+    {
+      "name": "importe 0",
+      "amount": 0,
+      "from": "VES",
+      "to": "USD",
+      "ratesPerUsd": {
+        "VES": 36.5
+      },
+      "pendingBefore": 25,
+      "rate": {
+        "fromPerBase": 36.5,
+        "toPerBase": 1
+      },
+      "equivalent": 0,
+      "pendingAfter": 25
+    },
+    {
+      "name": "tasa de origen que redondea a 0 con 8 decimales: sin tasa",
+      "amount": 100,
+      "from": "VES",
+      "to": "USD",
+      "ratesPerUsd": {
+        "VES": 4e-9
+      },
+      "pendingBefore": 25,
+      "rate": null,
+      "equivalent": null,
+      "pendingAfter": null
+    },
+    {
+      "name": "tasa de destino que redondea a 0 con 8 decimales: sin tasa",
+      "amount": 100,
+      "from": "USD",
+      "to": "VES",
+      "ratesPerUsd": {
+        "VES": 4e-9
+      },
+      "pendingBefore": 25,
+      "rate": null,
+      "equivalent": null,
+      "pendingAfter": null
+    },
+    {
+      "name": "tasa en la frontera de 8 decimales (0,000000006 → 0,00000001)",
+      "amount": 1,
+      "from": "USD",
+      "to": "VES",
+      "ratesPerUsd": {
+        "VES": 6e-9
+      },
+      "pendingBefore": 0,
+      "rate": {
+        "fromPerBase": 1,
+        "toPerBase": 1e-8
+      },
+      "equivalent": 0,
+      "pendingAfter": 0
+    },
+    {
+      "name": "medio céntimo en coma flotante (2,01 × 0,5 = 1,005)",
+      "amount": 2.01,
+      "from": "USD",
+      "to": "EUR",
+      "ratesPerUsd": {
+        "EUR": 0.5
+      },
+      "pendingBefore": 10,
+      "rate": {
+        "fromPerBase": 1,
+        "toPerBase": 0.5
+      },
+      "equivalent": 1,
+      "pendingAfter": 9
+    },
+    {
+      "name": "USD→JPY (0 decimales): el equivalente sale a céntimos",
+      "amount": 10,
+      "from": "USD",
+      "to": "JPY",
+      "ratesPerUsd": {
+        "JPY": 151.234567
+      },
+      "pendingBefore": 20000,
+      "rate": {
+        "fromPerBase": 1,
+        "toPerBase": 151.234567
+      },
+      "equivalent": 1512.35,
+      "pendingAfter": 18487.65
+    },
+    {
+      "name": "JPY→USD",
+      "amount": 15000,
+      "from": "JPY",
+      "to": "USD",
+      "ratesPerUsd": {
+        "JPY": 151.234567
+      },
+      "pendingBefore": 120,
+      "rate": {
+        "fromPerBase": 151.234567,
+        "toPerBase": 1
+      },
+      "equivalent": 99.18,
+      "pendingAfter": 20.82
+    },
+    {
+      "name": "JPY→VES, cruzada por USD",
+      "amount": 10000,
+      "from": "JPY",
+      "to": "VES",
+      "ratesPerUsd": {
+        "JPY": 151.234567,
+        "VES": 36.5
+      },
+      "pendingBefore": 5000,
+      "rate": {
+        "fromPerBase": 151.234567,
+        "toPerBase": 36.5
+      },
+      "equivalent": 2413.47,
+      "pendingAfter": 2586.53
+    },
+    {
+      "name": "VES→JPY, cruzada por USD",
+      "amount": 3650,
+      "from": "VES",
+      "to": "JPY",
+      "ratesPerUsd": {
+        "JPY": 151.234567,
+        "VES": 36.5
+      },
+      "pendingBefore": 20000,
+      "rate": {
+        "fromPerBase": 36.5,
+        "toPerBase": 151.234567
+      },
+      "equivalent": 15123.46,
+      "pendingAfter": 4876.54
+    },
+    {
+      "name": "importe grande VES→USD",
+      "amount": 999999999999.99,
+      "from": "VES",
+      "to": "USD",
+      "ratesPerUsd": {
+        "VES": 36.5
+      },
+      "pendingBefore": 30000000000,
+      "rate": {
+        "fromPerBase": 36.5,
+        "toPerBase": 1
+      },
+      "equivalent": 27397260273.97,
+      "pendingAfter": 2602739726.03
+    },
+    {
+      "name": "importe grande USD→VES",
+      "amount": 9999999999.99,
+      "from": "USD",
+      "to": "VES",
+      "ratesPerUsd": {
+        "VES": 36.5
+      },
+      "pendingBefore": 400000000000,
+      "rate": {
+        "fromPerBase": 1,
+        "toPerBase": 36.5
+      },
+      "equivalent": 364999999999.64,
+      "pendingAfter": 35000000000.36
+    },
+    {
+      "name": "importe grande con tasa grande (4.000.000 Bs./USD)",
+      "amount": 999999999999.99,
+      "from": "VES",
+      "to": "USD",
+      "ratesPerUsd": {
+        "VES": 4000000
+      },
+      "pendingBefore": 300000,
+      "rate": {
+        "fromPerBase": 4000000,
+        "toPerBase": 1
+      },
+      "equivalent": 250000,
+      "pendingAfter": 50000
+    },
+    {
+      "name": "importe grande EUR→VES con tasa grande",
+      "amount": 99999.99,
+      "from": "EUR",
+      "to": "VES",
+      "ratesPerUsd": {
+        "VES": 4000000,
+        "EUR": 0.92
+      },
+      "pendingBefore": 500000000000,
+      "rate": {
+        "fromPerBase": 0.92,
+        "toPerBase": 4000000
+      },
+      "equivalent": 434782565217.39,
+      "pendingAfter": 65217434782.61
+    }
+  ]
+}
