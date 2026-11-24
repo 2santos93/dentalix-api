@@ -69,6 +69,7 @@ import { DiscountReportController } from '../discounts/presentation/discount-rep
 import { ProductionByProcedureController } from '../reports/presentation/production-by-procedure.controller';
 import { QuoteFunnelController } from '../reports/presentation/quote-funnel.controller';
 import { AcquisitionController } from '../reports/presentation/acquisition.controller';
+import { RetentionController } from '../reports/presentation/retention.controller';
 import {
   PatientAcquisitionController,
   PatientSourcesController,
@@ -1708,6 +1709,23 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'PATIENT',
     reason: 'ACQUISITION_REPORT',
   },
+  // DX-260: las listas de «Retención» llevan nombre y teléfono de cada
+  // paciente; los dos CSV salen de la clínica. El informe (solo cifras), no.
+  'GET /reports/retention.csv': {
+    action: 'EXPORT',
+    resource: 'PATIENT',
+    reason: 'RETENTION_REPORT',
+  },
+  'GET /reports/retention/patients': {
+    action: 'VIEW',
+    resource: 'PATIENT',
+    reason: 'RETENTION_REPORT',
+  },
+  'GET /reports/retention/patients.csv': {
+    action: 'EXPORT',
+    resource: 'PATIENT',
+    reason: 'RETENTION_REPORT',
+  },
   'GET /patients/:id/acquisition': {
     action: 'VIEW',
     resource: 'PATIENT',
@@ -2868,6 +2886,7 @@ const KNOWN_UNAUDITED: Record<string, string> = {
 
 const CONTROLLERS: Type[] = [
   AcquisitionController,
+  RetentionController,
   PatientSourcesController,
   PatientAcquisitionController,
   LeadsController,

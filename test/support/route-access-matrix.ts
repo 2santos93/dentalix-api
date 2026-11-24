@@ -1118,6 +1118,22 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
     'FINANCIAL_REPORTS_VIEW',
   ),
   'GET /reports/acquisition.csv': ADMIN_ONLY,
+  // DX-260: retención por sede y profesional y la lista de cada cifra. ADMIN
+  // o FINANCIAL_REPORTS_VIEW (también el CSV del informe, sin pacientes); el
+  // CSV de una lista (nombres y teléfonos), solo ADMIN.
+  'GET /reports/retention': orPermission(
+    roles('ADMIN'),
+    'FINANCIAL_REPORTS_VIEW',
+  ),
+  'GET /reports/retention.csv': orPermission(
+    roles('ADMIN'),
+    'FINANCIAL_REPORTS_VIEW',
+  ),
+  'GET /reports/retention/patients': orPermission(
+    roles('ADMIN'),
+    'FINANCIAL_REPORTS_VIEW',
+  ),
+  'GET /reports/retention/patients.csv': ADMIN_ONLY,
   // DX-561: efectividad del seguimiento automático, con el alcance del embudo.
   'GET /reports/quote-follow-up': orPermission(
     roles('ADMIN', 'DENTIST'),

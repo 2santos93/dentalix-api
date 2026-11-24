@@ -53,6 +53,13 @@ import { GetNoShowsUseCase } from './application/use-cases/get-no-shows.use-case
 import { PROFESSIONAL_REPORTS_REPOSITORY } from './domain/ports/professional-reports-repository.port';
 import { PrismaProfessionalReportsRepository } from './infrastructure/prisma-professional-reports.repository';
 import { ProfessionalReportsController } from './presentation/professional-reports.controller';
+import {
+  GetRetentionUseCase,
+  RETENTION_CLOCK,
+} from './application/use-cases/get-retention.use-case';
+import { RETENTION_REPOSITORY } from './domain/ports/retention-repository.port';
+import { PrismaRetentionRepository } from './infrastructure/prisma-retention.repository';
+import { RetentionController } from './presentation/retention.controller';
 import { ExchangeModule } from '../exchange/exchange.module';
 import { CATALOG_CURRENCY_READER } from '../dental-catalog/domain/ports/catalog-currency-reader.port';
 import { PrismaCatalogCurrencyReader } from '../dental-catalog/infrastructure/prisma-catalog-currency-reader';
@@ -82,6 +89,8 @@ import { PrismaCatalogCurrencyReader } from '../dental-catalog/infrastructure/pr
     AcquisitionController,
     // DX-304: «Profesionales» e «Inasistencias».
     ProfessionalReportsController,
+    // DX-260: «Retención» por sede y profesional.
+    RetentionController,
   ],
   providers: [
     GetLocationsComparisonUseCase,
@@ -96,6 +105,7 @@ import { PrismaCatalogCurrencyReader } from '../dental-catalog/infrastructure/pr
     GetAcquisitionUseCase,
     GetProfessionalProductivityUseCase,
     GetNoShowsUseCase,
+    GetRetentionUseCase,
     TokenService,
     TenantContextInterceptor,
     {
@@ -141,6 +151,8 @@ import { PrismaCatalogCurrencyReader } from '../dental-catalog/infrastructure/pr
       provide: PROFESSIONAL_REPORTS_REPOSITORY,
       useClass: PrismaProfessionalReportsRepository,
     },
+    { provide: RETENTION_REPOSITORY, useClass: PrismaRetentionRepository },
+    { provide: RETENTION_CLOCK, useValue: () => new Date() },
     {
       provide: CATALOG_CURRENCY_READER,
       useClass: PrismaCatalogCurrencyReader,
