@@ -4,6 +4,7 @@ import {
   assertValidDecisions,
   currentConsentByScope,
   deriveLegacyPatientConsent,
+  sortHistory,
 } from './consent-state';
 import type { DataConsentRecord } from './entities/data-consent.entity';
 
@@ -56,6 +57,37 @@ describe('currentConsentByScope', () => {
     expect(current.find((c) => c.scope === 'SENSITIVE_HEALTH')?.granted).toBe(
       null,
     );
+  });
+
+  // DX-058: dos decisiones del mismo scope en el MISMO milisegundo (doble
+  // envío) no pueden dar un estado distinto según el orden de llegada: se
+  // desempata por id descendente, igual que el `ORDER BY "recordedAt" DESC,
+  // "id" DESC` de la base.
+  it('desempata por id (mayor primero) dos filas del mismo scope en el mismo ms', () => {
+    const at = new Date('2026-10-03T10:00:00.000Z');
+    const low = row({
+      id: '00000000-0000-4000-8000-000000000001',
+      scope: 'MARKETING',
+      granted: true,
+      recordedAt: at,
+    });
+    const high = row({
+      id: 'ffffffff-0000-4000-8000-000000000001',
+      scope: 'MARKETING',
+      granted: false,
+      recordedAt: at,
+    });
+    for (const input of [
+      [low, high],
+      [high, low],
+    ]) {
+      const marketing = currentConsentByScope(input).find(
+        (c) => c.scope === 'MARKETING',
+      );
+      expect(marketing?.latest?.id).toBe(high.id);
+      expect(marketing?.granted).toBe(false);
+      expect(sortHistory(input).map((r) => r.id)).toEqual([high.id, low.id]);
+    }
   });
 });
 

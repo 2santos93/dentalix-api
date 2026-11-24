@@ -17,6 +17,17 @@ const BACKFILL =
   /^INSERT INTO "data_processing_consents"[\s\S]*?;$/m.exec(MIGRATION)?.[0] ??
   '';
 
+// DX-058: la fecha del resumen de los pacientes con fila LEGACY sin fecha.
+const LEGACY_AT_MIGRATION = readFileSync(
+  join(
+    __dirname,
+    '../prisma/migrations/20270204100000_dx058_legacy_consent_at/migration.sql',
+  ),
+  'utf8',
+);
+const LEGACY_AT_UPDATE =
+  /^UPDATE "patients" p[\s\S]*?;$/m.exec(LEGACY_AT_MIGRATION)?.[0] ?? '';
+
 // Owner/superusuario (DIRECT_URL): fixtures y limpieza.
 const owner = new PrismaClient<Prisma.PrismaClientOptions>({
   datasources: { db: { url: process.env.DIRECT_URL } },
@@ -195,6 +206,91 @@ describe('DX-037 · autorizaciones de datos en la BD (int)', () => {
           // La prueba de un paciente retirado también se conserva.
           expect(byPatient.get(retired.id)?.granted).toBe(true);
           expect(rows).toHaveLength(4);
+          throw new Rollback();
+        }),
+      ).rejects.toBeInstanceOf(Rollback);
+    });
+  });
+
+  describe('DX-058 · fecha del resumen de las filas LEGACY sin dataConsentAt', () => {
+    it('la migración apaga row_security antes de la primera sentencia', () => {
+      expect(LEGACY_AT_UPDATE).toContain('SET "dataConsentAt"');
+      const before = LEGACY_AT_MIGRATION.slice(
+        0,
+        LEGACY_AT_MIGRATION.indexOf('SET LOCAL row_security = off;'),
+      )
+        .split('\n')
+        .filter((l) => l.trim() !== '' && !l.trim().startsWith('--'));
+      expect(before).toEqual([]);
+    });
+
+    it('el resumen toma la fecha de la última fila GENERAL si es LEGACY; lo demás no cambia', async () => {
+      const acceptedAt = new Date('2026-03-01T09:30:00.000Z');
+      const updatedAt = new Date('2026-03-03T11:00:00.000Z');
+      const laterAt = new Date('2026-04-01T08:00:00.000Z');
+      await expect(
+        owner.$transaction(async (tx) => {
+          const mk = (data: Prisma.PatientUncheckedCreateInput) =>
+            tx.patient.create({ data });
+          const noDate = await mk({
+            tenantId: tenantB,
+            firstName: 'SinFecha',
+            lastName: 'B',
+            dataConsentAccepted: true,
+            updatedAt,
+          });
+          const dated = await mk({
+            tenantId: tenantB,
+            firstName: 'ConFecha',
+            lastName: 'B',
+            dataConsentAccepted: true,
+            dataConsentAt: acceptedAt,
+          });
+          // Sin fecha, pero luego registró en persona: su última fila GENERAL
+          // no es LEGACY y el resumen lo escribe la app, no esta migración.
+          const superseded = await mk({
+            tenantId: tenantB,
+            firstName: 'Reemplazada',
+            lastName: 'B',
+            dataConsentAccepted: true,
+            updatedAt,
+          });
+          await tx.$executeRawUnsafe(BACKFILL);
+          const policyB = await tx.privacyPolicyVersion.create({
+            data: {
+              tenantId: tenantB,
+              version: 1,
+              policyText: 'p',
+              generalText: 'g',
+              sensitiveHealthText: 's',
+              marketingText: 'm',
+              contentHash: 'h',
+              publishedById: userId,
+            },
+          });
+          await tx.dataProcessingConsent.create({
+            data: {
+              tenantId: tenantB,
+              patientId: superseded.id,
+              policyVersionId: policyB.id,
+              scope: 'GENERAL',
+              granted: false,
+              channel: 'IN_PERSON',
+              recordedById: userId,
+              recordedAt: laterAt,
+            },
+          });
+
+          await tx.$executeRawUnsafe(LEGACY_AT_UPDATE);
+          const after = async (id: string) =>
+            (await tx.patient.findUniqueOrThrow({ where: { id } }))
+              .dataConsentAt;
+          expect((await after(noDate.id))?.getTime()).toBe(updatedAt.getTime());
+          expect((await after(dated.id))?.getTime()).toBe(acceptedAt.getTime());
+          expect(await after(superseded.id)).toBeNull();
+
+          // Idempotente: una segunda pasada no toca nada.
+          expect(await tx.$executeRawUnsafe(LEGACY_AT_UPDATE)).toBe(0);
           throw new Rollback();
         }),
       ).rejects.toBeInstanceOf(Rollback);

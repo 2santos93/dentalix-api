@@ -122,7 +122,8 @@ async function sensitiveHealthGranted(
 ): Promise<boolean> {
   const latest = await tx.dataProcessingConsent.findFirst({
     where: { patientId, scope: DataConsentScope.SENSITIVE_HEALTH },
-    orderBy: { recordedAt: 'desc' },
+    // DX-058: el mismo desempate que el estado vigente (consent-state).
+    orderBy: [{ recordedAt: 'desc' }, { id: 'desc' }],
     select: { granted: true },
   });
   return latest?.granted === true;

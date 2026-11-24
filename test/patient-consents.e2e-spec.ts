@@ -663,6 +663,55 @@ describe('Consentimientos informados — /consent-templates y /patients/:id/cons
       });
       expect(row.body).toBe(signed.body);
     });
+
+    // DX-058: la firma reusa el instante de la vista previa para {{fecha}}.
+    it('DX-058: lo firmado con previewedAt es exactamente la vista previa; caducada 409, mal formada 400', async () => {
+      await as(clinicA)
+        .patch(`/consent-templates/${templateA.id}`, {
+          body: 'Yo, {{paciente}}, firmo el {{fecha}}.',
+        })
+        .expect(200);
+      const preview = (
+        await as(clinicA, dentistA)
+          .get(
+            `/patients/${patientA}/consents/preview?templateId=${templateA.id}`,
+          )
+          .expect(200)
+      ).body as { body: string; templateVersion: number; previewedAt: string };
+      expect(new Date(preview.previewedAt).toISOString()).toBe(
+        preview.previewedAt,
+      );
+      const base = { templateVersion: preview.templateVersion };
+
+      const expired = await as(clinicA, dentistA)
+        .post(
+          `/patients/${patientA}/consents`,
+          signBody(templateA, {
+            ...base,
+            previewedAt: new Date(
+              Date.now() - 3 * 60 * 60 * 1000,
+            ).toISOString(),
+          }),
+        )
+        .expect(409);
+      expect((expired.body as { code: string }).code).toBe(
+        'CONSENT_PREVIEW_EXPIRED',
+      );
+      await as(clinicA, dentistA)
+        .post(
+          `/patients/${patientA}/consents`,
+          signBody(templateA, { ...base, previewedAt: 'ayer' }),
+        )
+        .expect(400);
+
+      const ok = await as(clinicA, dentistA)
+        .post(
+          `/patients/${patientA}/consents`,
+          signBody(templateA, { ...base, previewedAt: preview.previewedAt }),
+        )
+        .expect(201);
+      expect((ok.body as ConsentBody).body).toBe(preview.body);
+    });
   });
 
   describe('aislamiento entre clínicas', () => {

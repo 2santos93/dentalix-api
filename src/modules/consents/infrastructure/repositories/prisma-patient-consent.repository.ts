@@ -20,6 +20,7 @@ import {
   CreateCountersignatureRepoInput,
   CreatePatientConsentRepoInput,
   PatientConsentRepository,
+  TemplateVersionChangedError,
 } from '../../domain/ports/patient-consent-repository.port';
 
 /** Columnas del listado: todo menos el texto, las firmas, IP y UA. */
@@ -287,6 +288,17 @@ export class PrismaPatientConsentRepository implements PatientConsentRepository 
         where: { id: tenantId },
         select: { logoKey: true },
       });
+      // DX-058: la versión de la plantilla se vuelve a comprobar AQUÍ, con la
+      // fila bloqueada en FOR SHARE hasta el COMMIT: espera a una edición en
+      // curso (que la toma FOR UPDATE) y lee la versión ya confirmada. Así no
+      // queda hueco entre la comprobación del caso de uso y el INSERT.
+      const [template] = await tx.$queryRaw<{ version: number }[]>`
+        SELECT "version" FROM "consent_templates"
+         WHERE "id" = ${input.templateId}::uuid AND "tenantId" = ${tenantId}::uuid
+           FOR SHARE`;
+      if (!template || template.version !== input.templateVersion) {
+        throw new TemplateVersionChangedError();
+      }
       return tx.patientConsent.create({
         data: {
           tenantId,

@@ -55,7 +55,8 @@ export class PrismaDataConsentRepository implements DataConsentRepository {
       tx.dataProcessingConsent.findMany({
         // Tenant explícito además de la RLS (defensa en profundidad).
         where: { tenantId, patientId },
-        orderBy: { recordedAt: 'desc' },
+        // DX-058: desempate por id en el mismo milisegundo (consent-state).
+        orderBy: [{ recordedAt: 'desc' }, { id: 'desc' }],
         include: WITH_REFS,
       }),
     );

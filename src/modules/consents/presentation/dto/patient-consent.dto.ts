@@ -26,6 +26,14 @@ export class ConsentPreviewDto {
 
   @ApiProperty()
   professionalName!: string;
+
+  @ApiProperty({
+    type: String,
+    format: 'date-time',
+    description:
+      'DX-058: instante del servidor con el que se pintó {{fecha}}; se devuelve tal cual al firmar (`previewedAt`).',
+  })
+  previewedAt!: Date;
 }
 
 /** DX-243: evidencias congeladas de la firma del paciente a distancia. */
