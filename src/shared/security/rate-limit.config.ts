@@ -154,6 +154,12 @@
  *                  payment-link-token: 30/min es 4 veces el sondeo de una
  *                  pantalla (deja reintentos y una pestaña de más), y una
  *                  pantalla filtrada no admite ráfagas aunque cambie de IP.
+ * - check-in:      el QR de llegada de la sede (DX-265: ver la sede e
+ *                  identificarse con documento y fecha de nacimiento), por IP
+ *                  y por ruta: 20/min. El bloqueo de 15 min tras 5 fallos por
+ *                  sede e IP es aparte (BD). Una recepción con varios pacientes
+ *                  tras el mismo wifi cabe de sobra. Variables:
+ *                  RATE_LIMIT_CHECK_IN_*.
  */
 export type RateLimitPolicy =
   | 'auth'
@@ -194,6 +200,7 @@ export type RateLimitPolicy =
   | 'bank-statement'
   | 'waiting-room'
   | 'waiting-room-token'
+  | 'check-in'
   | 'clinic-export';
 
 export interface RateLimitRule {
@@ -247,6 +254,7 @@ export const DEFAULT_RATE_LIMITS: RateLimitConfig = {
   'bank-statement': { limit: 10, ttlMs: MINUTE },
   'waiting-room': { limit: 120, ttlMs: MINUTE },
   'waiting-room-token': { limit: 30, ttlMs: MINUTE },
+  'check-in': { limit: 20, ttlMs: MINUTE },
   'clinic-export': { limit: 10, ttlMs: MINUTE },
 };
 
@@ -313,6 +321,7 @@ export function loadRateLimitConfig(env: EnvReader): RateLimitConfig {
     'bank-statement': rule('bank-statement'),
     'waiting-room': rule('waiting-room'),
     'waiting-room-token': rule('waiting-room-token'),
+    'check-in': rule('check-in'),
     'clinic-export': rule('clinic-export'),
   };
 }

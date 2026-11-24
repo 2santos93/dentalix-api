@@ -46,6 +46,7 @@ for (const policy of [
   'ONLINE_BOOKING_WRITE',
   'APPOINTMENT_SERIES',
   'RECALL_BATCH',
+  'CHECK_IN',
 ]) {
   process.env[`RATE_LIMIT_${policy}_LIMIT`] ??= HIGH_LIMIT;
 }

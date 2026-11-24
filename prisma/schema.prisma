@@ -327,6 +327,9 @@ model Tenant {
   chairs                                  Chair[]
   waitingRoomScreens                      WaitingRoomScreen[]
   locationTurnCounters                    LocationTurnCounter[]
+  // DX-265: «Ya llegué» por sede (ajustes y fallos del QR).
+  locationCheckInSettings                 LocationCheckInSettings[]
+  locationCheckInAttempts                 LocationCheckInAttempt[]
   // DX-053: exportaciones de los datos de la clínica.
   clinicExports                           ClinicExport[]
   // DX-542: equipos biomédicos de las sedes y sus mantenimientos.
@@ -772,6 +775,9 @@ model Location {
   // DX-588: pantallas de sala de espera y contador de turnos del día.
   waitingRoomScreens         WaitingRoomScreen[]
   turnCounters               LocationTurnCounter[]
+  // DX-265: «Ya llegué» (ajustes y fallos del QR).
+  checkInSettings            LocationCheckInSettings?
+  checkInAttempts            LocationCheckInAttempt[]
   // DX-542: equipos biomédicos de la sede.
   equipment                  Equipment[]
   providerSchedules          ProviderSchedule[]
@@ -1811,20 +1817,20 @@ enum EarlierWindow {
 }
 
 model Appointment {
-  id                     String                  @id @default(uuid()) @db.Uuid
-  tenantId               String                  @db.Uuid
-  locationId             String                  @db.Uuid
-  patientId              String                  @db.Uuid
-  providerId             String                  @db.Uuid
+  id                     String                    @id @default(uuid()) @db.Uuid
+  tenantId               String                    @db.Uuid
+  locationId             String                    @db.Uuid
+  patientId              String                    @db.Uuid
+  providerId             String                    @db.Uuid
   start                  DateTime
   end                    DateTime
-  status                 AppointmentStatus       @default(SCHEDULED)
+  status                 AppointmentStatus         @default(SCHEDULED)
   reason                 String?
   notes                  String?
-  createdById            String?                 @db.Uuid
+  createdById            String?                   @db.Uuid
   // DX-121: tipo de cita (duración y color). Opcional: las citas anteriores no
   // tienen tipo y siguen siendo válidas.
-  appointmentTypeId      String?                 @db.Uuid
+  appointmentTypeId      String?                   @db.Uuid
   // DX-005: cuándo recepción generó el último enlace de confirmación vigente
   // (null = nunca, o se invalidó al reagendar/cambiar el estado a mano).
   confirmationSentAt     DateTime?
@@ -1833,7 +1839,7 @@ model Appointment {
   callbackRequestedAt    DateTime?
   // DX-210: «Adelantar si hay hueco». La cita es candidata para ocupar un
   // hueco libre anterior; al moverla a uno se apaga.
-  wantsEarlier           Boolean                 @default(false)
+  wantsEarlier           Boolean                   @default(false)
   // DX-437: la franja pedida (solo con wantsEarlier) y cuándo lo pidió EL
   // PACIENTE desde el enlace de confirmación (null = lo marcó el personal).
   // Se limpian con la marca.
@@ -1851,6 +1857,11 @@ model Appointment {
   /// agendada/confirmada. NULL en las citas que no han llegado y en las
   /// anteriores a DX-588.
   turnNumber             Int?
+  /// DX-265: quién marcó la llegada si no fue el personal: el paciente desde
+  /// el enlace de su cita (PATIENT_LINK) o con el QR de la sede (SEDE_QR).
+  /// NULL = el personal (o antes de DX-265). Solo con `arrivedAt` (CHECK
+  /// appointments_arrival_source_check).
+  arrivalSource          AppointmentArrivalSource?
   /// DX-306: hora en que la cita pasó a COMPLETED (la salida). La pone el
   /// trigger appointments_completed_at; la app no la escribe. NULL fuera de
   /// COMPLETED y en las citas completadas antes de DX-306.
@@ -1866,7 +1877,7 @@ model Appointment {
   cancelledAt            DateTime?
   cancelledByKind        CancellationByKind?
   cancelReasonCode       CancellationReasonCode?
-  cancelReasonText       String?                 @db.VarChar(500)
+  cancelReasonText       String?                   @db.VarChar(500)
   noticeMinutes          Int?
   lateCancellation       Boolean?
   // DX-279: cuándo se marcó la inasistencia (solo en NO_SHOW; null en las antiguas).
@@ -1874,24 +1885,24 @@ model Appointment {
   // DX-279: versión de la política COMUNICADA al paciente. DX-291 la rellena
   // al enviar el recordatorio y cuando el paciente responde por el enlace
   // (la que vio); null = no consta que se le comunicara.
-  policyVersionId        String?                 @db.Uuid
+  policyVersionId        String?                   @db.Uuid
   // DX-470: triaje de recepción de una urgencia (datos de salud: solo GET
   // /appointments/:id y el panel «En clínica»; nunca vistas públicas,
   // recordatorios ni logs). CHECK appointments_triage_check: ≤ 6 señales y la
   // nota recortada de 1–200.
-  triageFlags            TriageFlag[]            @default([])
-  triageNote             String?                 @db.VarChar(200)
+  triageFlags            TriageFlag[]              @default([])
+  triageNote             String?                   @db.VarChar(200)
   // DX-470: nació en «Atender sin cita» (llegada en el mismo paso).
-  walkIn                 Boolean                 @default(false)
+  walkIn                 Boolean                   @default(false)
   // DX-470: sobrecupo anotado (sin hueco reservado libre): no cuenta en la
   // EXCLUDE de solape del profesional. Solo con `walkIn` (CHECK). El motivo,
   // en appointment_reserved_overrides (WALK_IN_OVERBOOK).
-  overbooked             Boolean                 @default(false)
+  overbooked             Boolean                   @default(false)
   // DX-211: sillón de la cita (null = sin sillón, como todas las anteriores).
   // FK compuesta con la SEDE de la cita; EXCLUDE
   // appointments_no_overlap_per_chair (en la migración) sobre las vivas y no
   // canceladas.
-  chairId                String?                 @db.Uuid
+  chairId                String?                   @db.Uuid
   // DX-510: Idempotency-Key (UUID) de «Atender sin cita» y huella de la
   // petición. Único parcial por clínica (ver abajo); inalterables (trigger
   // dx509_walk_in_guard). DX-509: el mismo trigger apaga `overbooked` si la
@@ -1902,19 +1913,19 @@ model Appointment {
   // «Deshacer lote» retira en blando las suyas que siguen SCHEDULED, y el
   // barrido de recordatorios las salta hasta que el ADMIN los active en el
   // lote. FK compuesta por tenant (appointments_import_batch_fkey).
-  importBatchId          String?                 @map("import_batch_id") @db.Uuid
+  importBatchId          String?                   @map("import_batch_id") @db.Uuid
   // DX-016: de dónde salió la cita: el personal (STAFF) o la reserva online
   // del paciente (ONLINE, la marca «Online» de la agenda). Inmutable de hecho:
   // ningún caso de uso la cambia.
-  origin                 AppointmentOrigin       @default(STAFF)
+  origin                 AppointmentOrigin         @default(STAFF)
   // DX-562: la serie («cada N semanas») que creó la cita y su posición en
   // ella (1..n, por fecha al crearla). Las dos o ninguna (CHECK
   // appointments_series_check); FK compuesta por clínica
   // (appointments_series_fkey). Mover o cancelar la cita suelta no la saca.
-  seriesId               String?                 @db.Uuid
-  seriesIndex            Int?                    @db.SmallInt
-  createdAt              DateTime                @default(now())
-  updatedAt              DateTime                @updatedAt
+  seriesId               String?                   @db.Uuid
+  seriesIndex            Int?                      @db.SmallInt
+  createdAt              DateTime                  @default(now())
+  updatedAt              DateTime                  @updatedAt
   deletedAt              DateTime?
 
   planItems                    AppointmentPlanItem[]
@@ -10551,4 +10562,58 @@ model ClinicExport {
 
   @@index([tenantId, requestedAt(sort: Desc), id(sort: Desc)], map: "clinic_exports_tenant_requested_idx")
   @@map("clinic_exports")
+}
+
+/// DX-265: quién marcó la llegada de una cita si no fue el personal.
+enum AppointmentArrivalSource {
+  PATIENT_LINK
+  SEDE_QR
+}
+
+/// DX-265: «Ya llegué» de una sede. Sin fila = valores por defecto (enlace
+/// activo, 30 min antes y 30 después, retraso desde 10) y sin QR. El token
+/// del QR solo viaja en el cartel; aquí su SHA-256. No se borra (sin DELETE
+/// para dentalix_app): el QR se revoca dejando el hash a NULL.
+model LocationCheckInSettings {
+  tenantId      String    @db.Uuid
+  locationId    String    @db.Uuid
+  linkEnabled   Boolean   @default(true)
+  /// 0–240 (CHECK).
+  minutesBefore Int       @default(30)
+  /// 0–240 (CHECK).
+  minutesAfter  Int       @default(30)
+  /// 0–240 (CHECK): llegar más tarde que esto → «Pase por recepción».
+  lateMinutes   Int       @default(10)
+  /// SHA-256 hex del token del QR (64): único en TODA la BD.
+  qrTokenHash   String?   @unique(map: "location_check_in_settings_qr_token_hash_key") @db.Char(64)
+  qrCreatedAt   DateTime?
+  updatedById   String?   @db.Uuid
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id])
+  location Location @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Restrict)
+
+  @@id([tenantId, locationId], map: "location_check_in_settings_pkey")
+  @@map("location_check_in_settings")
+}
+
+/// DX-265: fallos de identificación con el QR de una sede desde un cliente
+/// (`clientKey` = SHA-256 de sede + IP; nunca la IP). Contador atómico; el
+/// quinto fallo bloquea 15 minutos. Un acierto borra la fila.
+model LocationCheckInAttempt {
+  tenantId       String    @db.Uuid
+  locationId     String    @db.Uuid
+  clientKey      String    @db.Char(64)
+  failedAttempts Int
+  firstFailedAt  DateTime
+  lockedUntil    DateTime?
+  updatedAt      DateTime  @default(now()) @updatedAt
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id])
+  // CASCADE: dato efímero de la sede, como LocationTurnCounter.
+  location Location @relation(fields: [tenantId, locationId], references: [tenantId, id], onDelete: Cascade)
+
+  @@id([tenantId, locationId, clientKey], map: "location_check_in_attempts_pkey")
+  @@map("location_check_in_attempts")
 }

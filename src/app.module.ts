@@ -56,6 +56,8 @@ import { WeeklyDigestModule } from './modules/weekly-digest/weekly-digest.module
 import { MessageTemplatesModule } from './modules/message-templates/message-templates.module';
 import { BankReconciliationModule } from './modules/bank-reconciliation/bank-reconciliation.module';
 import { WaitingRoomModule } from './modules/waiting-room/waiting-room.module';
+import { SelfCheckInModule } from './modules/self-check-in/self-check-in.module';
+import { SelfCheckInPublicModule } from './modules/self-check-in/self-check-in-public.module';
 import { ClinicExportsModule } from './modules/clinic-exports/clinic-exports.module';
 import { QuoteFollowUpModule } from './modules/quote-follow-up/quote-follow-up.module';
 import { CollectionsModule } from './modules/collections/collections.module';
@@ -178,6 +180,9 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     BankReconciliationModule,
     // DX-588: pantalla de sala de espera (el televisor).
     WaitingRoomModule,
+    // DX-265: «Ya llegué» (ajustes, enlace de la cita y QR de la sede).
+    SelfCheckInModule,
+    SelfCheckInPublicModule,
     ClinicExportsModule,
     // DX-561: seguimiento automático de presupuestos presentados.
     QuoteFollowUpModule,

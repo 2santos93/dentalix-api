@@ -1,3 +1,4 @@
+import { CheckInSettingsController } from '../self-check-in/presentation/check-in-settings.controller';
 import { WaitingRoomScreensController } from '../waiting-room/presentation/waiting-room-screens.controller';
 import { PlanVisitsController } from '../treatment-plans/presentation/plan-visits.controller';
 import { AppointmentsController } from '../appointments/presentation/appointments.controller';
@@ -2093,6 +2094,26 @@ const EXPECTED: Record<string, AuditOptions> = {
     reason: 'WAITING_ROOM_SCREEN_REVOKED',
   },
 
+  // DX-265: «Ya llegué» de una sede (sin paciente ni token en el evento).
+  'PATCH /locations/:locationId/check-in-settings': {
+    action: 'UPDATE',
+    resource: 'LOCATION',
+    resourceId: { param: 'locationId' },
+    reason: 'CHECK_IN_SETTINGS_UPDATED',
+  },
+  'POST /locations/:locationId/check-in-settings/qr': {
+    action: 'UPDATE',
+    resource: 'LOCATION',
+    resourceId: { param: 'locationId' },
+    reason: 'CHECK_IN_QR_CREATED',
+  },
+  'POST /locations/:locationId/check-in-settings/qr/revoke': {
+    action: 'UPDATE',
+    resource: 'LOCATION',
+    resourceId: { param: 'locationId' },
+    reason: 'CHECK_IN_QR_REVOKED',
+  },
+
   // DX-542: equipos biomédicos (sin paciente). No se borran: se dan de baja;
   // los mantenimientos se anulan con motivo.
   'POST /equipment': {
@@ -2439,6 +2460,14 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // DX-437: el paciente pide (o quita) «Avisarme si se libera un hueco antes»; auditado en el repositorio, origen PUBLIC_LINK.
   'POST /public/appointment-confirmations/:token/wants-earlier':
     'confirmation-audit.spec.ts y appointment-confirmations.e2e-spec.ts',
+  // DX-265: «Ya llegué» del paciente (enlace de la cita y QR de la sede): el
+  // caso de uso de la llegada escribe UPDATE APPOINTMENT sin usuario, origen
+  // PATIENT_LINK o SEDE_QR, PATIENT_SELF_CHECK_IN; un fallo del QR no deja
+  // evento (no hay paciente que auditar: lo frena el contador de la sede).
+  'POST /public/appointment-confirmations/:token/arrival':
+    'self-check-in.use-case.spec.ts y self-check-in.e2e-spec.ts',
+  'POST /public/check-in/:token':
+    'self-check-in.use-case.spec.ts y self-check-in.e2e-spec.ts',
   // ANAMNESIS_SUBMITTED (y el consentimiento) en la transacción del envío.
   'POST /public/medical-history/:token':
     'medical-history-submissions.e2e-spec.ts',
@@ -2931,6 +2960,7 @@ const CONTROLLERS: Type[] = [
   ScheduleBlocksController,
   ChairsController,
   WaitingRoomScreensController,
+  CheckInSettingsController,
   EquipmentController,
   StaffController,
   ClinicalNoteTemplatesController,

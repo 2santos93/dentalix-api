@@ -1,7 +1,11 @@
 import { OrthoBalanceFlagDto } from '../../../orthodontics/presentation/dto/ortho.dto';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsOptional, Matches } from 'class-validator';
-import { TriageFlag } from '@prisma/client';
+import { AppointmentArrivalSource, TriageFlag } from '@prisma/client';
+import {
+  CHECK_IN_PENDING,
+  type CheckInPending,
+} from '../../../self-check-in/domain/check-in-rules';
 import { IN_CLINIC_STATUSES } from '../../domain/patient-flow';
 import { MedicalAlertFlagsDto } from '../../../medical-history/presentation/dto/medical-alerts.dto';
 import { PlanItemReservedElsewhereDto } from './appointment.dto';
@@ -83,6 +87,24 @@ export class InClinicItemDto {
       'DX-588: turno del día en la sede, dado al marcar «Llegó» (estable mientras dure la visita; el que ve el paciente en la pantalla de sala de espera en modo «Número de turno»). null si llegó antes de DX-588.',
   })
   turnNumber!: number | null;
+
+  @ApiProperty({
+    enum: AppointmentArrivalSource,
+    enumName: 'AppointmentArrivalSource',
+    nullable: true,
+    description:
+      'DX-265: la llegada la marcó el propio paciente con «Ya llegué»: PATIENT_LINK (enlace de la cita) o SEDE_QR (QR de la sede). null = la marcó el personal.',
+  })
+  arrivalSource!: AppointmentArrivalSource | null;
+
+  @ApiProperty({
+    enum: CHECK_IN_PENDING,
+    enumName: 'CheckInPending',
+    isArray: true,
+    description:
+      'DX-265: solo para quien llegó por su cuenta y sigue esperando: lo que recepción tiene que resolver (por eso la página le dijo «Pase por recepción»). ANAMNESIS: ausente o caducada (DX-247). CONSENT: sin autorización de datos (general o de salud) o con un consentimiento por firmar a distancia. PATIENT_DATA: falta documento, fecha de nacimiento o teléfono. LATE: llegó más tarde que el umbral de la sede. Vacío en el resto.',
+  })
+  checkInPending!: CheckInPending[];
 
   @ApiProperty({
     description:

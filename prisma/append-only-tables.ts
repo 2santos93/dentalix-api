@@ -182,6 +182,11 @@ export const NO_APP_DELETE = [
   // contador de turnos del día solo sube.
   'waiting_room_screens',
   'location_turn_counters',
+  // DX-265: los ajustes de «Ya llegué» de una sede no se borran (el QR se
+  // retira dejando su hash a NULL); el contador de intentos del QR se reinicia
+  // al vencer su ventana, nunca se borra.
+  'location_check_in_settings',
+  'location_check_in_attempts',
   // DX-053: el historial de exportaciones no se borra (el fichero sí, del
   // almacén, a los 7 días: `fileDeletedAt`).
   'clinic_exports',

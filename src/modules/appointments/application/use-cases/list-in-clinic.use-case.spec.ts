@@ -199,6 +199,7 @@ describe('ListInClinicUseCase (DX-200)', () => {
       seatedAt: null,
       readyForCheckoutAt: null,
       turnNumber: null,
+      arrivalSource: null,
       minutesInStatus: 30,
       waitedMinutes: 30,
       punctuality: 'ON_TIME',
