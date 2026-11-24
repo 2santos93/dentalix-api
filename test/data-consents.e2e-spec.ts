@@ -422,7 +422,13 @@ describe('Autorización de datos — /privacy-policies y /patients/:id/data-cons
             decisions: [{ scope: 'GENERAL', granted: true }],
           },
         })
-        .expect(409);
+        .expect(409)
+        // DX-058: el alta lo distingue de otros 409 para recargar la política.
+        .expect((res) =>
+          expect((res.body as { code?: string }).code).toBe(
+            'PRIVACY_POLICY_OUTDATED',
+          ),
+        );
       expect(
         await raw.patient.count({ where: { docNumber: 'ALTA-FALLA' } }),
       ).toBe(0);
@@ -512,6 +518,44 @@ describe('Autorización de datos — /privacy-policies y /patients/:id/data-cons
       ).toBe(2);
     });
 
+    // DX-058: dos decisiones del mismo scope en el MISMO milisegundo (doble
+    // envío). El estado vigente no puede depender del orden en que Postgres
+    // devuelva las filas: gana la de id mayor, en la lista y en `current`.
+    it('dos filas del mismo scope en el mismo ms: el estado vigente es determinista (id mayor)', async () => {
+      const twin = (await createPatient(clinicA, 'REG-MISMO-MS')).id;
+      const recordedAt = new Date('2026-10-20T15:00:00.000Z');
+      const low = '00000000-0000-4000-8000-0000000d0580';
+      const high = 'ffffffff-0000-4000-8000-0000000d0580';
+      // Primero la de id mayor: el orden físico no coincide con el esperado.
+      for (const [id, granted] of [
+        [high, false],
+        [low, true],
+      ] as const) {
+        await raw.dataProcessingConsent.create({
+          data: {
+            id,
+            tenantId: clinicA.tenantId,
+            patientId: twin,
+            policyVersionId: policyId,
+            scope: 'MARKETING',
+            granted,
+            channel: 'IN_PERSON',
+            recordedById: receptionAId,
+            recordedAt,
+          },
+        });
+      }
+      for (let i = 0; i < 3; i += 1) {
+        const body = (
+          await as(clinicA).get(`/patients/${twin}/data-consents`).expect(200)
+        ).body as ConsentsBody;
+        const marketing = body.current.find((c) => c.scope === 'MARKETING');
+        expect(marketing?.latest?.id).toBe(high);
+        expect(marketing?.granted).toBe(false);
+        expect(body.history.map((r) => r.id)).toEqual([high, low]);
+      }
+    });
+
     it('no existe ruta para editar ni borrar una autorización', async () => {
       const rowId = (
         await raw.dataProcessingConsent.findFirstOrThrow({
@@ -557,12 +601,18 @@ describe('Autorización de datos — /privacy-policies y /patients/:id/data-cons
       for (const row of history) {
         expect(row.policyVersion?.version).toBe(1);
       }
-      await as(clinicA)
+      // DX-058: 409 con código estable para que la web recargue la política.
+      const outdated = await as(clinicA)
         .post(`/patients/${patientId}/data-consents`, {
           policyVersionId: v1.id,
           decisions: [{ scope: 'GENERAL', granted: true }],
         })
         .expect(409);
+      const outdatedBody = outdated.body as { code: string; message: string };
+      expect(outdatedBody.code).toBe('PRIVACY_POLICY_OUTDATED');
+      expect(outdatedBody.message).toMatch(
+        /^La política de tratamiento de datos cambió/,
+      );
       const all = (await as(clinicA).get('/privacy-policies').expect(200))
         .body as { current: PolicyBody; history: PolicyBody[] };
       expect(all.current.id).toBe(v2.id);

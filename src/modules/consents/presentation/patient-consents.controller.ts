@@ -168,7 +168,8 @@ export class PatientConsentsController {
     description: 'Paciente, plantilla o plan no encontrados en esta clínica',
   })
   @ApiConflictResponse({
-    description: 'La plantilla cambió desde la vista previa (templateVersion)',
+    description:
+      'La plantilla cambió desde la vista previa (templateVersion, comprobado también en la transacción del INSERT) o la vista previa caducó (CONSENT_PREVIEW_EXPIRED)',
   })
   async sign(
     @Param('patientId', ParseUUIDPipe) patientId: string,
@@ -181,6 +182,7 @@ export class PatientConsentsController {
       {
         templateId: dto.templateId,
         templateVersion: dto.templateVersion,
+        previewedAt: dto.previewedAt,
         treatmentPlanId: dto.treatmentPlanId,
         signerType: dto.signerType,
         guardianName: dto.guardianName,
