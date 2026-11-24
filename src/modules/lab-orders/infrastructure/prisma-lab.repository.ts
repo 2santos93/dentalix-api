@@ -547,6 +547,7 @@ export class PrismaLabRepository implements LabRepository {
           instructions: input.instructions,
           dueOn: input.dueOn ? dateOf(input.dueOn) : null,
           createdById: input.createdById,
+          createdAt: input.createdAt,
           // Lo sustituye el trigger por el siguiente de la clínica.
           number: 0,
         },
