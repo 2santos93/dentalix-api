@@ -147,8 +147,13 @@ describe('NodeDnsResolver', () => {
         expect(['ETIMEOUT', 'ECANCELLED']).toContain(
           (error as DnsLookupError).code,
         );
-        // Plazo duro de 200 ms (más el margen del bucle de eventos).
-        expect(elapsed).toBeLessThan(1000);
+        // Plazo duro de 200 ms. DX-419: la cota es holgada (3 s) a propósito:
+        // con la máquina cargada (suite entera en paralelo) el bucle de
+        // eventos llegó a pasar de 1 s y el test fallaba sin que el resolver
+        // tuviera nada que ver. Sigue separando lo que importa: con los
+        // valores por defecto de c-ares (sin timeout ni intentos propios) un
+        // DNS mudo no da error ni en 6 s.
+        expect(elapsed).toBeLessThan(3000);
       });
     });
   });

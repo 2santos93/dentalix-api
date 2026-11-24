@@ -81,23 +81,29 @@ docker run -d --name "$NAME" --network host \
   -e SHUTDOWN_DRAIN_MS=1000 -e LOG_LEVEL=info \
   "$IMAGE" >/dev/null
 
+# DX-419: nada de `cmd | grep -q` con pipefail: si grep sale al encontrar la
+# línea mientras `cmd` aún escribe, `cmd` muere por SIGPIPE (141) y el pipeline
+# falla aunque la línea esté. Se captura la salida y se busca después.
 for _ in $(seq 1 60); do
   if curl -fs -o /dev/null "http://127.0.0.1:${API_PORT}/api/v1/health"; then break; fi
-  docker ps -q --filter "name=^${NAME}$" | grep -q . || fail "la API terminó al arrancar"
+  [[ -n "$(docker ps -q --filter "name=^${NAME}$")" ]] || fail "la API terminó al arrancar"
   sleep 1
 done
-curl -fsS "http://127.0.0.1:${API_PORT}/api/v1/health" | grep -q '"ok"' || fail "/api/v1/health"
-curl -fsS "http://127.0.0.1:${API_PORT}/api/v1/health/ready" | grep -q '"up"' || fail "/api/v1/health/ready"
+health="$(curl -fsS "http://127.0.0.1:${API_PORT}/api/v1/health")" || fail "/api/v1/health"
+grep -q '"ok"' <<<"$health" || fail "/api/v1/health"
+ready="$(curl -fsS "http://127.0.0.1:${API_PORT}/api/v1/health/ready")" || fail "/api/v1/health/ready"
+grep -q '"up"' <<<"$ready" || fail "/api/v1/health/ready"
 [[ "$(docker exec "$NAME" id -u)" != 0 ]] || fail "la API corre como root"
 echo "/api/v1/health y /health/ready: 200; usuario $(docker exec "$NAME" id -un)"
 
-psql -v ON_ERROR_STOP=1 "${DATABASE_URL%%\?*}" -tAc \
-  "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user" | grep -qx f \
-  || fail "dentalix_app es superusuario o BYPASSRLS"
+privileged="$(psql -v ON_ERROR_STOP=1 "${DATABASE_URL%%\?*}" -tAc \
+  "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user")"
+[[ "$privileged" == f ]] || fail "dentalix_app es superusuario o BYPASSRLS"
 
 echo "==> SIGTERM: apagado ordenado"
 docker stop -t 30 "$NAME" >/dev/null
 status="$(docker inspect -f '{{.State.ExitCode}}' "$NAME")"
-docker logs "$NAME" 2>&1 | grep -q 'shutdown.done' || fail "no terminó el apagado ordenado"
+logs="$(docker logs "$NAME" 2>&1)"
+grep -q 'shutdown.done' <<<"$logs" || fail "no terminó el apagado ordenado"
 [[ "$status" = 0 ]] || fail "salió con código $status"
 echo "Humo de la imagen de la API: OK"

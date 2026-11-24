@@ -1,4 +1,5 @@
 import { INestApplication } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { promises as fs } from 'fs';
 import * as path from 'path';
@@ -6,13 +7,28 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
 import { applySecurity } from '../src/shared/security/apply-security';
+import {
+  loadSecuritySettings,
+  type SecuritySettings,
+} from '../src/shared/security/security-settings';
 import { setupSwagger } from '../src/config/swagger';
 import { createAppValidationPipe } from '../src/shared/validation/app-validation-pipe';
 
 // Construye la app igual que main.ts (applySecurity + Swagger) para verificar
 // las cabeceras HTTP de seguridad tal como salen en producción.
+//
+// DX-419: los orígenes de CORS se leen de la configuración EFECTIVA de la app
+// (la misma que usa applySecurity), no se dan por supuestos. `.env.test` se
+// carga SOBRESCRIBIENDO el entorno (test/support/test-db-guard.ts), así que el
+// `??=` de test/setup-e2e.ts no gana a un CORS_ROOT_DOMAIN o CORS_ORIGINS
+// escrito ahí (p. ej. el de la demo local): con el dominio fijo
+// «dentalix.local», «acepta subdominios del dominio raíz» fallaba en local y
+// pasaba en la CI, cuyo `.env.test` no los trae.
 describe('Cabeceras de seguridad (e2e)', () => {
   let app: INestApplication<App>;
+  let settings: SecuritySettings;
+  /** El primer origen exacto de CORS_ORIGINS (por defecto, la web en :3001). */
+  let webOrigin: string;
   const storageRoot = process.env.STORAGE_DIR ?? './storage-test';
   const avatar = path.join(storageRoot, 'avatars', 'security-headers.png');
 
@@ -29,6 +45,9 @@ describe('Cabeceras de seguridad (e2e)', () => {
     setupSwagger(app);
     await app.init();
     await app.listen(0, '127.0.0.1');
+    const config = app.get(ConfigService);
+    settings = loadSecuritySettings((k) => config.get<string>(k));
+    webOrigin = settings.corsOrigins[0];
   });
 
   afterAll(async () => {
@@ -84,15 +103,14 @@ describe('Cabeceras de seguridad (e2e)', () => {
   });
 
   it('mantiene CORS para la web con credenciales y la cabecera de sede', async () => {
+    expect(webOrigin).toBeDefined();
     const res = await request(app.getHttpServer())
       .options('/api/v1/auth/login')
-      .set('Origin', 'http://localhost:3001')
+      .set('Origin', webOrigin)
       .set('Access-Control-Request-Method', 'POST')
       .set('Access-Control-Request-Headers', 'content-type,x-location-id');
     expect(res.status).toBe(204);
-    expect(res.headers['access-control-allow-origin']).toBe(
-      'http://localhost:3001',
-    );
+    expect(res.headers['access-control-allow-origin']).toBe(webOrigin);
     expect(res.headers['access-control-allow-credentials']).toBe('true');
     expect(res.headers['access-control-allow-headers']).toMatch(
       /X-Location-Id/,
@@ -104,7 +122,7 @@ describe('Cabeceras de seguridad (e2e)', () => {
       .options(
         '/api/v1/treatment-plans/00000000-0000-4000-8000-000000000000/payments',
       )
-      .set('Origin', 'http://localhost:3001')
+      .set('Origin', webOrigin)
       .set('Access-Control-Request-Method', 'POST')
       .set(
         'Access-Control-Request-Headers',
@@ -119,7 +137,7 @@ describe('Cabeceras de seguridad (e2e)', () => {
   it('deja pasar X-Signature-Session en el preflight (firma a distancia desde el navegador, DX-243)', async () => {
     const res = await request(app.getHttpServer())
       .options(`/api/v1/public/sign/${'A'.repeat(43)}/sign`)
-      .set('Origin', 'http://localhost:3001')
+      .set('Origin', webOrigin)
       .set('Access-Control-Request-Method', 'POST')
       .set(
         'Access-Control-Request-Headers',
@@ -132,12 +150,19 @@ describe('Cabeceras de seguridad (e2e)', () => {
   });
 
   it('acepta subdominios del dominio raíz (marca blanca)', async () => {
+    const origin = `http://acme.${settings.corsRootDomain}`;
     const res = await request(app.getHttpServer())
       .get('/api/v1/health')
-      .set('Origin', 'http://acme.dentalix.local')
+      .set('Origin', origin)
       .expect(200);
-    expect(res.headers['access-control-allow-origin']).toBe(
-      'http://acme.dentalix.local',
-    );
+    expect(res.headers['access-control-allow-origin']).toBe(origin);
+  });
+
+  it('rechaza un host que solo empieza como el dominio raíz', async () => {
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/health')
+      .set('Origin', `http://acme.${settings.corsRootDomain}.otro.test`)
+      .expect(403);
+    expect(res.headers['access-control-allow-origin']).toBeUndefined();
   });
 });
