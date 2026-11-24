@@ -53,6 +53,14 @@ export interface NewLabOrderInput {
   instructions: string | null;
   dueOn: string | null;
   createdById: string;
+  /**
+   * DX-017-quater: el instante de creación con el reloj del laboratorio
+   * (LAB_CLOCK), no el `now()` de la BD. El envío compara la fecha prometida
+   * con la sugerida desde el día de creación; con relojes distintos, una
+   * fecha puesta a mano que coincidiera con la sugerida de «hoy» se trataba
+   * como automática y se recalculaba.
+   */
+  createdAt: Date;
 }
 
 /** Columnas que escribe una edición o un paso (solo las presentes). */
