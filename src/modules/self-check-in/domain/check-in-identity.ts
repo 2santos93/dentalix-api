@@ -10,6 +10,12 @@ import { docKey } from '../../patients/domain/doc-key';
  */
 
 export const CHECK_IN_MAX_FAILURES = 5;
+/**
+ * Tope por documento, MAYOR que por IP: quien conoce el documento de otro
+ * puede bloquearle el QR fallando adrede (riesgo aceptado: el paciente pasa
+ * por recepción); con 10 cuesta el doble y la IP sigue frenando en 5.
+ */
+export const CHECK_IN_DOCUMENT_MAX_FAILURES = 10;
 export const CHECK_IN_LOCK_MINUTES = 15;
 /** Ventana en la que se acumulan los fallos (después, empieza de cero). */
 export const CHECK_IN_FAILURE_WINDOW_MINUTES = 15;

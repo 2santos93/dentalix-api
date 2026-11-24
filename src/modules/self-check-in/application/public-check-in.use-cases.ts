@@ -5,6 +5,7 @@ import {
   HttpStatus,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { AppointmentArrivalSource, AppointmentStatus } from '@prisma/client';
@@ -45,6 +46,7 @@ import {
   CHECK_IN_LOCKED_CODE,
   CHECK_IN_LOCKED_MESSAGE,
   CHECK_IN_LOCK_MINUTES,
+  CHECK_IN_DOCUMENT_MAX_FAILURES,
   CHECK_IN_MAX_FAILURES,
   CHECK_IN_NO_MATCH_CODE,
   CHECK_IN_NO_MATCH_MESSAGE,
@@ -178,6 +180,8 @@ const STATE_RANK: Record<ArrivalState, number> = {
  */
 @Injectable()
 export class PublicCheckInUseCases {
+  private readonly logger = new Logger(PublicCheckInUseCases.name);
+
   constructor(
     private readonly tenantContext: TenantContextService,
     @Inject(CHECK_IN_REPOSITORY) private readonly repo: CheckInRepository,
@@ -293,15 +297,17 @@ export class PublicCheckInUseCases {
       input.documentNumber,
     );
     const keys = [clientKey, documentKey];
+    // Tope por clave: 5 por IP, 10 por documento (ver CHECK_IN_DOCUMENT_MAX_FAILURES).
+    const maxFor = [CHECK_IN_MAX_FAILURES, CHECK_IN_DOCUMENT_MAX_FAILURES];
     const now = this.clock();
     // Cada intento se anota ANTES de comparar, en los dos contadores (una
     // sentencia atómica cada uno): una ráfaga a la vez no compara más de
     // CHECK_IN_MAX_FAILURES datos; pasado el tope, 429 sin comparar.
     const attempts: CheckInAttemptState[] = [];
-    for (const key of keys) {
+    for (const [n, key] of keys.entries()) {
       attempts.push(
         await this.repo.reserveAttempt(location.locationId, key, {
-          maxAttempts: CHECK_IN_MAX_FAILURES,
+          maxAttempts: maxFor[n],
           lockMinutes: CHECK_IN_LOCK_MINUTES,
           windowMinutes: CHECK_IN_FAILURE_WINDOW_MINUTES,
         }),
@@ -321,8 +327,17 @@ export class PublicCheckInUseCases {
       await floor();
       // El quinto fallo (por IP o por documento) bloquea ya, y lo dice.
       const reached = keys.filter(
-        (_, n) => attempts[n].failedAttempts >= CHECK_IN_MAX_FAILURES,
+        (_, n) => attempts[n].failedAttempts >= maxFor[n],
       );
+      if (reached.includes(documentKey)) {
+        // Rastro para el personal sin el documento: sede y hora.
+        this.logger.warn({
+          event: 'self_check_in.document_locked',
+          tenantId,
+          locationId: location.locationId,
+          lockMinutes: CHECK_IN_LOCK_MINUTES,
+        });
+      }
       if (reached.length > 0) {
         let until = now;
         for (const key of reached) {

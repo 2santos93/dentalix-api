@@ -674,10 +674,12 @@ describe('«Ya llegué» (e2e, DX-265)', () => {
       expect(res.body).toMatchObject({ code: 'CHECK_IN_LOCKED' });
     });
 
-    it('bloqueo por documento: rotar de IP contra un mismo paciente bloquea al quinto fallo, también su intento bueno', async () => {
+    it('bloqueo por documento: rotar de IP contra un mismo paciente bloquea al décimo fallo (la IP frena en 5), también su intento bueno', async () => {
       const target = await patient('Beatriz', 'V-24242424', '1979-03-03');
       const appt = await bookToday(target, altamira, 0);
-      for (let i = 0; i < 4; i++) {
+      // 9 fallos desde IPs distintas: ninguna llega a su tope (5) y el
+      // documento tampoco (10).
+      for (let i = 0; i < 9; i++) {
         await qrIdentify(
           secondQr,
           { documentNumber: 'V-24242424', birthDate: `1979-03-1${i}` },
@@ -685,7 +687,7 @@ describe('«Ya llegué» (e2e, DX-265)', () => {
           `198.51.100.${10 + i}`,
         ).expect(400);
       }
-      // Quinto fallo, sin la letra (cuenta igual): bloquea el documento.
+      // Décimo fallo, sin la letra (cuenta igual): bloquea el documento.
       await qrIdentify(
         secondQr,
         { documentNumber: '24242424', birthDate: '1979-03-19' },
