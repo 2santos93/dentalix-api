@@ -15,6 +15,9 @@ import {
   computeRemoteConsentHash,
 } from '../../domain/consent-hash';
 import {
+  CONSENT_PREVIEW_EXPIRED_MESSAGE,
+  CONSENT_PREVIEW_MAX_AGE_MS,
+  CONSENT_TEMPLATE_CHANGED_MESSAGE,
   CountersignPatientConsentUseCase,
   GetPatientConsentUseCase,
   ListPatientConsentsUseCase,
@@ -101,6 +104,8 @@ describe('PreviewPatientConsentUseCase', () => {
         'Clínica Demo a realizar: Exodoncia simple (diente 48); Resina ' +
         '(diente 36). Fecha: 16 de octubre de 2026.',
       professionalName: 'Dra. Laura Gómez',
+      // DX-058: el instante con el que se pintó {{fecha}}; la firma lo reusa.
+      previewedAt: NOW,
     });
   });
 
@@ -376,6 +381,117 @@ describe('SignPatientConsentUseCase', () => {
     await expect(
       sign.execute('p1', signInput(template.id), META),
     ).rejects.toThrow(ConflictException);
+  });
+
+  // DX-058: lo firmado es EXACTAMENTE lo previsualizado, también {{fecha}}.
+  describe('DX-058 · fecha de la vista previa', () => {
+    // 23:58 del 16 de octubre en Madrid (UTC+2) y 00:03 del 17.
+    const BEFORE_MIDNIGHT = new Date('2026-10-16T21:58:00.000Z');
+    const AFTER_MIDNIGHT = new Date('2026-10-16T22:03:00.000Z');
+
+    function withClock(start: Date) {
+      const base = setup();
+      let current = start;
+      const clock = () => current;
+      return {
+        ...base,
+        setNow: (at: Date) => {
+          current = at;
+        },
+        preview: new PreviewPatientConsentUseCase(
+          base.templates,
+          base.consents,
+          clock,
+          base.names,
+        ),
+        sign: new SignPatientConsentUseCase(
+          base.templates,
+          base.consents,
+          clock,
+          base.names,
+        ),
+      };
+    }
+
+    it('firmado pasada la medianoche, el texto lleva la fecha que se vio en la vista previa', async () => {
+      const { preview, sign, setNow, template } = withClock(BEFORE_MIDNIGHT);
+      const shown = await preview.execute(
+        'p1',
+        { templateId: template.id },
+        'dentist-1',
+      );
+      expect(shown.body).toContain('Fecha: 16 de octubre de 2026.');
+
+      setNow(AFTER_MIDNIGHT);
+      const signed = await sign.execute(
+        'p1',
+        signInput(template.id, {
+          previewedAt: shown.previewedAt.toISOString(),
+        }),
+        META,
+      );
+
+      expect(signed.body).toBe(shown.body);
+      // `signedAt` sigue siendo el reloj del servidor al firmar.
+      expect(signed.signedAt).toEqual(AFTER_MIDNIGHT);
+      expect(signed.contentHash).toBe(
+        computeConsentHash({
+          title: signed.title,
+          body: shown.body,
+          signerType: 'PATIENT',
+          signerName: 'Ana Pérez',
+          signerDocument: 'Documento nacional 1020304050',
+          professionalName: 'Dra. Laura Gómez',
+          patientSignature: PNG_A,
+          professionalSignature: PNG_B,
+          signedAt: AFTER_MIDNIGHT,
+        }),
+      );
+    });
+
+    it('sin previewedAt (cliente antiguo) la fecha es la de la firma', async () => {
+      const { sign, template } = withClock(AFTER_MIDNIGHT);
+      const signed = await sign.execute('p1', signInput(template.id), META);
+      expect(signed.body).toContain('Fecha: 17 de octubre de 2026.');
+    });
+
+    it('409 CONSENT_PREVIEW_EXPIRED si la vista previa es muy antigua o del futuro; no guarda nada', async () => {
+      const { sign, consents, template } = withClock(AFTER_MIDNIGHT);
+      const stale = new Date(
+        AFTER_MIDNIGHT.getTime() - CONSENT_PREVIEW_MAX_AGE_MS - 1,
+      );
+      const future = new Date(AFTER_MIDNIGHT.getTime() + 60_000);
+      for (const previewedAt of [stale, future]) {
+        const error = await sign
+          .execute(
+            'p1',
+            signInput(template.id, { previewedAt: previewedAt.toISOString() }),
+            META,
+          )
+          .catch((e: unknown) => e);
+        expect(error).toBeInstanceOf(ConflictException);
+        expect((error as ConflictException).getResponse()).toMatchObject({
+          code: 'CONSENT_PREVIEW_EXPIRED',
+          message: CONSENT_PREVIEW_EXPIRED_MESSAGE,
+        });
+      }
+      expect(consents.rows).toHaveLength(0);
+    });
+
+    it('409 si la plantilla cambia entre la comprobación y el INSERT (la repite la transacción)', async () => {
+      const { sign, consents, template } = withClock(BEFORE_MIDNIGHT);
+      // Otra petición sube la versión justo antes del INSERT: el repositorio
+      // la vuelve a leer, bloqueada, dentro de la transacción que inserta.
+      consents.templateVersionAtInsert = () => 2;
+      const error = await sign
+        .execute('p1', signInput(template.id), META)
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(ConflictException);
+      expect((error as ConflictException).message).toBe(
+        CONSENT_TEMPLATE_CHANGED_MESSAGE,
+      );
+      expect(consents.rows).toHaveLength(0);
+    });
   });
 
   it('editar la plantilla después NO cambia el consentimiento firmado (snapshot)', async () => {

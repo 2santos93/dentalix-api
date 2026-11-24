@@ -85,6 +85,17 @@ export class AlreadyCountersignedError extends Error {
   }
 }
 
+/**
+ * DX-058: la plantilla ya no está en la versión de la vista previa al
+ * INSERTAR (se editó entre la comprobación del caso de uso y la transacción).
+ */
+export class TemplateVersionChangedError extends Error {
+  constructor() {
+    super('La plantilla cambió antes de guardar el consentimiento');
+    this.name = 'TemplateVersionChangedError';
+  }
+}
+
 export const PATIENT_CONSENT_REPOSITORY = Symbol('PATIENT_CONSENT_REPOSITORY');
 
 export interface PatientConsentRepository {
@@ -101,6 +112,9 @@ export interface PatientConsentRepository {
   /**
    * Append-only: SIEMPRE inserta. No hay update ni delete en este puerto
    * (inmutabilidad a nivel de interfaz; la base también lo impide).
+   * DX-058: en la MISMA transacción del INSERT relee la plantilla bloqueada
+   * (FOR SHARE) y lanza `TemplateVersionChangedError` si su versión ya no es
+   * `templateVersion`: una edición concurrente no se cuela en el hueco.
    */
   create(input: CreatePatientConsentRepoInput): Promise<PatientConsent>;
 

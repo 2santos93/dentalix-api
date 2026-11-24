@@ -1,6 +1,11 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
+import { PrismaPatientConsentRepository } from '../src/modules/consents/infrastructure/repositories/prisma-patient-consent.repository';
+import {
+  TemplateVersionChangedError,
+  type CreatePatientConsentRepoInput,
+} from '../src/modules/consents/domain/ports/patient-consent-repository.port';
 
 // DX-006, capa DB de patient_consents / consent_templates. Cada caso escribe
 // POR LA MISMA RUTA que la app (runWithTenant, rol dentalix_app, sujeto a RLS);
@@ -245,6 +250,73 @@ describe('patient_consents: FK compuestas, RLS, inmutabilidad y CHECKs (DX-006, 
           }),
         ),
       ).rejects.toThrow(/patient_consents_guardian_document_check/);
+    });
+  });
+
+  // DX-058: la versión de la plantilla se comprueba DENTRO de la transacción
+  // del INSERT, con la fila en FOR SHARE: una edición en curso no se cuela.
+  describe('versión de la plantilla en la transacción del INSERT (DX-058)', () => {
+    const repo = new PrismaPatientConsentRepository(prisma, tenantContext);
+
+    function repoInput(templateVersion: number): CreatePatientConsentRepoInput {
+      return {
+        patientId: a.patientId,
+        templateId: a.templateId,
+        templateVersion,
+        treatmentPlanId: null,
+        title: 'Exodoncia',
+        body: 'Texto Ana',
+        signerType: 'PATIENT',
+        signerName: 'Ana',
+        signerDocument: null,
+        professionalName: 'Dra.',
+        patientSignature: PNG,
+        professionalSignature: PNG,
+        contentHash: HASH,
+        signedAt: new Date(),
+        recordedById: a.patientId,
+        ipAddress: null,
+        userAgent: null,
+      };
+    }
+
+    it('una edición confirmada mientras el INSERT espera: TemplateVersionChangedError y nada guardado', async () => {
+      const { version } = await raw.consentTemplate.findUniqueOrThrow({
+        where: { id: a.templateId },
+      });
+      const before = await raw.patientConsent.count({
+        where: { tenantId: a.tenantId },
+      });
+      let insert: Promise<unknown> | undefined;
+      await raw.$transaction(
+        async (tx) => {
+          // La edición de la plantilla: fila en FOR UPDATE y versión + 1.
+          await tx.$queryRaw`
+            SELECT "id" FROM "consent_templates"
+             WHERE "id" = ${a.templateId}::uuid FOR UPDATE`;
+          await tx.consentTemplate.update({
+            where: { id: a.templateId },
+            data: { version: { increment: 1 } },
+          });
+          // La firma (con la versión que vio) llega mientras tanto y espera.
+          insert = tenantContext
+            .run(a.tenantId, () => repo.create(repoInput(version)))
+            .catch((error: unknown) => error);
+          await new Promise((resolve) => setTimeout(resolve, 300));
+        },
+        { timeout: 10_000 },
+      );
+      expect(await insert).toBeInstanceOf(TemplateVersionChangedError);
+      expect(
+        await raw.patientConsent.count({ where: { tenantId: a.tenantId } }),
+      ).toBe(before);
+
+      // Con la versión vigente, la misma firma entra.
+      await expect(
+        tenantContext.run(a.tenantId, () =>
+          repo.create(repoInput(version + 1)),
+        ),
+      ).resolves.toMatchObject({ templateVersion: version + 1 });
     });
   });
 });
