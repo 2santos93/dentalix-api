@@ -54,6 +54,13 @@ jobs:
       - name: db:lint-migrations
         if: ${{ !cancelled() }}
         run: npm run db:lint-migrations
+      # DX-419 (TST-051): la lista de tests intermitentes (los ÚNICOS que la
+      # CI reintenta, una vez) está bien formada y ninguna entrada ha caducado
+      # (fecha UTC de la CI). La deja en el resumen de la run. Ver
+      # test/flaky/flaky-list.ts.
+      - name: Lista de tests intermitentes al día (DX-419)
+        if: ${{ !cancelled() }}
+        run: npx ts-node --transpile-only test/flaky/cli.ts check
 
   # Tipos, unit y build: cada paso corre aunque falle el anterior (solo
   # dependen de `npm ci` y `prisma generate`), así un rojo en uno no deja los
@@ -88,9 +95,11 @@ jobs:
       - name: Supuestos de país (check:country-assumptions)
         if: ${{ !cancelled() && steps.prisma.outcome == 'success' }}
         run: npm run check:country-assumptions
+      # DX-419: `npm test` (jest) con el reintento acotado: solo los tests de
+      # test/flaky/flaky-tests.json, una vez; el resumen dice cuáles.
       - name: Unit (npm test)
         if: ${{ !cancelled() && steps.prisma.outcome == 'success' }}
-        run: npm test
+        run: npx ts-node --transpile-only test/flaky/cli.ts run --label "Unit" -- npx jest
       - name: Build
         id: build
         if: ${{ !cancelled() && steps.prisma.outcome == 'success' }}
@@ -275,7 +284,12 @@ jobs:
         run: scripts/prisma-drift.sh check
       - name: test:int (shard ${{ matrix.shard }}/${{ matrix.total }})
         if: ${{ !cancelled() && steps.db.outcome == 'success' }}
-        run: npm run test:int -- --shard=${{ matrix.shard }}/${{ matrix.total }}
+        # `npm run test:int` con el reintento acotado de DX-419 (mismo comando).
+        run: >-
+          npx ts-node --transpile-only test/flaky/cli.ts run
+          --label "Integración ${{ matrix.shard }}/${{ matrix.total }}" --
+          npx dotenv -e .env.test -- jest --config ./test/jest-int.json --runInBand
+          --shard=${{ matrix.shard }}/${{ matrix.total }}
 
       - name: Duración del shard
         if: ${{ always() }}
@@ -446,7 +460,12 @@ jobs:
         run: npm run db:test:setup
       - name: test:e2e (shard ${{ matrix.shard }}/${{ matrix.total }})
         if: ${{ !cancelled() && steps.db.outcome == 'success' }}
-        run: npm run test:e2e -- --shard=${{ matrix.shard }}/${{ matrix.total }}
+        # `npm run test:e2e` con el reintento acotado de DX-419 (mismo comando).
+        run: >-
+          npx ts-node --transpile-only test/flaky/cli.ts run
+          --label "E2E ${{ matrix.shard }}/${{ matrix.total }}" --
+          npx dotenv -e .env.test -- jest --config ./test/jest-e2e.json --runInBand
+          --shard=${{ matrix.shard }}/${{ matrix.total }}
       # SEC-046: la prueba de carga de la importación (20 lecturas en paralelo,
       # pico de RSS < +300 MB) va aparte porque tarda ~1 min; fuera de CI solo
       # corre con RUN_SLOW_TESTS=1. Corre solo en el shard al que le toca su

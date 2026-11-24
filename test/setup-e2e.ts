@@ -60,7 +60,10 @@ process.env.LOGIN_IP_FAILURE_LIMIT ??= HIGH_LIMIT;
 
 // CORS: los e2e asumen los defaults documentados (localhost:3001 + subdominios
 // de dentalix.local). Sin esto, un `.env` local (que ConfigModule también
-// carga) con otro CORS_ROOT_DOMAIN cambiaría qué orígenes se aceptan.
+// carga) con otro CORS_ROOT_DOMAIN cambiaría qué orígenes se aceptan. Ojo:
+// `.env.test` se carga ANTES y sobrescribiendo (test-db-guard.ts), así que
+// uno escrito ahí sí gana; por eso security-headers lee los orígenes de la
+// configuración efectiva de la app (DX-419).
 process.env.CORS_ORIGINS ??= 'http://localhost:3001';
 process.env.CORS_ROOT_DOMAIN ??= 'dentalix.local';
 
