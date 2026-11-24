@@ -526,3 +526,34 @@ describe('la CI reintenta solo por la lista (DX-419)', () => {
     expect(offenders).toEqual([]);
   });
 });
+
+describe('scripts de shell sin la carrera de `| grep -q` con pipefail (DX-419)', () => {
+  // Con `set -o pipefail`, `cmd | grep -q x` falla (141, SIGPIPE) si grep
+  // encuentra la línea y sale mientras `cmd` aún escribe. Así falló una vez el
+  // humo de la imagen de la web; se captura la salida y se busca después.
+  const shellScripts = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((d) =>
+      d.isDirectory()
+        ? shellScripts(join(dir, d.name))
+        : d.name.endsWith('.sh')
+          ? [join(dir, d.name)]
+          : [],
+    );
+  const files = [
+    ...shellScripts(join(REPO, '.github', 'scripts')),
+    ...shellScripts(join(REPO, 'scripts')),
+  ].map((f) => f.slice(REPO.length + 1));
+
+  it.each(files)('%s', (file) => {
+    const text = readFileSync(join(REPO, file), 'utf8');
+    if (!/pipefail/.test(text)) return;
+    const offenders = text
+      .split('\n')
+      .filter(
+        (line) =>
+          !line.trim().startsWith('#') &&
+          /\|\s*grep\s+(-\w*q|--quiet)/.test(line),
+      );
+    expect(offenders).toEqual([]);
+  });
+});
