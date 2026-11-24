@@ -358,6 +358,7 @@ export class LabOrderUseCases {
       toothNumbers: teeth.value,
       dueOn,
       createdById: ctx.actor.userId,
+      createdAt: this.now(),
     });
     return redactForRole(await this.view(id), ctx.actor.role);
   }

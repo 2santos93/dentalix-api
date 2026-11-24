@@ -231,7 +231,7 @@ export class InMemoryLabRepository implements LabRepository {
 
   createOrder(input: NewLabOrderInput): Promise<string> {
     const id = randomUUID();
-    const at = this.nextInstant();
+    const at = input.createdAt ?? this.nextInstant();
     this.orders.set(id, {
       id,
       number: ++this.number,
