@@ -2050,6 +2050,14 @@ byte en la web, `src/lib/money/rounding-vectors.json`, vigilada por
 `scripts/check-api-reference-sync.mjs` de la web) fija RSD, JPY, EUR y ALL con
 123,45 × 7,5 %, límites del descuento y total de líneas; lo comprueban
 `rounding-vectors.spec.ts` (API) y `line-rounding.test.ts` (web).
+DX-398: `src/modules/payments/application/payment-rate-vectors.json` (copia en
+la web, `src/lib/payments/payment-rate-vectors.json`, misma guarda) fija el
+abono en otra moneda: tasa congelada (8 decimales; la que redondea a 0 es «sin
+tasa»), equivalente en la moneda del plan y lo pendiente tras el abono, con
+VES, USD, EUR, JPY e importes grandes; lo comprueban
+`payment-rate-vectors.spec.ts` (API, con `freezePaymentRate`,
+`paymentAmountIn` y `PlanBalanceCalculator`) y `payment-rate-vectors.test.ts`
+(web, con `quoteFromRates`, `convertWithRate` y `balanceAfterPayment`).
 
 Para cambiar la referencia: descargar la List One de SIX, ejecutar
 `npx ts-node --transpile-only prisma/scripts/generate-currency-digits.ts
