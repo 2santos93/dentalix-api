@@ -86,6 +86,7 @@ interface AuditPage {
   }[];
   nextCursor: string | null;
   timeZone: string;
+  patient: { id: string; fullName: string } | null;
 }
 
 let counter = 0;
@@ -248,9 +249,50 @@ describe('Registro de auditoría (e2e, DX-009)', () => {
         resourceType: 'MEDICAL_HISTORY',
         patientId,
       });
+      // DX-095: el PUT manda la anamnesis entera, pero solo cambiaron las
+      // alergias (las notas llegan iguales): el evento lista solo esas.
       expect(update.metadata).toEqual({
-        changedFields: ['allergies', 'notes'],
+        changedFields: ['allergies'],
         params: { patientId },
+      });
+      // Guardar lo mismo otra vez: el evento queda, sin campos cambiados.
+      const { event: same } = await onlyEvent(
+        clinicA,
+        'put',
+        `/patients/${patientId}/medical-history`,
+        dentist.token,
+        { allergies: [], notes: HISTORY_NOTE },
+        200,
+      );
+      expect(same.metadata).toEqual({ params: { patientId } });
+    });
+
+    it('DX-095: editar la ficha deja solo los campos que cambiaron, cruzados con el DTO', async () => {
+      const { event } = await onlyEvent(
+        clinicA,
+        'patch',
+        `/patients/${patientId}`,
+        reception.token,
+        {
+          // La ficha entera tal como la manda el formulario: nombre y
+          // documento iguales, teléfono nuevo y un campo que el DTO no tiene
+          // (la ValidationPipe lo descarta).
+          firstName: 'Paula',
+          lastName: 'Auditada',
+          docNumber: 'AUD-0001',
+          phone: '4121234567',
+          campoQueNoExiste: 'x',
+        },
+        200,
+      );
+      expect(event).toMatchObject({
+        action: 'UPDATE',
+        resourceType: 'PATIENT',
+        patientId,
+      });
+      expect(event.metadata).toEqual({
+        changedFields: ['phone'],
+        params: { id: patientId },
       });
     });
 
@@ -518,6 +560,45 @@ describe('Registro de auditoría (e2e, DX-009)', () => {
       });
       expect(page.items[0].ip).toMatch(TRUNCATED_IP);
       expect(page.items[0].requestId).toMatch(/^dx009-e2e-/);
+    });
+
+    it('DX-095: filtrando por paciente trae su nombre, también sin eventos en el período', async () => {
+      const withEvents = await api(
+        clinicA,
+        'get',
+        `/audit-events?patientId=${patientId}`,
+        clinicA.adminToken,
+      ).expect(200);
+      expect((withEvents.body as AuditPage).patient).toEqual({
+        id: patientId,
+        fullName: 'Paula Auditada',
+      });
+      const empty = await api(
+        clinicA,
+        'get',
+        `/audit-events?patientId=${patientId}&from=2020-01-01T00:00:00.000Z&to=2020-01-02T00:00:00.000Z`,
+        clinicA.adminToken,
+      ).expect(200);
+      expect((empty.body as AuditPage).items).toEqual([]);
+      expect((empty.body as AuditPage).patient).toEqual({
+        id: patientId,
+        fullName: 'Paula Auditada',
+      });
+      // Sin filtro, null; y B no ve el nombre de un paciente de A (RLS).
+      const all = await api(
+        clinicA,
+        'get',
+        '/audit-events',
+        clinicA.adminToken,
+      ).expect(200);
+      expect((all.body as AuditPage).patient).toBeNull();
+      const fromB = await api(
+        clinicB,
+        'get',
+        `/audit-events?patientId=${patientId}`,
+        clinicB.adminToken,
+      ).expect(200);
+      expect((fromB.body as AuditPage).patient).toBeNull();
     });
 
     it('filtra por usuario y por recurso', async () => {

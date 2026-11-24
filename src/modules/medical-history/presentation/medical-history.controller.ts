@@ -27,7 +27,10 @@ import {
 } from '@nestjs/swagger';
 import { SaveMedicalHistoryDto } from './dto/save-medical-history.dto';
 import { GetMedicalHistoryUseCase } from '../application/use-cases/get-medical-history.use-case';
-import { SaveMedicalHistoryUseCase } from '../application/use-cases/save-medical-history.use-case';
+import {
+  SaveMedicalHistoryUseCase,
+  type SaveMedicalHistoryAuditSignals,
+} from '../application/use-cases/save-medical-history.use-case';
 import { MedicalHistory } from '../domain/entities/medical-history.entity';
 import { MedicalHistoryDto } from './dto/medical-history.dto';
 import { AnamnesisConfirmationDto } from './dto/medical-alerts.dto';
@@ -50,6 +53,8 @@ interface AuthenticatedRequest {
   user: JwtPayload;
   /** DX-574: la repetición de un guardado idempotente no escribe: no se audita. */
   skipAudit?: boolean;
+  /** DX-095: los campos que cambiaron frente a la versión anterior. */
+  auditMetadata?: Record<string, unknown>;
 }
 
 @ApiTags('medical-history')
@@ -116,14 +121,19 @@ export class MedicalHistoryController {
     @Headers('idempotency-key') idempotencyKey: string | undefined,
   ): Promise<MedicalHistory> {
     const signals: IdempotencySignals = {};
+    // DX-095: el PUT manda la anamnesis entera; el evento lista solo lo que
+    // cambió frente a la versión anterior.
+    const audit: SaveMedicalHistoryAuditSignals = {};
     const saved = await this.saveMedicalHistory.execute(
       patientId,
       dto,
       req.user.sub,
       { idempotencyKey, signals },
+      audit,
     );
     // DX-574: un reintento con la misma clave no escribió nada.
     if (signals.replayed) req.skipAudit = true;
+    else req.auditMetadata = { changedFields: audit.changedFields ?? [] };
     return saved;
   }
 

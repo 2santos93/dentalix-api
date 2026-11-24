@@ -12,6 +12,7 @@ import { currentRequestId } from '../../../shared/observability/request-context'
 import { RecordAuditEventUseCase } from '../application/record-audit-event.use-case';
 import type { AuditActorRef } from '../domain/audit-event';
 import { AUDIT_OPTIONS, type AuditOptions } from './audit-options';
+import { auditBodyDtoFields } from './audit-body-dto';
 import {
   buildAuditDrafts,
   isBreakGlassLogin,
@@ -76,6 +77,11 @@ export class AuditInterceptor implements NestInterceptor {
       tenantId,
       locationId: this.tenantContext.getLocationId() ?? null,
       requestId: currentRequestId() ?? null,
+      // DX-095: los campos del DTO del cuerpo, para cruzar `changedFields`.
+      bodyDtoFields:
+        options.action === 'UPDATE'
+          ? auditBodyDtoFields(context.getClass(), context.getHandler())
+          : null,
     };
     if (options.action === 'LOGIN') return this.login(req, scope, next);
     return next.handle().pipe(

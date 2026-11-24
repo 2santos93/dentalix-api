@@ -43,11 +43,13 @@ class InMemoryMedicalHistoryRepository implements MedicalHistoryRepository {
     data: MedicalHistoryVersionData,
     createdById?: string,
     idempotency?: { key: string; fingerprint: string },
+    onPrevious?: (previous: MedicalHistory | null) => void,
   ): Promise<MedicalHistory> {
     if (idempotency && this.keys.has(idempotency.key)) {
       throw new Error('P2002 medical_history_versions_tenant_idempotency_key');
     }
     const latest = await this.getLatest(patientId);
+    onPrevious?.(latest);
     const version = (latest?.version ?? 0) + 1;
     const { safetyFlags, hasCriticalAlert } = deriveSafetyFlags(data);
     const row: MedicalHistory = {
@@ -125,6 +127,84 @@ describe('SaveMedicalHistoryUseCase', () => {
     // mutable reference to the "current" row).
     expect(v1.notes).toBe('Penicilina');
     expect(v1.version).toBe(1);
+  });
+
+  describe('changedFields exactos (DX-095)', () => {
+    const alergia = {
+      alergeno: 'Penicilina',
+      tipo: 'MEDICAMENTO' as const,
+      severidad: 'ANAFILAXIA' as const,
+      esAlerta: true,
+    };
+
+    it('la primera versión: los campos enviados con algo', async () => {
+      const repo = new InMemoryMedicalHistoryRepository();
+      const uc = new SaveMedicalHistoryUseCase(repo, patientsInClinic('p1'));
+      const audit: { changedFields?: string[] } = {};
+      await uc.execute(
+        'p1',
+        { allergies: [alergia], medications: [], notes: 'Control' },
+        'user-1',
+        undefined,
+        audit,
+      );
+      expect(audit.changedFields).toEqual(['allergies', 'notes']);
+    });
+
+    it('el formulario entero con un solo campo distinto deja solo ese campo', async () => {
+      const repo = new InMemoryMedicalHistoryRepository();
+      const uc = new SaveMedicalHistoryUseCase(repo, patientsInClinic('p1'));
+      const form = {
+        allergies: [alergia],
+        medications: [],
+        pregnancy: 'NO' as const,
+        notes: 'Control',
+      };
+      await uc.execute('p1', form, 'user-1');
+      const audit: { changedFields?: string[] } = {};
+      await uc.execute(
+        'p1',
+        { ...form, notes: 'Control semestral' },
+        'user-1',
+        undefined,
+        audit,
+      );
+      expect(audit.changedFields).toEqual(['notes']);
+    });
+
+    it('guardar lo mismo: ningún campo cambió', async () => {
+      const repo = new InMemoryMedicalHistoryRepository();
+      const uc = new SaveMedicalHistoryUseCase(repo, patientsInClinic('p1'));
+      const form = { allergies: [alergia], notes: 'Control' };
+      await uc.execute('p1', form, 'user-1');
+      const audit: { changedFields?: string[] } = {};
+      await uc.execute('p1', form, 'user-1', undefined, audit);
+      expect(audit.changedFields).toEqual([]);
+    });
+
+    it('`embarazo` (cliente anterior) cuenta como `pregnancy`; las semanas se comparan con las guardadas', async () => {
+      const repo = new InMemoryMedicalHistoryRepository();
+      const uc = new SaveMedicalHistoryUseCase(repo, patientsInClinic('p1'));
+      await uc.execute('p1', { pregnancy: 'SI', semanasEmbarazo: 12 }, 'u');
+      const same: { changedFields?: string[] } = {};
+      await uc.execute(
+        'p1',
+        { embarazo: true, semanasEmbarazo: 12 },
+        'u',
+        undefined,
+        same,
+      );
+      expect(same.changedFields).toEqual([]);
+      const weeks: { changedFields?: string[] } = {};
+      await uc.execute(
+        'p1',
+        { pregnancy: 'SI', semanasEmbarazo: 13 },
+        'u',
+        undefined,
+        weeks,
+      );
+      expect(weeks.changedFields).toEqual(['semanasEmbarazo']);
+    });
   });
 
   it('computes the next version independently per patient', async () => {

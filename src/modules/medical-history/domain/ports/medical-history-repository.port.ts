@@ -50,6 +50,11 @@ export interface MedicalHistoryRepository {
     createdById?: string,
     /** DX-574: clave y huella del guardado; un choque del único deshace todo. */
     idempotency?: IdempotencyRequest,
+    /**
+     * DX-095: recibe la versión vigente ANTES de esta (leída bajo el candado
+     * del paciente, en la misma transacción), para auditar qué cambió.
+     */
+    onPrevious?: (previous: MedicalHistory | null) => void,
   ): Promise<MedicalHistory>;
 
   /**

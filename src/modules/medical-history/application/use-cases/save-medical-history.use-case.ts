@@ -14,6 +14,13 @@ import {
   idempotentCreate,
   type IdempotencySignals,
 } from '../../../../shared/validation/idempotent-create';
+import { anamnesisChangedFields } from '../../domain/anamnesis-changes';
+
+/** DX-095: lo que el controlador necesita para el evento de auditoría. */
+export interface SaveMedicalHistoryAuditSignals {
+  /** Campos enviados cuya respuesta cambió frente a la versión anterior. */
+  changedFields?: string[];
+}
 
 /** DX-574: 422 de una Idempotency-Key repetida con otra anamnesis. */
 export const ANAMNESIS_IDEMPOTENCY_KEY_REUSED_MESSAGE =
@@ -51,6 +58,7 @@ export class SaveMedicalHistoryUseCase {
     data: MedicalHistoryInput,
     createdById?: string,
     idempotency?: { idempotencyKey?: string; signals?: IdempotencySignals },
+    audit?: SaveMedicalHistoryAuditSignals,
   ): Promise<MedicalHistory> {
     // DX-574: cada guardado añade una versión, así que un reintento tras un
     // corte de red con la misma clave devuelve la que ya guardó.
@@ -64,12 +72,22 @@ export class SaveMedicalHistoryUseCase {
       create: async () => {
         await assertPatientInClinic(this.patients, patientId);
         const normalized = toVersionData(data);
-        return this.repo.createVersion(
+        let previous: MedicalHistory | null = null;
+        const saved = await this.repo.createVersion(
           patientId,
           normalized,
           createdById,
           request,
+          audit
+            ? (p) => {
+                previous = p;
+              }
+            : undefined,
         );
+        if (audit) {
+          audit.changedFields = anamnesisChangedFields(previous, saved, data);
+        }
+        return saved;
       },
       reusedMessage: ANAMNESIS_IDEMPOTENCY_KEY_REUSED_MESSAGE,
       signals: idempotency?.signals,
