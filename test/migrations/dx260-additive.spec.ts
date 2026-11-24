@@ -5,7 +5,7 @@ import { join } from 'node:path';
 // profesional en el INCLUDE. CONCURRENTLY y solo en su fichero (lint de
 // DX-148); sin columnas nuevas de pacientes, así que dx_merge_patients
 // (DX-266) no cambia.
-const MIGRATION = '20270203140000_dx260_appointments_completed_provider_idx';
+const MIGRATION = '20270204140000_dx260_appointments_completed_provider_idx';
 
 const code = (): string =>
   readFileSync(
