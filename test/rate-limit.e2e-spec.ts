@@ -59,6 +59,7 @@ const LOW_LIMITS: RateLimitConfig = {
   'waiting-room': { limit: 4, ttlMs: 60_000 },
   'waiting-room-token': { limit: 2, ttlMs: 60_000 },
   'check-in': { limit: 3, ttlMs: 60_000 },
+  'clinic-export': { limit: 2, ttlMs: 60_000 },
 };
 
 // JWT con `sub` pero sin firma válida: JwtAuthGuard lo rechaza (401), pero el

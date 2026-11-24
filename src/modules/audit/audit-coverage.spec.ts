@@ -2264,6 +2264,12 @@ const EXPECTED: Record<string, AuditOptions> = {
  * (sería un evento doble).
  */
 const AUDITED_IN_USE_CASE: Record<string, string> = {
+  // DX-053: exportación de los datos de la clínica. CREATE CLINIC_EXPORT
+  // (CLINIC_EXPORT_REQUESTED) en la transacción que la crea y encola el
+  // trabajo; EXPORT CLINIC_EXPORT (CLINIC_EXPORT_DOWNLOADED, con bytes,
+  // ficheros y filas) en la que consume el enlace de un solo uso. Sin sede.
+  'POST /clinic-exports': 'clinic-exports.e2e-spec.ts',
+  'POST /clinic-exports/:id/download': 'clinic-exports.e2e-spec.ts',
   // DX-172: el catálogo «¿Cómo nos conoció?» (CREATE/UPDATE CLINIC_SETTINGS,
   // PATIENT_SOURCE_CREATED/UPDATED, antes y después; sin evento si nada
   // cambia), en la transacción del guardado.

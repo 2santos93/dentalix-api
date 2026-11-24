@@ -44,6 +44,8 @@ describe('loadRateLimitConfig', () => {
     expect(cfg['waiting-room']).toEqual({ limit: 120, ttlMs: 60_000 });
     expect(cfg['waiting-room-token']).toEqual({ limit: 30, ttlMs: 60_000 });
     expect(cfg['check-in']).toEqual({ limit: 20, ttlMs: 60_000 });
+    // DX-053: pedir y descargar la exportación, por clínica + usuario.
+    expect(cfg['clinic-export']).toEqual({ limit: 10, ttlMs: 60_000 });
     // DX-099: el cuestionario público de anamnesis, por IP y por token.
     expect(cfg.anamnesis).toEqual({ limit: 20, ttlMs: 60_000 });
     expect(cfg['anamnesis-token']).toEqual({ limit: 10, ttlMs: 60_000 });

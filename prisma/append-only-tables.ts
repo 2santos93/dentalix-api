@@ -187,6 +187,9 @@ export const NO_APP_DELETE = [
   // al vencer su ventana, nunca se borra.
   'location_check_in_settings',
   'location_check_in_attempts',
+  // DX-053: el historial de exportaciones no se borra (el fichero sí, del
+  // almacén, a los 7 días: `fileDeletedAt`).
+  'clinic_exports',
 ] as const;
 
 /**

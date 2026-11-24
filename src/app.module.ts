@@ -58,6 +58,7 @@ import { BankReconciliationModule } from './modules/bank-reconciliation/bank-rec
 import { WaitingRoomModule } from './modules/waiting-room/waiting-room.module';
 import { SelfCheckInModule } from './modules/self-check-in/self-check-in.module';
 import { SelfCheckInPublicModule } from './modules/self-check-in/self-check-in-public.module';
+import { ClinicExportsModule } from './modules/clinic-exports/clinic-exports.module';
 import { QuoteFollowUpModule } from './modules/quote-follow-up/quote-follow-up.module';
 import { CollectionsModule } from './modules/collections/collections.module';
 import { CashSessionsModule } from './modules/cash-sessions/cash-sessions.module';
@@ -182,6 +183,7 @@ import { TenantHostMiddleware } from './shared/tenancy/tenant-host.middleware';
     // DX-265: «Ya llegué» (ajustes, enlace de la cita y QR de la sede).
     SelfCheckInModule,
     SelfCheckInPublicModule,
+    ClinicExportsModule,
     // DX-561: seguimiento automático de presupuestos presentados.
     QuoteFollowUpModule,
     // DX-150: cobranza (notas, compromisos de pago y marca «Saldo vencido»).

@@ -10,6 +10,7 @@ import {
   MfaEnrollmentCodeEmailVars,
   MfaNoticeEmailVars,
   NewLoginEmailVars,
+  ClinicExportReadyEmailVars,
   PasswordResetEmailVars,
   PaymentReceiptEmailVars,
   PaymentReceiptSummaryEmailVars,
@@ -444,6 +445,43 @@ function mfaNotice(
       { kind: 'note', text: note },
     ],
     action: null,
+  });
+}
+
+/**
+ * DX-053: la exportación de los datos de la clínica está lista. Sin enlace al
+ * fichero: el botón lleva a Ajustes › Exportar datos (exige sesión de ADMIN).
+ */
+function clinicExportReady(
+  vars: ClinicExportReadyEmailVars,
+  brand: EmailBrand | null,
+): RenderedEmail {
+  const who = vars.requestedByName ?? 'Un administrador';
+  const when = vars.requestedAtLabel ? ` el ${vars.requestedAtLabel}` : '';
+  const until = vars.expiresAtLabel
+    ? `hasta el ${vars.expiresAtLabel}`
+    : 'durante 24 horas';
+  return renderLayout({
+    brand,
+    subject: `La exportación de datos de ${vars.clinicName} está lista`,
+    heading: 'Exportación de datos lista',
+    blocks: [
+      {
+        kind: 'paragraph',
+        text: `${who} pidió${when} una exportación completa de los datos de ${vars.clinicName}. Ya está lista (${vars.sizeLabel}).`,
+      },
+      {
+        kind: 'paragraph',
+        text: `Cualquier administrador puede descargarla una sola vez desde Ajustes › Exportar datos ${until}. Después hay que pedir otra.`,
+      },
+      {
+        kind: 'note',
+        text: 'Contiene datos de salud de tus pacientes: guárdala en un lugar seguro. Si nadie de la clínica la pidió, revisa el personal y la auditoría.',
+      },
+    ],
+    action: vars.settingsUrl
+      ? { label: 'Ir a Exportar datos', url: vars.settingsUrl }
+      : null,
   });
 }
 
@@ -1026,6 +1064,7 @@ const RENDERERS: { [T in EmailTemplateName]: Renderer<T> } = {
   'online-booking-code': onlineBookingCode,
   'online-booking-received': onlineBookingReceived,
   'appointment-series': appointmentSeries,
+  'clinic-export-ready': clinicExportReady,
 };
 
 /**

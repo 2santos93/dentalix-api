@@ -35,6 +35,9 @@ const REVIEWED_CALLERS = [
   'modules/patient-certificates/application/patient-certificates.use-cases.ts',
   // DX-572: PDF de una orden externa cuya emisión o anulación no se confirmó.
   'modules/external-orders/application/external-orders.use-cases.ts',
+  // DX-053: ZIP de la exportación de la clínica (`clinic-exports/<t>/<id>.zip`)
+  // huérfano o caducado a los 7 días.
+  'modules/clinic-exports/application/clinic-export-builder.ts',
 ];
 
 /** Los adaptadores implementan el puerto; no deciden qué se borra. */
