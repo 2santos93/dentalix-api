@@ -699,4 +699,14 @@ export class AuditEventsPageDto {
       'días de los filtros.',
   })
   timeZone!: string;
+
+  @ApiProperty({
+    type: AuditPatientDto,
+    nullable: true,
+    description:
+      'DX-095: el paciente del filtro `patientId` con su nombre (aunque la ' +
+      'página no traiga eventos); `null` sin ese filtro o si no es de la ' +
+      'clínica.',
+  })
+  patient!: AuditPatientDto | null;
 }

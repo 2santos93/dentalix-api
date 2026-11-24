@@ -40,6 +40,12 @@ export interface ListAuditEventsOutput {
   nextCursor: string | null;
   /** Zona de la sede activa o principal: con ella la web arma los filtros. */
   timeZone: string;
+  /**
+   * DX-095: el paciente del filtro `patientId` con su nombre, aunque la
+   * página no traiga eventos (el filtro dice a quién, no «seleccionado»).
+   * `null` sin filtro o si no es de la clínica.
+   */
+  patient: { id: string; fullName: string } | null;
 }
 
 /**
@@ -104,9 +110,12 @@ export class ListAuditEventsUseCase {
       from,
       to,
     };
-    const [rows, timeZone] = await Promise.all([
+    const [rows, timeZone, patient] = await Promise.all([
       this.repo.list(input.tenantId, filter, cursor, limit + 1),
       this.repo.clinicTimeZone(input.tenantId, input.locationId),
+      input.patientId
+        ? this.repo.patientName(input.tenantId, input.patientId)
+        : null,
     ]);
     const items = rows.slice(0, limit);
     const last = items[items.length - 1];
@@ -117,6 +126,7 @@ export class ListAuditEventsUseCase {
           ? encodeAuditCursor({ occurredAt: last.occurredAt, id: last.id })
           : null,
       timeZone,
+      patient,
     };
   }
 }

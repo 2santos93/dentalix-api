@@ -278,6 +278,22 @@ export class PrismaAuditEventRepository implements AuditEventRepository {
     });
   }
 
+  patientName(
+    tenantId: string,
+    patientId: string,
+  ): Promise<{ id: string; fullName: string } | null> {
+    return this.prisma.runWithTenant(tenantId, async (tx) => {
+      const p = await tx.patient.findFirst({
+        where: { id: patientId },
+        select: { id: true, firstName: true, lastName: true },
+      });
+      // El mismo nombre que lleva cada evento de la lista.
+      return p
+        ? { id: p.id, fullName: `${p.firstName} ${p.lastName}`.trim() }
+        : null;
+    });
+  }
+
   clinicTimeZone(tenantId: string, locationId?: string): Promise<string> {
     // Una sede pedida, aunque esté retirada (sus eventos siguen en el
     // registro); sin ella, la principal (R6).

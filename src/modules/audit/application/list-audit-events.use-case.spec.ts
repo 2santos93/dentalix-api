@@ -34,13 +34,20 @@ function setup(rows: AuditEventView[] = []) {
     >()
     .mockResolvedValue(rows);
   const clinicTimeZone = jest.fn().mockResolvedValue('America/Caracas');
+  const patientName = jest
+    .fn<
+      ReturnType<AuditEventRepository['patientName']>,
+      Parameters<AuditEventRepository['patientName']>
+    >()
+    .mockResolvedValue(null);
   const repo: AuditEventRepository = {
     insert: jest.fn(),
     list,
     clinicTimeZone,
+    patientName,
   };
   const useCase = new ListAuditEventsUseCase(repo, () => NOW);
-  return { repo: { list, clinicTimeZone }, useCase };
+  return { repo: { list, clinicTimeZone, patientName }, useCase };
 }
 
 describe('ListAuditEventsUseCase (DX-009)', () => {
@@ -57,7 +64,28 @@ describe('ListAuditEventsUseCase (DX-009)', () => {
       items: [],
       nextCursor: null,
       timeZone: 'America/Caracas',
+      patient: null,
     });
+    // Sin filtro por paciente no se busca ninguno.
+    expect(repo.patientName).not.toHaveBeenCalled();
+  });
+
+  it('DX-095: filtrando por paciente, la respuesta trae su nombre aunque no haya eventos', async () => {
+    const PATIENT = '00000000-0000-4000-8000-0000000000aa';
+    const { repo, useCase } = setup([]);
+    repo.patientName.mockResolvedValue({ id: PATIENT, fullName: 'Ana Pérez' });
+    const out = await useCase.execute({ tenantId: TENANT, patientId: PATIENT });
+    expect(repo.patientName).toHaveBeenCalledWith(TENANT, PATIENT);
+    expect(out.patient).toEqual({ id: PATIENT, fullName: 'Ana Pérez' });
+  });
+
+  it('DX-095: un paciente que no es de la clínica (RLS) queda sin nombre: null', async () => {
+    const { useCase } = setup([]);
+    const out = await useCase.execute({
+      tenantId: TENANT,
+      patientId: '00000000-0000-4000-8000-0000000000bb',
+    });
+    expect(out.patient).toBeNull();
   });
 
   it('pide una fila de más para saber si hay otra página, y no la devuelve', async () => {
