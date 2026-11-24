@@ -13,7 +13,8 @@ import type {
  * (los nombres de sedes, profesionales y pacientes los escribe la clínica).
  *  - El informe: una fila por sede y profesional, el subtotal de cada sede y
  *    el total, como la tabla; sin pacientes.
- *  - Una lista: sus pacientes con teléfono (la ficha ya lo enseña), sede y
+ *  - Una lista: sus pacientes con teléfono (vacío con baja de avisos, DX-128,
+ *    y la columna «Baja de avisos» lo explica), sede y
  *    profesional de la última visita y si tienen cita futura; las fechas, en
  *    la zona de su sede.
  */

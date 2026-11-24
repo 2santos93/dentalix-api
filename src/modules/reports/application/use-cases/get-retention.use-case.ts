@@ -368,7 +368,10 @@ function toItem(
   return {
     ...rest,
     providerName: providerName ?? UNNAMED_PROFESSIONAL,
-    // DX-128: con baja de avisos cuenta en la cifra, pero sin wa.me.
+    // DX-128: con baja de avisos cuenta en la cifra, pero no se ofrece el
+    // contacto (ni el número ni wa.me), como la lista de recall; la web lo
+    // explica con `reminderOptedOut`.
+    phone: r.reminderOptedOut ? null : r.phone,
     whatsApp: r.reminderOptedOut
       ? null
       : whatsAppDigits(r.phone, phoneRegionOrNull(phoneRegion)),

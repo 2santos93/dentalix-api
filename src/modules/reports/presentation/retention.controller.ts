@@ -139,7 +139,7 @@ export class RetentionController {
   @Get('retention/patients')
   @ApiOperation({
     summary: 'Retención: los pacientes que forman una cifra (paginado)',
-    description: `Los pacientes de la cifra \`segment\` con los mismos filtros que el informe; \`total\` es la cifra. Nombre, teléfono, wa.me (null con baja de avisos, DX-128), primera y última visita, sede y profesional de la última y si tiene cita futura. De la última visita más reciente a la más antigua (\`page\`/\`pageSize\`, 25 por defecto, máx. 100). Lleva datos de contacto: auditado (VIEW). ${SCOPE}`,
+    description: `Los pacientes de la cifra \`segment\` con los mismos filtros que el informe; \`total\` es la cifra. Nombre, teléfono y wa.me (los dos null con baja de avisos, DX-128, con \`reminderOptedOut\` para explicarlo), primera y última visita, sede y profesional de la última y si tiene cita futura. De la última visita más reciente a la más antigua (\`page\`/\`pageSize\`, 25 por defecto, máx. 100). Lleva datos de contacto: auditado (VIEW). ${SCOPE}`,
   })
   @ApiOkResponse({ type: RetentionPatientsReportDto })
   @ApiBadRequestResponse({ description: BAD_REQUEST })
@@ -164,7 +164,7 @@ export class RetentionController {
   @ApiOperation({
     summary:
       'Retención: los pacientes de una cifra en CSV (sin paginar; solo ADMIN)',
-    description: `Los pacientes de la cifra \`segment\` (como mucho ${RETENTION_CSV_MAX_ROWS}, los de visita más reciente; si hay más, lo avisa la cabecera), con nombre, teléfono, baja de avisos, primera y última visita (día en la zona de su sede), sede, profesional y cita futura. Lleva datos de contacto: solo ADMIN, y cada descarga deja un evento EXPORT en la auditoría. UTF-8 con BOM; celdas protegidas contra fórmulas.`,
+    description: `Los pacientes de la cifra \`segment\` (como mucho ${RETENTION_CSV_MAX_ROWS}, los de visita más reciente; si hay más, lo avisa la cabecera), con nombre, teléfono (vacío con baja de avisos), baja de avisos, primera y última visita (día en la zona de su sede), sede, profesional y cita futura. Lleva datos de contacto: solo ADMIN, y cada descarga deja un evento EXPORT en la auditoría. UTF-8 con BOM; celdas protegidas contra fórmulas.`,
   })
   @ApiProduces('text/csv')
   @ApiOkResponse(CSV_RESPONSE)

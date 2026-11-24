@@ -68,7 +68,8 @@ describe('CSV de «Retención» (DX-260)', () => {
         {
           patientId: 'p1',
           patientName: 'Ana Rondón',
-          phone: '+58 412 555 0101',
+          // Con baja de avisos el caso de uso ya lo deja en null.
+          phone: null,
           whatsApp: null,
           reminderOptedOut: true,
           firstVisitAt: new Date('2024-01-02T14:00:00Z'),
@@ -93,7 +94,7 @@ describe('CSV de «Retención» (DX-260)', () => {
     expect(csv).toContain('"Pacientes",2');
     expect(csv).toContain('"Aviso","Solo las 1 primeras filas de 2."');
     expect(csv).toContain(
-      `"Ana Rondón","'+58 412 555 0101","Sí","2024-01-02","2024-11-04","Sede Chacao","Dra. Pérez","No"`,
+      `"Ana Rondón","","Sí","2024-01-02","2024-11-04","Sede Chacao","Dra. Pérez","No"`,
     );
   });
 });

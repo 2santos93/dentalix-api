@@ -168,7 +168,7 @@ describe('«Retención» en la BD (DX-260, int)', () => {
     },
   );
 
-  it('la lista lleva contacto, última visita, sede, profesional y cita futura; con baja de avisos, sin wa.me', async () => {
+  it('la lista lleva contacto, última visita, sede, profesional y cita futura; con baja de avisos, sin teléfono ni wa.me', async () => {
     const [newOnes, activeEnd] = await context.run(a.tenantId, () =>
       Promise.all([
         useCase.patients({ ...input(), segment: 'new' }),
@@ -179,7 +179,8 @@ describe('«Retención» en la BD (DX-260, int)', () => {
     expect(n3).toMatchObject({
       reminderOptedOut: true,
       whatsApp: null,
-      phone: '+58 412 555 0101',
+      // Como recall: con baja de avisos, tampoco el número.
+      phone: null,
       hasUpcomingAppointment: false,
       locationId: a.norte,
       providerId: a.drNorte,
@@ -187,6 +188,7 @@ describe('«Retención» en la BD (DX-260, int)', () => {
     });
     const n1 = newOnes.items.find((i) => i.patientId === a.patients.N1)!;
     expect(n1.whatsApp).toBe('584125550101');
+    expect(n1.phone).toBe('+58 412 555 0101');
     expect(n1.firstVisitAt.toISOString()).toMatch(/^2026-02-02T14:/);
     expect(n1.lastVisitAt.toISOString()).toMatch(/^2026-03-02T14:/);
     const p8 = activeEnd.items.find((i) => i.patientId === a.patients.P8)!;

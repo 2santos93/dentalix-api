@@ -170,15 +170,23 @@ describe('GetRetentionUseCase (DX-260)', () => {
     expect(calls.map((c) => c.locationIds)).toEqual([[SUR], [NORTE]]);
   });
 
-  it('la lista: wa.me con la región de la sede; con baja de avisos, null', async () => {
+  it('la lista: wa.me con la región de la sede; con baja de avisos, sin teléfono ni wa.me', async () => {
     const { repo } = fakeRepo();
     const list = await new GetRetentionUseCase(repo, () => NOW).patients({
       ...base,
       segment: 'new',
     });
-    expect(list.items.map((i) => [i.patientId, i.whatsApp])).toEqual([
-      ['p1', '584125550101'],
-      ['p2', null],
+    expect(
+      list.items.map((i) => [
+        i.patientId,
+        i.phone,
+        i.whatsApp,
+        i.reminderOptedOut,
+      ]),
+    ).toEqual([
+      ['p1', '0412 555 0101', '584125550101', false],
+      // Con baja de avisos, ni teléfono ni wa.me (como recall).
+      ['p2', null, null, true],
     ]);
     expect(list.items[0].timeZone).toBe('America/Caracas');
     expect(list.definition.key).toBe('newPatients');

@@ -163,13 +163,18 @@ describe('Reportes › Retención (DX-260)', () => {
     },
   );
 
-  it('con baja de avisos cuenta en la cifra, pero sin wa.me; la cita futura se marca', async () => {
+  it('con baja de avisos cuenta en la cifra, pero sin teléfono ni wa.me; la cita futura se marca', async () => {
     const news = await list({ segment: 'new' });
     const n3 = news.items.find((i) => i.patientId === seeded.patients.N3)!;
-    expect(n3).toMatchObject({ reminderOptedOut: true, whatsApp: null });
+    expect(n3).toMatchObject({
+      reminderOptedOut: true,
+      phone: null,
+      whatsApp: null,
+    });
     const n2 = news.items.find((i) => i.patientId === seeded.patients.N2)!;
     expect(n2).toMatchObject({
       reminderOptedOut: false,
+      phone: '+58 412 555 0101',
       whatsApp: '584125550101',
       hasUpcomingAppointment: true,
     });
@@ -281,8 +286,17 @@ describe('Reportes › Retención (DX-260)', () => {
     expect(lost.text).toContain('"Pacientes",2');
     expect(lost.text).toContain('"Paciente P7 A"');
     expect(lost.text).toContain('"Paciente P9 A"');
+    // N3 (baja de avisos): en el CSV sin teléfono.
+    const noReturn = await get(
+      `${PATIENTS}.csv`,
+      { ...RETENTION_PERIOD, segment: 'new_no_return' },
+      a.adminToken,
+    ).expect(200);
+    expect(noReturn.text).toContain('"Paciente N3 A","","Sí",');
+    expect(noReturn.text).not.toContain('412 555');
     const events = await auditEvents(since);
     expect(events.map((e) => [e.action, e.resourceType])).toEqual([
+      ['EXPORT', 'PATIENT'],
       ['EXPORT', 'PATIENT'],
       ['EXPORT', 'PATIENT'],
     ]);

@@ -274,7 +274,12 @@ export class RetentionPatientDto {
   @ApiProperty()
   patientName!: string;
 
-  @ApiProperty({ type: String, nullable: true })
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'Teléfono de la ficha; null si no tiene o si se dio de baja de los avisos (`reminderOptedOut`, DX-128), como la lista de recall',
+  })
   phone!: string | null;
 
   @ApiProperty({
@@ -287,7 +292,7 @@ export class RetentionPatientDto {
 
   @ApiProperty({
     description:
-      'Baja de los avisos (DX-128): cuenta en la cifra, pero la web no ofrece wa.me',
+      'Baja de los avisos (DX-128): cuenta en la cifra, pero sin contacto (`phone` y `whatsApp` a null); la web dice por qué',
   })
   reminderOptedOut!: boolean;
 
