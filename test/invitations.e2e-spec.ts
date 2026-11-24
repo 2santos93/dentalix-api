@@ -220,6 +220,28 @@ describe('Staff invitations (e2e)', () => {
     expect(acceptBody.accessToken).toEqual(expect.any(String));
     expect(acceptBody.refreshToken).toEqual(expect.any(String));
 
+    // DX-095: aceptar abre sesión, y queda en la auditoría como un inicio de
+    // sesión del nuevo miembro (motivo INVITATION_LOGIN), con su rol.
+    const newMember = await raw.user.findUniqueOrThrow({
+      where: { email: newEmail },
+      select: { id: true },
+    });
+    const logins = await raw.auditEvent.findMany({
+      where: {
+        tenantId: clinicA.tenantId,
+        action: 'LOGIN',
+        actorUserId: newMember.id,
+      },
+      select: { actorRole: true, resourceType: true, metadata: true },
+    });
+    expect(logins).toEqual([
+      {
+        actorRole: ClinicRole.DENTIST,
+        resourceType: 'SESSION',
+        metadata: { reason: 'INVITATION_LOGIN' },
+      },
+    ]);
+
     // Aparece en GET /staff con el rol invitado.
     const staffList = await request(app.getHttpServer())
       .get('/api/v1/staff')
