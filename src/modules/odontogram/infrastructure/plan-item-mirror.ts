@@ -1,4 +1,7 @@
-import { UnprocessableEntityException } from '@nestjs/common';
+import {
+  ConflictException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import {
   CatalogKind,
   Prisma,
@@ -104,6 +107,41 @@ export async function mirrorPlanItemIntoOdontogram(
   return { kind: 'CREATED', recordId: row.id, replacesRecordId };
 }
 
+/**
+ * El «hoy» del espejo: el día civil en la zona de la sede de la petición (o la
+ * principal), como el alta manual. Una sede sin zona válida no bloquea el DONE
+ * (el control postoperatorio tampoco lo hace, DX-566): en vez de inventar una
+ * zona, se toman los dos días civiles que «ahora» puede ser en cualquier lugar
+ * (UTC−12 y UTC+14; si coinciden, uno).
+ */
+async function mirrorDays(
+  tx: Prisma.TransactionClient,
+  mirror: PlanItemMirror,
+): Promise<string[]> {
+  try {
+    const { timeZone } = await resolveReferenceLocation(
+      tx,
+      mirror.tenantId,
+      mirror.locationId,
+    );
+    return [civilDateIn(mirror.now, timeZone)];
+  } catch (err) {
+    const code =
+      err instanceof ConflictException
+        ? (err.getResponse() as { code?: string }).code
+        : undefined;
+    if (code !== 'LOCATION_TIMEZONE_REQUIRED' && code !== 'LOCATION_REQUIRED') {
+      throw err;
+    }
+    return [
+      ...new Set([
+        civilDateIn(mirror.now, 'Etc/GMT+12'),
+        civilDateIn(mirror.now, 'Etc/GMT-14'),
+      ]),
+    ];
+  }
+}
+
 async function assertMirrorFitsDentition(
   tx: Prisma.TransactionClient,
   mirror: PlanItemMirror,
@@ -121,17 +159,18 @@ async function assertMirrorFitsDentition(
     },
     orderBy: [{ recordedAt: 'asc' }, { id: 'asc' }],
   });
-  const { timeZone } = await resolveReferenceLocation(
-    tx,
-    mirror.tenantId,
-    mirror.locationId,
-  );
-  const dentition = toothDentitionConflict({
-    toothNumber: mirror.toothNumber,
-    birthDate: patient?.birthDate ?? null,
-    onDate: civilDateIn(mirror.now, timeZone),
-    events,
-  });
+  const conflictOn = (onDate: string) =>
+    toothDentitionConflict({
+      toothNumber: mirror.toothNumber,
+      birthDate: patient?.birthDate ?? null,
+      onDate,
+      events,
+    });
+  const days = await mirrorDays(tx, mirror);
+  // Con la zona de la sede, un solo día. Sin ella, rechaza solo si el diente no
+  // cabe en NINGÚN día posible: nunca bloquea un DONE por falta de zona.
+  const conflicts = days.map(conflictOn);
+  const dentition = conflicts.every((c) => c !== null) ? conflicts[0] : null;
   if (dentition !== null) {
     throw new UnprocessableEntityException({
       statusCode: 422,

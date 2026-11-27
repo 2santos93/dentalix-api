@@ -253,6 +253,53 @@ describe('espejo plan → odontograma (DX-132, int)', () => {
     });
   });
 
+  describe('sede sin zona horaria (no bloquea el DONE, como DX-566)', () => {
+    let sinZona: string;
+
+    beforeAll(async () => {
+      sinZona = (
+        await raw.location.create({
+          data: locationData(REGIONAL_CARACAS_FIXTURE, {
+            tenantId: s.tenantId,
+            name: 'Sede sin zona',
+            timeZone: null,
+          }),
+        })
+      ).id;
+    });
+
+    function doneAt(itemId: string, patientId: string) {
+      return tenantContext.run(s.tenantId, sinZona, () =>
+        plans.updateItem(
+          itemId,
+          () => ({
+            patch: { status: DONE },
+            mirror: {
+              patientId,
+              kind: CatalogKind.PROCEDURE,
+              performedById: s.userId,
+            },
+          }),
+          audit(),
+        ),
+      );
+    }
+
+    it('un temporal que cabe se copia aunque la sede no tenga zona', async () => {
+      const itemId = await acceptedItem(s.childPlanId, '52');
+      expect((await doneAt(itemId, s.childId)).status).toBe(DONE);
+      expect(await copiesOf(itemId)).toHaveLength(1);
+    });
+
+    it('un diente que no cabe en ningún día posible sigue dando 422', async () => {
+      const itemId = await acceptedItem(s.adultPlanId, '52');
+      await expect(doneAt(itemId, s.adultId)).rejects.toMatchObject({
+        response: { code: 'TOOTH_DENTITION_MISMATCH' },
+      });
+      expect(await copiesOf(itemId)).toHaveLength(0);
+    });
+  });
+
   describe('re-copia tras una anulación (append-only)', () => {
     it('anulada la copia, volver a DONE inserta otra que la sustituye; las filas previas no cambian', async () => {
       const itemId = await acceptedItem(s.childPlanId, '55');
