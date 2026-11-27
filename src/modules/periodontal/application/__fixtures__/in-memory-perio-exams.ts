@@ -1,5 +1,9 @@
 import type { PerioExamRecord } from '../../domain/entities/perio-exam.entity';
-import { countPerioSites } from '../../domain/perio-measures';
+import {
+  DEFAULT_PERIO_THRESHOLDS,
+  countPerioSites,
+  type PerioThresholds,
+} from '../../domain/perio-measures';
 import type {
   CreatePerioExamRepoInput,
   PerioExamRepository,
@@ -13,6 +17,8 @@ export class InMemoryPerioExamRepository implements PerioExamRepository {
   readonly exams: PerioExamRecord[] = [];
   /** Zona de la sede activa (por defecto, la de una sede sin horario). */
   timeZone = 'America/Caracas';
+  /** Umbrales de la clínica (DX-066). */
+  perioThresholds: PerioThresholds = { ...DEFAULT_PERIO_THRESHOLDS };
   private seq = 0;
 
   clinicTimeZone(): Promise<string> {
@@ -32,15 +38,49 @@ export class InMemoryPerioExamRepository implements PerioExamRepository {
   listSummaries(
     patientId: string,
     limit: number,
+    thresholds: PerioThresholds,
   ): Promise<PerioExamSummaryRow[]> {
     return Promise.resolve(
       this.byPatient(patientId)
         .slice(0, limit)
         .map(({ sites, teeth, ...header }) => ({
           ...header,
-          counts: countPerioSites(sites, teeth),
+          counts: countPerioSites(sites, teeth, thresholds),
         })),
     );
+  }
+
+  findManyByIds(
+    patientId: string,
+    ids: readonly string[],
+  ): Promise<PerioExamRecord[]> {
+    return Promise.resolve(
+      this.exams.filter((e) => e.patientId === patientId && ids.includes(e.id)),
+    );
+  }
+
+  updateNotes(
+    patientId: string,
+    id: string,
+    notes: string | null,
+  ): Promise<PerioWriteResult> {
+    const exam = this.find(patientId, id);
+    if (!exam) return Promise.resolve('not_found');
+    if (exam.status === 'FINAL') return Promise.resolve('final');
+    exam.notes = notes;
+    return Promise.resolve('ok');
+  }
+
+  thresholds(): Promise<PerioThresholds> {
+    return Promise.resolve({ ...this.perioThresholds });
+  }
+
+  setThresholds(
+    next: PerioThresholds,
+  ): Promise<{ before: PerioThresholds; after: PerioThresholds }> {
+    const before = { ...this.perioThresholds };
+    this.perioThresholds = { ...next };
+    return Promise.resolve({ before, after: { ...next } });
   }
 
   findById(patientId: string, id: string): Promise<PerioExamRecord | null> {

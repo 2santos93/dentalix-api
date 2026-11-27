@@ -1,4 +1,4 @@
-import type { PerioSiteCounts } from '../perio-measures';
+import type { PerioSiteCounts, PerioThresholds } from '../perio-measures';
 import type {
   PerioExamHeader,
   PerioExamRecord,
@@ -55,8 +55,18 @@ export interface PerioExamRepository {
   listSummaries(
     patientId: string,
     limit: number,
+    thresholds: PerioThresholds,
   ): Promise<PerioExamSummaryRow[]>;
   findById(patientId: string, id: string): Promise<PerioExamRecord | null>;
+  /**
+   * DX-066: los exámenes (no borrados) del paciente con esos ids, con sus
+   * medidas. Los que no existen, son de otro paciente o de otra clínica (RLS)
+   * no vienen.
+   */
+  findManyByIds(
+    patientId: string,
+    ids: readonly string[],
+  ): Promise<PerioExamRecord[]>;
   /** El examen más reciente (por fecha) del paciente, o `null`. */
   findLatest(patientId: string): Promise<PerioExamRecord | null>;
   create(input: CreatePerioExamRepoInput): Promise<PerioExamRecord>;
@@ -66,7 +76,22 @@ export interface PerioExamRepository {
     id: string,
     input: SavePerioMeasuresRepoInput,
   ): Promise<PerioWriteResult>;
+  /** DX-066: cambia solo las notas, si el examen sigue en DRAFT. */
+  updateNotes(
+    patientId: string,
+    id: string,
+    notes: string | null,
+  ): Promise<PerioWriteResult>;
   finalize(patientId: string, id: string, at: Date): Promise<PerioWriteResult>;
   /** Borrado blando de un DRAFT. */
   deleteDraft(patientId: string, id: string): Promise<PerioWriteResult>;
+  /** DX-066: umbrales de sondaje de la clínica del contexto. */
+  thresholds(): Promise<PerioThresholds>;
+  /**
+   * DX-066: guarda los umbrales con la fila de la clínica bloqueada y
+   * devuelve el antes y el después (para la auditoría).
+   */
+  setThresholds(
+    next: PerioThresholds,
+  ): Promise<{ before: PerioThresholds; after: PerioThresholds }>;
 }

@@ -17,6 +17,95 @@ export const PERIO_SITES: readonly PerioSite[] = [
 export const PROBING_RANGE = { min: 0, max: 19 } as const;
 export const RECESSION_RANGE = { min: -5, max: 19 } as const;
 export const FURCATION_MAX = 3;
+
+/**
+ * DX-066: sitios donde la furca tiene sentido. Molares superiores (16–18,
+ * 26–28): vestibular (B) y las dos entradas palatinas, mesiopalatina (MP, que
+ * se guarda en el sitio ML) y distopalatina (DP, en DL). Molares inferiores
+ * (36–38, 46–48): vestibular (B) y lingual (L). En el resto de dientes no hay
+ * furca que registrar.
+ */
+export const UPPER_MOLAR_FURCATION_SITES: readonly PerioSite[] = [
+  PerioSite.B,
+  PerioSite.ML,
+  PerioSite.DL,
+];
+export const LOWER_MOLAR_FURCATION_SITES: readonly PerioSite[] = [
+  PerioSite.B,
+  PerioSite.L,
+];
+
+/** Sitios del diente donde se puede registrar furca (vacío: ninguno). */
+export function furcationSites(fdi: number): readonly PerioSite[] {
+  if (!isPermanentFdi(fdi) || fdi % 10 < 6) return [];
+  const quadrant = Math.floor(fdi / 10);
+  return quadrant <= 2
+    ? UPPER_MOLAR_FURCATION_SITES
+    : LOWER_MOLAR_FURCATION_SITES;
+}
+
+export const FURCATION_SITE_MESSAGE =
+  'la furca solo se registra en molares: superiores en B, MP (sitio ML) y DP (sitio DL); inferiores en B y L';
+
+/**
+ * DX-066: umbrales de sondaje de la clínica. `pdAlertMm` (4 de fábrica) marca
+ * la bolsa en alerta y `pdSevereMm` (6) la severa; colorean la carta y cuentan
+ * en los índices (`sitesAlertOrMore`, `sitesSevereOrMore`). Alerta < severo.
+ */
+export interface PerioThresholds {
+  pdAlertMm: number;
+  pdSevereMm: number;
+}
+
+export const DEFAULT_PERIO_THRESHOLDS: PerioThresholds = {
+  pdAlertMm: 4,
+  pdSevereMm: 6,
+};
+export const PD_ALERT_RANGE = { min: 2, max: 10 } as const;
+export const PD_SEVERE_RANGE = { min: 3, max: 12 } as const;
+
+export const PERIO_THRESHOLDS_MESSAGES = {
+  alert: `El umbral de alerta debe ser un entero entre ${PD_ALERT_RANGE.min} y ${PD_ALERT_RANGE.max} mm`,
+  severe: `El umbral severo debe ser un entero entre ${PD_SEVERE_RANGE.min} y ${PD_SEVERE_RANGE.max} mm`,
+  order: 'El umbral de alerta debe ser menor que el severo',
+} as const;
+
+/** Errores en español (vacío si los umbrales son válidos). */
+export function validatePerioThresholds(input: {
+  pdAlertMm: unknown;
+  pdSevereMm: unknown;
+}): string[] {
+  const errors: string[] = [];
+  const alertOk = isIntIn(input.pdAlertMm, PD_ALERT_RANGE);
+  const severeOk = isIntIn(input.pdSevereMm, PD_SEVERE_RANGE);
+  if (!alertOk) errors.push(PERIO_THRESHOLDS_MESSAGES.alert);
+  if (!severeOk) errors.push(PERIO_THRESHOLDS_MESSAGES.severe);
+  if (
+    alertOk &&
+    severeOk &&
+    (input.pdAlertMm as number) >= (input.pdSevereMm as number)
+  ) {
+    errors.push(PERIO_THRESHOLDS_MESSAGES.order);
+  }
+  return errors;
+}
+
+function isIntIn(
+  value: unknown,
+  range: { min: number; max: number },
+): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= range.min &&
+    value <= range.max
+  );
+}
+
+/** Código de auditoría de los umbrales (`PD_A4_S6`). */
+export function perioThresholdsCode(t: PerioThresholds): string {
+  return `PD_A${t.pdAlertMm}_S${t.pdSevereMm}`;
+}
 export const MOBILITY_MAX = 3;
 /** 32 dientes x 6 sitios. */
 export const MAX_SITES_PER_REQUEST = 192;
@@ -103,6 +192,10 @@ export interface PerioSiteCounts {
   plaqueSites: number;
   sites4mmOrMore: number;
   sites6mmOrMore: number;
+  /** DX-066: sitios con sondaje ≥ el umbral de alerta de la clínica. */
+  sitesAlertOrMore: number;
+  /** DX-066: sitios con sondaje ≥ el umbral severo de la clínica. */
+  sitesSevereOrMore: number;
 }
 
 /**
@@ -112,6 +205,7 @@ export interface PerioSiteCounts {
 export function countPerioSites(
   sites: readonly PerioSiteMeasure[],
   teeth: readonly PerioToothMeasure[],
+  thresholds: PerioThresholds = DEFAULT_PERIO_THRESHOLDS,
 ): PerioSiteCounts {
   const skipped = new Set(
     teeth.filter((t) => t.skipped).map((t) => t.toothFdi),
@@ -125,6 +219,12 @@ export function countPerioSites(
     plaqueSites: examined.filter((s) => s.plaque).length,
     sites4mmOrMore: examined.filter((s) => (s.probingMm ?? 0) >= 4).length,
     sites6mmOrMore: examined.filter((s) => (s.probingMm ?? 0) >= 6).length,
+    sitesAlertOrMore: examined.filter(
+      (s) => (s.probingMm ?? 0) >= thresholds.pdAlertMm,
+    ).length,
+    sitesSevereOrMore: examined.filter(
+      (s) => (s.probingMm ?? 0) >= thresholds.pdSevereMm,
+    ).length,
   };
 }
 
@@ -137,18 +237,22 @@ export function indicesFromCounts(counts: PerioSiteCounts): PerioIndices {
     plaquePercent: percent(counts.plaqueSites, total),
     sites4mmOrMore: counts.sites4mmOrMore,
     sites6mmOrMore: counts.sites6mmOrMore,
+    sitesAlertOrMore: counts.sitesAlertOrMore,
+    sitesSevereOrMore: counts.sitesSevereOrMore,
   };
 }
 
 /**
- * Índices del examen: % BOP, % placa y nº de sitios con sondaje ≥4 y ≥6 mm,
- * EXCLUYENDO los dientes omitidos (ausentes / no sondables).
+ * Índices del examen: % BOP, % placa, nº de sitios con sondaje ≥4 y ≥6 mm y
+ * ≥ los umbrales de la clínica, EXCLUYENDO los dientes omitidos (ausentes /
+ * no sondables).
  */
 export function computePerioIndices(
   sites: readonly PerioSiteMeasure[],
   teeth: readonly PerioToothMeasure[],
+  thresholds: PerioThresholds = DEFAULT_PERIO_THRESHOLDS,
 ): PerioIndices {
-  return indicesFromCounts(countPerioSites(sites, teeth));
+  return indicesFromCounts(countPerioSites(sites, teeth, thresholds));
 }
 
 function inRange(
@@ -204,6 +308,11 @@ export function validatePerioMeasures(input: {
     }
     if (!inRange(s.furcation, 0, FURCATION_MAX)) {
       errors.push(`${where}: la furca debe ser 0, 1, 2 o 3`);
+    } else if (
+      s.furcation !== null &&
+      !furcationSites(s.toothFdi).includes(s.site)
+    ) {
+      errors.push(`${where}: ${FURCATION_SITE_MESSAGE}`);
     }
   }
   const seenTeeth = new Set<number>();

@@ -36,8 +36,10 @@ interface SiteBody {
   probingMm: number | null;
   recessionMm: number | null;
   calMm: number | null;
+  furcation: number | null;
   bleeding: boolean;
   plaque: boolean;
+  calculus: boolean;
 }
 
 interface ExamBody {
@@ -56,7 +58,10 @@ interface ExamBody {
     plaquePercent: number;
     sites4mmOrMore: number;
     sites6mmOrMore: number;
+    sitesAlertOrMore: number;
+    sitesSevereOrMore: number;
   };
+  thresholds: { pdAlertMm: number; pdSevereMm: number };
 }
 
 async function cleanup(): Promise<void> {
@@ -88,6 +93,8 @@ describe('Periodontograma — /patients/:id/perio-exams (e2e)', () => {
         withAuth(request(server()).post(`/api/v1${path}`)).send(body),
       put: (path: string, body: object) =>
         withAuth(request(server()).put(`/api/v1${path}`)).send(body),
+      patch: (path: string, body: object) =>
+        withAuth(request(server()).patch(`/api/v1${path}`)).send(body),
       delete: (path: string) =>
         withAuth(request(server()).delete(`/api/v1${path}`)),
     };
@@ -201,6 +208,45 @@ describe('Periodontograma — /patients/:id/perio-exams (e2e)', () => {
     return (res.body as ExamBody).id;
   }
 
+  /**
+   * DX-066: `n` exámenes FINAL del paciente, un mes entre uno y otro, con el
+   * sondaje del 16 MB subiendo 1 mm por examen y el NIC 2 mm (recesión +1).
+   */
+  async function finalExamsOf(
+    session: Session,
+    patientId: string,
+    n: number,
+    token = session.accessToken,
+  ): Promise<string[]> {
+    const ids: string[] = [];
+    for (let i = 0; i < n; i += 1) {
+      const created = await as(session, token)
+        .post(path(patientId), { examDate: `2026-0${i + 1}-20` })
+        .expect(201);
+      const id = (created.body as ExamBody).id;
+      await as(session, token)
+        .put(path(patientId, `/${id}/measures`), {
+          sites: [
+            {
+              toothFdi: 16,
+              site: 'MB',
+              probingMm: 3 + i,
+              recessionMm: i,
+              bleeding: i % 2 === 0,
+            },
+            { toothFdi: 21, site: 'B', probingMm: 5 - i },
+          ],
+          teeth: [],
+        })
+        .expect(200);
+      await as(session, token)
+        .post(path(patientId, `/${id}/finalize`))
+        .expect(200);
+      ids.push(id);
+    }
+    return ids;
+  }
+
   it('el dentista crea un DRAFT; el autor sale del token', async () => {
     const res = await as(clinicA, dentistA.token)
       .post(path(patientA), { examDate: '2026-04-10', notes: 'Inicial' })
@@ -252,7 +298,10 @@ describe('Periodontograma — /patients/:id/perio-exams (e2e)', () => {
       plaquePercent: 33.3,
       sites4mmOrMore: 2,
       sites6mmOrMore: 1,
+      sitesAlertOrMore: 2,
+      sitesSevereOrMore: 1,
     });
+    expect(exam.thresholds).toEqual({ pdAlertMm: 4, pdSevereMm: 6 });
 
     // El asistente (higienista) también escribe; un sitio vacío borra.
     const again = await as(clinicA, assistantA)
@@ -365,7 +414,8 @@ describe('Periodontograma — /patients/:id/perio-exams (e2e)', () => {
         recessionMm: ((t * i) % 7) - 2,
         bleeding: (t + i) % 3 === 0,
         plaque: (t + i) % 4 === 0,
-        furcation: i === 0 ? t % 4 : null,
+        // DX-066: furca solo donde tiene sentido (vestibular de molares).
+        furcation: site === 'B' && toothFdi % 10 >= 6 ? t % 4 : null,
       })),
     );
     const saved = await as(clinicA, assistantA)
@@ -443,8 +493,24 @@ describe('Periodontograma — /patients/:id/perio-exams (e2e)', () => {
   // ISOLATION_COVERS: PUT /patients/:patientId/perio-exams/:id/measures
   // ISOLATION_COVERS: POST /patients/:patientId/perio-exams/:id/finalize
   // ISOLATION_COVERS: DELETE /patients/:patientId/perio-exams/:id
+  // ISOLATION_COVERS: PATCH /patients/:patientId/perio-exams/:id
+  // ISOLATION_COVERS: GET /patients/:patientId/perio-exams/compare
   it('aislamiento: la clínica B no lee ni escribe exámenes de pacientes de A', async () => {
     const examId = await draftExamOfA();
+    // DX-066: ni cambia las notas ni compara (ni desde su paciente).
+    const finalIds = await finalExamsOf(clinicA, patientA, 2);
+    await as(clinicB)
+      .patch(path(patientA, `/${examId}`), { notes: 'Intruso' })
+      .expect(404);
+    await as(clinicB)
+      .get(path(patientA, `/compare?examIds=${finalIds.join(',')}`))
+      .expect(404);
+    await as(clinicB)
+      .get(path(patientB, `/compare?examIds=${finalIds.join(',')}`))
+      .expect(404);
+    expect(
+      (await raw.perioExam.findUniqueOrThrow({ where: { id: examId } })).notes,
+    ).toBe('Propio');
     await as(clinicB).get(path(patientA)).expect(404);
     await as(clinicB).post(path(patientA)).expect(404);
     await as(clinicB)
@@ -473,5 +539,398 @@ describe('Periodontograma — /patients/:id/perio-exams (e2e)', () => {
     expect(
       await raw.perioExam.count({ where: { tenantId: clinicB.tenantId } }),
     ).toBe(0);
+  });
+
+  describe('DX-066: deudas de DX-007', () => {
+    let patientC: string;
+
+    beforeAll(async () => {
+      patientC = await createPatient(clinicA, 'Diana', 'PERIO-A-3');
+    });
+
+    it('PATCH de notas: cambia y borra las de un DRAFT; un FINAL da 409 en español', async () => {
+      const created = await as(clinicA, dentistA.token)
+        .post(path(patientC), { examDate: '2026-05-02', notes: 'Primera' })
+        .expect(201);
+      const id = (created.body as ExamBody).id;
+      const patched = await as(clinicA, assistantA)
+        .patch(path(patientC, `/${id}`), {
+          notes: '  Control en 3 meses tras raspado  ',
+        })
+        .expect(200);
+      expect((patched.body as ExamBody).notes).toBe(
+        'Control en 3 meses tras raspado',
+      );
+      const cleared = await as(clinicA, dentistA.token)
+        .patch(path(patientC, `/${id}`), { notes: null })
+        .expect(200);
+      expect((cleared.body as ExamBody).notes).toBeNull();
+      const missing = await as(clinicA)
+        .patch(path(patientC, `/${id}`), {})
+        .expect(400);
+      expect(JSON.stringify(missing.body)).toContain(
+        'Faltan las notas (null para borrarlas)',
+      );
+      const tooLong = await as(clinicA)
+        .patch(path(patientC, `/${id}`), { notes: 'x'.repeat(2001) })
+        .expect(400);
+      expect(JSON.stringify(tooLong.body)).toContain(
+        'Las notas no pueden superar 2000 caracteres',
+      );
+      await as(clinicA, receptionA)
+        .patch(path(patientC, `/${id}`), { notes: 'Recepción' })
+        .expect(403);
+
+      await as(clinicA)
+        .patch(path(patientC, `/${id}`), { notes: 'Antes de cerrar' })
+        .expect(200);
+      await as(clinicA)
+        .post(path(patientC, `/${id}/finalize`))
+        .expect(200);
+      const locked = await as(clinicA, dentistA.token)
+        .patch(path(patientC, `/${id}`), { notes: 'Después de cerrar' })
+        .expect(409);
+      expect((locked.body as { message: string }).message).toBe(
+        'El examen está finalizado: no se puede modificar ni borrar. Para corregirlo crea un examen nuevo.',
+      );
+      expect(
+        (await raw.perioExam.findUniqueOrThrow({ where: { id } })).notes,
+      ).toBe('Antes de cerrar');
+      // Otro paciente de la misma clínica: 404.
+      await as(clinicA)
+        .patch(path(patientA, `/${id}`), { notes: 'x' })
+        .expect(404);
+      const events = await raw.auditEvent.findMany({
+        where: {
+          tenantId: clinicA.tenantId,
+          resourceType: 'PERIO_EXAM',
+          resourceId: id,
+          action: 'UPDATE',
+        },
+      });
+      expect(
+        events.filter(
+          (e) => (e.metadata as { reason?: string }).reason === 'PERIO_NOTES',
+        ).length,
+      ).toBeGreaterThanOrEqual(3);
+    });
+
+    it('furca MP/DP en molares superiores y CALC se capturan y persisten; donde no tiene sentido, 400', async () => {
+      const created = await as(clinicA, dentistA.token)
+        .post(path(patientC), { examDate: '2026-05-03' })
+        .expect(201);
+      const id = (created.body as ExamBody).id;
+      await as(clinicA, assistantA)
+        .put(path(patientC, `/${id}/measures`), {
+          sites: [
+            { toothFdi: 26, site: 'B', probingMm: 4, furcation: 3 },
+            { toothFdi: 26, site: 'ML', probingMm: 5, furcation: 2 },
+            { toothFdi: 26, site: 'DL', probingMm: 6, furcation: 1 },
+            { toothFdi: 17, site: 'ML', furcation: 0 },
+            { toothFdi: 46, site: 'L', probingMm: 3, furcation: 1 },
+            { toothFdi: 31, site: 'L', probingMm: 2, calculus: true },
+            { toothFdi: 41, site: 'B', calculus: true, plaque: true },
+          ],
+          teeth: [],
+        })
+        .expect(200);
+      const reloaded = await as(clinicA)
+        .get(path(patientC, `/${id}`))
+        .expect(200);
+      const sites = (reloaded.body as ExamBody).sites;
+      const at = (fdi: number, s: string) =>
+        sites.find((x) => x.toothFdi === fdi && x.site === s);
+      expect(at(26, 'B')?.furcation).toBe(3);
+      expect(at(26, 'ML')?.furcation).toBe(2);
+      expect(at(26, 'DL')?.furcation).toBe(1);
+      expect(at(17, 'ML')?.furcation).toBe(0);
+      expect(at(46, 'L')?.furcation).toBe(1);
+      expect(at(31, 'L')).toMatchObject({ calculus: true, probingMm: 2 });
+      expect(at(41, 'B')).toMatchObject({ calculus: true, plaque: true });
+      // En la base: CALC es el bit 8 del bitmask.
+      const row = await raw.perioSiteMeasure.findFirstOrThrow({
+        where: { examId: id, toothFdi: 41, site: 'B' },
+      });
+      expect(row.flags & 8).toBe(8);
+
+      const cases: [object, string][] = [
+        [
+          { toothFdi: 11, site: 'B', furcation: 1 },
+          'Diente 11, sitio B: la furca solo se registra en molares: superiores en B, MP (sitio ML) y DP (sitio DL); inferiores en B y L',
+        ],
+        [{ toothFdi: 16, site: 'L', furcation: 1 }, 'Diente 16, sitio L:'],
+        [{ toothFdi: 36, site: 'ML', furcation: 2 }, 'Diente 36, sitio ML:'],
+        [{ toothFdi: 14, site: 'MB', furcation: 1 }, 'Diente 14, sitio MB:'],
+      ];
+      for (const [site, message] of cases) {
+        const res = await as(clinicA)
+          .put(path(patientC, `/${id}/measures`), { sites: [site], teeth: [] })
+          .expect(400);
+        expect((res.body as { message: string }).message).toContain(message);
+      }
+      // Limpiar la furca (null) vale en cualquier sitio.
+      await as(clinicA)
+        .put(path(patientC, `/${id}/measures`), {
+          sites: [{ toothFdi: 26, site: 'ML', probingMm: 5, furcation: null }],
+          teeth: [],
+        })
+        .expect(200);
+    });
+
+    it('compara 2–4 exámenes FINAL con Δ por sitio, en orden cronológico', async () => {
+      const patientD = await createPatient(clinicA, 'Elena', 'PERIO-A-4');
+      const ids = await finalExamsOf(clinicA, patientD, 4, dentistA.token);
+      type Comparison = {
+        thresholds: { pdAlertMm: number; pdSevereMm: number };
+        worseningMm: number;
+        exams: { id: string; examDate: string; indices: ExamBody['indices'] }[];
+        sites: {
+          toothFdi: number;
+          site: string;
+          values: {
+            probingMm: number | null;
+            calMm: number | null;
+            deltaProbingMm: number | null;
+            deltaCalMm: number | null;
+          }[];
+          deltaProbingMm: number | null;
+          deltaCalMm: number | null;
+          worsened: boolean;
+          improved: boolean;
+        }[];
+      };
+      // Desordenados y separados por comas.
+      const four = await as(clinicA, assistantA)
+        .get(
+          path(
+            patientD,
+            `/compare?examIds=${[ids[2], ids[0], ids[3], ids[1]].join(',')}`,
+          ),
+        )
+        .expect(200);
+      const body = four.body as Comparison;
+      expect(body.exams.map((e) => e.id)).toEqual(ids);
+      expect(body.exams.map((e) => e.examDate)).toEqual([
+        '2026-01-20',
+        '2026-02-20',
+        '2026-03-20',
+        '2026-04-20',
+      ]);
+      expect(body.thresholds).toEqual({ pdAlertMm: 4, pdSevereMm: 6 });
+      expect(body.worseningMm).toBe(2);
+      expect(body.sites.map((s) => `${s.toothFdi}${s.site}`)).toEqual([
+        '16MB',
+        '21B',
+      ]);
+      const [mb, b21] = body.sites;
+      expect(mb.values.map((v) => v.probingMm)).toEqual([3, 4, 5, 6]);
+      expect(mb.values.map((v) => v.calMm)).toEqual([3, 5, 7, 9]);
+      expect(mb.values.map((v) => v.deltaProbingMm)).toEqual([null, 1, 1, 1]);
+      expect(mb.values.map((v) => v.deltaCalMm)).toEqual([null, 2, 2, 2]);
+      expect(mb).toMatchObject({
+        deltaProbingMm: 3,
+        deltaCalMm: 6,
+        worsened: true,
+        improved: false,
+      });
+      expect(b21).toMatchObject({ deltaProbingMm: -3, improved: true });
+      // Evolución: BOP% y sitios ≥ alerta / ≥ severo por examen.
+      expect(body.exams.map((e) => e.indices.bopPercent)).toEqual([
+        50, 0, 50, 0,
+      ]);
+      expect(body.exams.map((e) => e.indices.sitesAlertOrMore)).toEqual([
+        1, 2, 1, 1,
+      ]);
+      expect(body.exams.map((e) => e.indices.sitesSevereOrMore)).toEqual([
+        0, 0, 0, 1,
+      ]);
+
+      // Dos, con el parámetro repetido: Δ de 1 mm no es empeoramiento.
+      const two = await as(clinicA, dentistA.token)
+        .get(path(patientD, `/compare?examIds=${ids[0]}&examIds=${ids[1]}`))
+        .expect(200);
+      expect((two.body as Comparison).sites[0]).toMatchObject({
+        deltaProbingMm: 1,
+        deltaCalMm: 2,
+        worsened: true,
+      });
+      expect((two.body as Comparison).sites[1]).toMatchObject({
+        deltaProbingMm: -1,
+        worsened: false,
+        improved: false,
+      });
+      const three = await as(clinicA)
+        .get(path(patientD, `/compare?examIds=${ids.slice(0, 3).join(',')}`))
+        .expect(200);
+      expect((three.body as Comparison).exams).toHaveLength(3);
+
+      const draft = await as(clinicA)
+        .post(path(patientD), { examDate: '2026-05-20' })
+        .expect(201);
+      const draftId = (draft.body as ExamBody).id;
+      const other = await finalExamsOf(clinicA, patientC, 1);
+      const bad: [string, number, string][] = [
+        [ids[0], 400, 'Elige entre 2 y 4 exámenes para comparar'],
+        [
+          [...ids, other[0]].join(','),
+          400,
+          'Elige entre 2 y 4 exámenes para comparar',
+        ],
+        [
+          `${ids[0]},no-es-uuid`,
+          400,
+          'Cada examen a comparar debe ser un identificador válido',
+        ],
+        [
+          `${ids[0]},${ids[0]}`,
+          400,
+          'Un examen está repetido en la comparación',
+        ],
+        [
+          `${ids[0]},${draftId}`,
+          400,
+          'Solo se comparan exámenes finalizados: finaliza el borrador o quítalo de la comparación',
+        ],
+        // Examen de otro paciente de la misma clínica.
+        [`${ids[0]},${other[0]}`, 404, 'Examen periodontal no encontrado'],
+      ];
+      for (const [query, status, message] of bad) {
+        const res = await as(clinicA)
+          .get(path(patientD, `/compare?examIds=${query}`))
+          .expect(status);
+        expect(JSON.stringify(res.body)).toContain(message);
+      }
+      await as(clinicA).get(path(patientD, '/compare')).expect(400);
+      await as(clinicA, receptionA)
+        .get(path(patientD, `/compare?examIds=${ids.slice(0, 2).join(',')}`))
+        .expect(403);
+      const audited = await raw.auditEvent.findMany({
+        where: {
+          tenantId: clinicA.tenantId,
+          resourceType: 'PERIO_EXAM',
+          action: 'VIEW',
+        },
+      });
+      expect(
+        audited.some(
+          (e) =>
+            (e.metadata as { reason?: string }).reason === 'PERIO_COMPARISON',
+        ),
+      ).toBe(true);
+    });
+
+    it('umbrales: los leen los clínicos, los cambia solo ADMIN (auditado) y colorean índices y comparación', async () => {
+      const settings = '/perio/settings';
+      const read = await as(clinicA, dentistA.token).get(settings).expect(200);
+      expect(read.body).toEqual({ pdAlertMm: 4, pdSevereMm: 6 });
+      await as(clinicA, assistantA).get(settings).expect(200);
+      await as(clinicA, receptionA).get(settings).expect(403);
+      const denied = await as(clinicA, dentistA.token)
+        .put(settings, { pdAlertMm: 5 })
+        .expect(403);
+      expect((denied.body as { message: string }).message).toBe(
+        'Solo un administrador puede cambiar los umbrales del periodontograma.',
+      );
+      await as(clinicA, assistantA).put(settings, { pdAlertMm: 5 }).expect(403);
+
+      const badCases: [object, string][] = [
+        [
+          { pdAlertMm: 6, pdSevereMm: 6 },
+          'El umbral de alerta debe ser menor que el severo',
+        ],
+        [{ pdAlertMm: 7 }, 'El umbral de alerta debe ser menor que el severo'],
+        [
+          { pdAlertMm: 1 },
+          'El umbral de alerta debe ser un entero entre 2 y 10 mm',
+        ],
+        [
+          { pdSevereMm: 13 },
+          'El umbral severo debe ser un entero entre 3 y 12 mm',
+        ],
+        [
+          { pdAlertMm: 4.5 },
+          'El umbral de alerta debe ser un entero entre 2 y 10 mm',
+        ],
+        [
+          { pdSevereMm: '7' },
+          'El umbral severo debe ser un entero entre 3 y 12 mm',
+        ],
+      ];
+      for (const [body, message] of badCases) {
+        const res = await as(clinicA).put(settings, body).expect(400);
+        expect(JSON.stringify(res.body)).toContain(message);
+      }
+
+      const events = async () =>
+        (
+          await raw.auditEvent.findMany({
+            where: {
+              tenantId: clinicA.tenantId,
+              resourceType: 'CLINIC_SETTINGS',
+            },
+            orderBy: { occurredAt: 'desc' },
+          })
+        ).filter(
+          (e) =>
+            (e.metadata as { reason?: string }).reason === 'PERIO_SETTINGS',
+        );
+      expect(await events()).toHaveLength(0);
+      const updated = await as(clinicA)
+        .put(settings, { pdAlertMm: 5, pdSevereMm: 7 })
+        .expect(200);
+      expect(updated.body).toEqual({ pdAlertMm: 5, pdSevereMm: 7 });
+      const [event] = await events();
+      expect(event.metadata).toEqual({
+        reason: 'PERIO_SETTINGS',
+        changedFields: ['pdAlertMm', 'pdSevereMm'],
+        statusChange: { from: 'PD_A4_S6', to: 'PD_A5_S7' },
+      });
+      // Sin cambio: 200 y ningún evento más.
+      await as(clinicA).put(settings, { pdAlertMm: 5 }).expect(200);
+      expect(await events()).toHaveLength(1);
+
+      // El detalle, la lista y la comparación cuentan con 5 / 7.
+      const patientE = await createPatient(clinicA, 'Fabiola', 'PERIO-A-5');
+      const ids = await finalExamsOf(clinicA, patientE, 4);
+      const detail = await as(clinicA)
+        .get(path(patientE, `/${ids[3]}`))
+        .expect(200);
+      expect((detail.body as ExamBody).thresholds).toEqual({
+        pdAlertMm: 5,
+        pdSevereMm: 7,
+      });
+      // 16 MB = 6 y 21 B = 2: uno ≥ 5, ninguno ≥ 7; ≥4/≥6 no cambian.
+      expect((detail.body as ExamBody).indices).toMatchObject({
+        sitesAlertOrMore: 1,
+        sitesSevereOrMore: 0,
+        sites4mmOrMore: 1,
+        sites6mmOrMore: 1,
+      });
+      const list = await as(clinicA).get(path(patientE)).expect(200);
+      expect(
+        (list.body as ExamBody[]).find((r) => r.id === ids[3])?.indices,
+      ).toEqual((detail.body as ExamBody).indices);
+      const comparison = await as(clinicA)
+        .get(path(patientE, `/compare?examIds=${ids.join(',')}`))
+        .expect(200);
+      const cmp = comparison.body as {
+        thresholds: object;
+        exams: { indices: ExamBody['indices'] }[];
+      };
+      expect(cmp.thresholds).toEqual({ pdAlertMm: 5, pdSevereMm: 7 });
+      // ≥ 5: (3, 5), (4, 4), (5, 3), (6, 2).
+      expect(cmp.exams.map((e) => e.indices.sitesAlertOrMore)).toEqual([
+        1, 0, 1, 1,
+      ]);
+
+      // La otra clínica conserva los de fábrica.
+      const other = await as(clinicB).get(settings).expect(200);
+      expect(other.body).toEqual({ pdAlertMm: 4, pdSevereMm: 6 });
+
+      // Se dejan como estaban para el resto del fichero.
+      await as(clinicA)
+        .put(settings, { pdAlertMm: 4, pdSevereMm: 6 })
+        .expect(200);
+    });
   });
 });

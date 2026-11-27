@@ -3,6 +3,7 @@ import { PrismaService } from '../src/shared/prisma/prisma.service';
 import { TenantContextService } from '../src/shared/tenancy/tenant-context.service';
 import { PrismaPerioExamRepository } from '../src/modules/periodontal/infrastructure/repositories/prisma-perio-exam.repository';
 import {
+  DEFAULT_PERIO_THRESHOLDS,
   PERIO_SITES,
   computePerioIndices,
   encodeFlags,
@@ -467,7 +468,11 @@ describe('periodontograma: guardado en lote y lista sin medidas (DX-103, int)', 
       let list: Awaited<ReturnType<typeof repo.listSummaries>>;
       try {
         list = await tenantContext.run(clinic.tenantId, undefined, () =>
-          observed.listSummaries(clinic.patientId, 10),
+          observed.listSummaries(
+            clinic.patientId,
+            10,
+            DEFAULT_PERIO_THRESHOLDS,
+          ),
         );
         await settle();
         console.log(
@@ -492,12 +497,14 @@ describe('periodontograma: guardado en lote y lista sin medidas (DX-103, int)', 
         expect(summary).not.toHaveProperty('teeth');
       }
       const capped = await tenantContext.run(clinic.tenantId, undefined, () =>
-        repo.listSummaries(clinic.patientId, 2),
+        repo.listSummaries(clinic.patientId, 2, DEFAULT_PERIO_THRESHOLDS),
       );
       expect(capped.map((e) => e.id)).toEqual([ids[3], ids[2]]);
       // Otra clínica no ve nada del paciente.
       await expect(
-        asA(() => repo.listSummaries(clinic.patientId, 10)),
+        asA(() =>
+          repo.listSummaries(clinic.patientId, 10, DEFAULT_PERIO_THRESHOLDS),
+        ),
       ).resolves.toEqual([]);
     } finally {
       await raw.perioExam.deleteMany({ where: { tenantId: clinic.tenantId } });
@@ -514,7 +521,8 @@ describe('periodontograma: guardado en lote y lista sin medidas (DX-103, int)', 
       const [summary] = await tenantContext.run(
         clinic.tenantId,
         undefined,
-        () => repo.listSummaries(clinic.patientId, 10),
+        () =>
+          repo.listSummaries(clinic.patientId, 10, DEFAULT_PERIO_THRESHOLDS),
       );
       expect(indicesFromCounts(summary.counts)).toEqual(
         computePerioIndices([], []),

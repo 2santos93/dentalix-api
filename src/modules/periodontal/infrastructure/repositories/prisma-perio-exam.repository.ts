@@ -8,6 +8,7 @@ import {
   PERIO_FLAG,
   decodeFlags,
   encodeFlags,
+  type PerioThresholds,
 } from '../../domain/perio-measures';
 import type {
   CreatePerioExamRepoInput,
@@ -52,6 +53,8 @@ interface SummarySqlRow {
   plaqueSites: number;
   sites4mmOrMore: number;
   sites6mmOrMore: number;
+  sitesAlertOrMore: number;
+  sitesSevereOrMore: number;
 }
 
 function mapRow(row: ExamRow): PerioExamRecord {
@@ -127,6 +130,7 @@ export class PrismaPerioExamRepository implements PerioExamRepository {
   async listSummaries(
     patientId: string,
     limit: number,
+    thresholds: PerioThresholds,
   ): Promise<PerioExamSummaryRow[]> {
     const tenantId = this.requireTenantId();
     const rows = await this.prisma.runWithTenant(
@@ -144,7 +148,8 @@ export class PrismaPerioExamRepository implements PerioExamRepository {
         )
         SELECT p.*, u."fullName" AS "providerName",
                c."sitesExamined", c."bleedingSites", c."plaqueSites",
-               c."sites4mmOrMore", c."sites6mmOrMore"
+               c."sites4mmOrMore", c."sites6mmOrMore",
+               c."sitesAlertOrMore", c."sitesSevereOrMore"
         FROM page p
         JOIN "public"."users" u ON u."id" = p."providerId"
         CROSS JOIN LATERAL (
@@ -152,7 +157,9 @@ export class PrismaPerioExamRepository implements PerioExamRepository {
                  count(*) FILTER (WHERE s."flags" & ${PERIO_FLAG.BOP} <> 0)::int AS "bleedingSites",
                  count(*) FILTER (WHERE s."flags" & ${PERIO_FLAG.PLAQ} <> 0)::int AS "plaqueSites",
                  count(*) FILTER (WHERE s."probingMm" >= 4)::int AS "sites4mmOrMore",
-                 count(*) FILTER (WHERE s."probingMm" >= 6)::int AS "sites6mmOrMore"
+                 count(*) FILTER (WHERE s."probingMm" >= 6)::int AS "sites6mmOrMore",
+                 count(*) FILTER (WHERE s."probingMm" >= ${thresholds.pdAlertMm})::int AS "sitesAlertOrMore",
+                 count(*) FILTER (WHERE s."probingMm" >= ${thresholds.pdSevereMm})::int AS "sitesSevereOrMore"
           FROM "public"."perio_site_measures" s
           WHERE s."tenantId" = p."tenantId"
             AND s."examId" = p."id"
@@ -187,8 +194,24 @@ export class PrismaPerioExamRepository implements PerioExamRepository {
         plaqueSites: row.plaqueSites,
         sites4mmOrMore: row.sites4mmOrMore,
         sites6mmOrMore: row.sites6mmOrMore,
+        sitesAlertOrMore: row.sitesAlertOrMore,
+        sitesSevereOrMore: row.sitesSevereOrMore,
       },
     }));
+  }
+
+  /** DX-066: una consulta (con sus medidas) para los exámenes a comparar. */
+  async findManyByIds(
+    patientId: string,
+    ids: readonly string[],
+  ): Promise<PerioExamRecord[]> {
+    const rows = await this.prisma.runWithTenant((tx) =>
+      tx.perioExam.findMany({
+        where: { id: { in: [...ids] }, patientId, deletedAt: null },
+        include: EXAM_INCLUDE,
+      }),
+    );
+    return rows.map(mapRow);
   }
 
   async findById(
@@ -317,6 +340,20 @@ export class PrismaPerioExamRepository implements PerioExamRepository {
     });
   }
 
+  /**
+   * DX-066: solo las notas, con el mismo UPDATE condicionado a DRAFT que el
+   * guardado (un FINAL da «final» y, aunque se saltara, lo frena el trigger).
+   */
+  updateNotes(
+    patientId: string,
+    id: string,
+    notes: string | null,
+  ): Promise<PerioWriteResult> {
+    return this.prisma.runWithTenant((tx) =>
+      this.lockDraft(tx, patientId, id, { notes, updatedAt: new Date() }),
+    );
+  }
+
   finalize(patientId: string, id: string, at: Date): Promise<PerioWriteResult> {
     return this.prisma.runWithTenant((tx) =>
       this.lockDraft(tx, patientId, id, {
@@ -331,6 +368,51 @@ export class PrismaPerioExamRepository implements PerioExamRepository {
     return this.prisma.runWithTenant((tx) =>
       this.lockDraft(tx, patientId, id, { deletedAt: new Date() }),
     );
+  }
+
+  /** DX-066: umbrales de la clínica del contexto (tenants no tiene RLS). */
+  async thresholds(): Promise<PerioThresholds> {
+    const tenant = await this.prisma.tenant.findUniqueOrThrow({
+      where: { id: this.requireTenantId() },
+      select: { perioPdAlertMm: true, perioPdSevereMm: true },
+    });
+    return {
+      pdAlertMm: tenant.perioPdAlertMm,
+      pdSevereMm: tenant.perioPdSevereMm,
+    };
+  }
+
+  /**
+   * DX-066: fila de la clínica bloqueada (FOR UPDATE): dos ADMIN a la vez no
+   * se pisan el «antes» de la auditoría. El CHECK de la BD es la red de la
+   * validación del caso de uso.
+   */
+  setThresholds(
+    next: PerioThresholds,
+  ): Promise<{ before: PerioThresholds; after: PerioThresholds }> {
+    const id = this.requireTenantId();
+    return this.prisma.$transaction(async (tx) => {
+      const [locked] = await tx.$queryRaw<
+        { pdAlertMm: number; pdSevereMm: number }[]
+      >`SELECT "perioPdAlertMm"::int AS "pdAlertMm",
+               "perioPdSevereMm"::int AS "pdSevereMm"
+          FROM "tenants" WHERE "id" = ${id}::uuid FOR UPDATE`;
+      const after = await tx.tenant.update({
+        where: { id },
+        data: {
+          perioPdAlertMm: next.pdAlertMm,
+          perioPdSevereMm: next.pdSevereMm,
+        },
+        select: { perioPdAlertMm: true, perioPdSevereMm: true },
+      });
+      return {
+        before: { pdAlertMm: locked.pdAlertMm, pdSevereMm: locked.pdSevereMm },
+        after: {
+          pdAlertMm: after.perioPdAlertMm,
+          pdSevereMm: after.perioPdSevereMm,
+        },
+      };
+    });
   }
 
   /** UPDATE solo si sigue en DRAFT; si no, distingue 404 de 409. */

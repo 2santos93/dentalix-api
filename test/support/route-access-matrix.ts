@@ -421,6 +421,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'PUT /patients/:patientId/perio-exams/:id/measures': CLINICAL,
   'POST /patients/:patientId/perio-exams/:id/finalize': CLINICAL,
   'DELETE /patients/:patientId/perio-exams/:id': CLINICAL,
+  // DX-066: notas del DRAFT, comparación y umbrales de la clínica.
+  'PATCH /patients/:patientId/perio-exams/:id': CLINICAL,
+  'GET /patients/:patientId/perio-exams/compare': CLINICAL,
+  'GET /perio/settings': CLINICAL,
+  'PUT /perio/settings': ADMIN_ONLY,
 
   // --- Consentimientos informados (DX-006) ---------------------------------
   // loop/informes/DX-006.md.
