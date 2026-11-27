@@ -30,6 +30,16 @@ import type { AppointmentAuditContext } from './update-appointment.use-case';
 import { TenantContextService } from '../../../../shared/tenancy/tenant-context.service';
 import { PROVIDER_NOT_AT_LOCATION_MESSAGE } from '../../../staff/domain/provider-location';
 import { inMemoryAvailability } from '../../../provider-schedule/application/__fixtures__/availability';
+import {
+  SCHEDULE_BLOCKED_RACE_MESSAGE,
+  ScheduleBlockedRaceError,
+} from '../../../schedule-blocks/domain/schedule-block-rules';
+import type { ChairAssignmentService } from '../chair-assignment';
+import {
+  addCivilDays,
+  civilWeekday,
+  zonedWallTime,
+} from '../../../../shared/time/civil-day';
 
 /** DX-279: cancelar desde la agenda exige origen y motivo. */
 const FOR_PATIENT = {
@@ -1919,5 +1929,463 @@ describe('UpdateAppointmentUseCase · ítems del plan de una cita cerrada (DX-27
       await useCase(existing, calls).execute(existing.id, { planItemIds: [] });
       expect(calls).toHaveLength(1);
     }
+  });
+});
+
+/**
+ * DX-069: el horario de la SEDE al reagendar. Una semana lun–vie 9–13 en la
+ * zona IANA de la sede, un día FIJO (lunes) y el reloj del caso de uso
+ * inyectado antes de él: nada depende de la hora a la que corra la suite.
+ */
+describe('UpdateAppointmentUseCase · horario de la sede al reagendar (DX-069)', () => {
+  const MX = 'America/Mexico_City';
+  const TOKYO = 'Asia/Tokyo';
+  // Lunes 3 de junio de 2030 (se comprueba abajo) y el reloj una semana antes.
+  const MONDAY = '2030-06-03';
+  const SUNDAY = addCivilDays(MONDAY, -1);
+  const clock = () => new Date('2030-05-27T12:00:00.000Z');
+  const weekdays9to13 = (timezone: string): BusinessHours => ({
+    timezone,
+    ranges: [1, 2, 3, 4, 5].map((weekday) => ({
+      weekday,
+      startMinute: 9 * 60,
+      endMinute: 13 * 60,
+    })),
+  });
+  /** Instante de las `hh:00` de pared del día `day` en `zone`. */
+  const wall = (day: string, hour: number, zone: string) =>
+    zonedWallTime(day, hour * 60, zone);
+  const slot = (day: string, hour: number, zone: string) => ({
+    start: wall(day, hour, zone),
+    end: new Date(wall(day, hour, zone).getTime() + 30 * 60_000),
+  });
+  const ctx = (): AppointmentAuditContext => ({
+    tenantId: 't1',
+    locationId: null,
+    actor: { userId: 'u-1', role: 'RECEPTION' },
+    requestId: 'req-1',
+    ip: null,
+    userAgent: null,
+  });
+
+  /** Horario por sede, anotando qué sede se consultó y con qué formato. */
+  function scheduleBySede(bySede: Record<string, BusinessHours | null>) {
+    const asked: string[] = [];
+    const formatAsked: (string | undefined)[] = [];
+    const schedule: LocationScheduleRepository = {
+      ...makeSchedule(),
+      findByLocation: (locationId: string) => {
+        asked.push(locationId);
+        return Promise.resolve(bySede[locationId] ?? null);
+      },
+      formatSourceOf: (locationId?: string) => {
+        formatAsked.push(locationId);
+        return Promise.resolve({
+          id: locationId ?? 'sin-sede',
+          locale: 'de-DE',
+          hourCycle: 'h23',
+        });
+      },
+    };
+    return { schedule, asked, formatAsked };
+  }
+
+  function setup(
+    bySede: Record<string, BusinessHours | null>,
+    existing: Appointment = fakeAppointment({
+      locationId: 'sede-mx',
+      ...slot(MONDAY, 11, MX),
+    }),
+    repoOverrides: RepoOverrides = {},
+  ) {
+    const writes: UpdateAppointmentRepoInput[] = [];
+    const repo = makeRepo({
+      findById: (id: string) =>
+        Promise.resolve(id === existing.id ? existing : null),
+      update: (_id, patch) => {
+        writes.push(patch);
+        return Promise.resolve({ ...existing, ...patch } as Appointment);
+      },
+      ...repoOverrides,
+    });
+    const { schedule, asked, formatAsked } = scheduleBySede(bySede);
+    const tenantContext = new TenantContextService();
+    const uc = new UpdateAppointmentUseCase(
+      repo,
+      schedule,
+      makeStaff(),
+      makeAudit(),
+      makeBlocks(),
+      makeLocations(),
+      tenantContext,
+      inMemoryAvailability(),
+      clock,
+    );
+    return { uc, writes, asked, formatAsked, existing, tenantContext };
+  }
+
+  it('el día del fixture es lunes y el anterior domingo', () => {
+    expect(civilWeekday(MONDAY)).toBe(1);
+    expect(civilWeekday(SUNDAY)).toBe(0);
+  });
+
+  it('reagendar dentro del horario (lunes 10:00 en la zona de la sede) escribe la nueva hora', async () => {
+    const { uc, writes } = setup({ 'sede-mx': weekdays9to13(MX) });
+    const target = slot(MONDAY, 10, MX);
+    await uc.execute('a1', target);
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject(target);
+  });
+
+  it('terminar justo al cierre (12:30–13:00) cabe: el tramo es medio abierto', async () => {
+    const { uc, writes } = setup({ 'sede-mx': weekdays9to13(MX) });
+    await uc.execute('a1', slot(MONDAY, 12.5, MX));
+    expect(writes).toHaveLength(1);
+  });
+
+  it.each([
+    ['08:00', 8],
+    ['14:00', 14],
+    ['12:45 (no cabe entera)', 12.75],
+  ])(
+    'reagendar fuera del horario (lunes %s) es 422 con el horario del día y no escribe',
+    async (_label, hour) => {
+      const { uc, writes } = setup({ 'sede-mx': weekdays9to13(MX) });
+      const error = await uc.execute('a1', slot(MONDAY, hour, MX)).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect(error).toBeInstanceOf(UnprocessableEntityException);
+      expect((error as Error).message).toBe(
+        'Fuera del horario de atención (lunes: 09:00–13:00)',
+      );
+      expect(writes).toHaveLength(0);
+    },
+  );
+
+  it('reagendar a un domingo (día cerrado) es 422 «no atiende los domingos» sin pedir el formato', async () => {
+    const { uc, writes, formatAsked } = setup({
+      'sede-mx': weekdays9to13(MX),
+    });
+    await expect(uc.execute('a1', slot(SUNDAY, 10, MX))).rejects.toThrow(
+      new UnprocessableEntityException('La sede no atiende los domingos'),
+    );
+    expect(writes).toHaveLength(0);
+    // DX-354: un día cerrado no necesita el reloj de la sede.
+    expect(formatAsked).toEqual(['sede-mx']);
+  });
+
+  it('una sede sin horario (null) o con la semana vacía no restringe', async () => {
+    for (const hours of [null, { timezone: MX, ranges: [] }]) {
+      const { uc, writes } = setup({ 'sede-mx': hours });
+      await uc.execute('a1', slot(SUNDAY, 3, MX));
+      expect(writes).toHaveLength(1);
+    }
+  });
+
+  it('cambiar solo el profesional también pasa por el horario de la sede', async () => {
+    const existing = fakeAppointment({
+      locationId: 'sede-mx',
+      ...slot(MONDAY, 14, MX),
+    });
+    const { uc, writes } = setup({ 'sede-mx': weekdays9to13(MX) }, existing);
+    await expect(
+      uc.execute('a1', { providerId: 'prov2' }),
+    ).rejects.toBeInstanceOf(UnprocessableEntityException);
+    expect(writes).toHaveLength(0);
+  });
+
+  it('editar notas de una cita que quedó fuera de horario no mira el horario', async () => {
+    const existing = fakeAppointment({
+      locationId: 'sede-mx',
+      ...slot(MONDAY, 14, MX),
+    });
+    const { uc, writes, asked } = setup(
+      { 'sede-mx': weekdays9to13(MX) },
+      existing,
+    );
+    await uc.execute('a1', { notes: 'Trae la radiografía' });
+    expect(writes).toHaveLength(1);
+    expect(asked).toEqual([]);
+  });
+
+  // BE-003 (DX-056): el horario que manda es el de la sede DE LA CITA, no el
+  // de la sede en contexto (cabecera X-Location-Id). Las dos sedes abren
+  // 9–13 en su zona; las 10:00 de México son la 01:00 del martes en Tokio.
+  describe('BE-003: el horario consultado es el de la sede de la cita', () => {
+    const bySede = {
+      'sede-mx': weekdays9to13(MX),
+      'sede-tokio': weekdays9to13(TOKYO),
+    };
+    const tokyoAppointment = fakeAppointment({
+      locationId: 'sede-tokio',
+      ...slot(MONDAY, 11, TOKYO),
+    });
+
+    it('con la sede de México en contexto, mover la cita de Tokio a las 10:00 de México es 422 con el horario de Tokio', async () => {
+      const { uc, writes, asked, formatAsked, tenantContext } = setup(
+        bySede,
+        tokyoAppointment,
+      );
+      const error = await tenantContext
+        .run('t1', 'sede-mx', () => uc.execute('a1', slot(MONDAY, 10, MX)))
+        .then(
+          () => null,
+          (e: unknown) => e,
+        );
+      expect(error).toBeInstanceOf(UnprocessableEntityException);
+      // 10:00 en México (UTC−6) = 01:00 del martes en Tokio (UTC+9).
+      expect((error as Error).message).toBe(
+        'Fuera del horario de atención (martes: 09:00–13:00)',
+      );
+      expect(asked).toEqual(['sede-tokio']);
+      expect(formatAsked).toEqual(['sede-tokio']);
+      expect(writes).toHaveLength(0);
+    });
+
+    it('con la sede de México en contexto, mover la cita de Tokio a las 10:00 de Tokio se guarda', async () => {
+      const { uc, writes, asked, tenantContext } = setup(
+        bySede,
+        tokyoAppointment,
+      );
+      await tenantContext.run('t1', 'sede-mx', () =>
+        uc.execute('a1', slot(MONDAY, 10, TOKYO)),
+      );
+      expect(writes).toHaveLength(1);
+      expect(asked).toEqual(['sede-tokio']);
+    });
+  });
+
+  it('mover al hueco («Ocupar este hueco») a un domingo es 422 con el horario de la sede de la cita', async () => {
+    const existing = fakeAppointment({
+      locationId: 'sede-mx',
+      wantsEarlier: true,
+      ...slot(MONDAY, 11, MX),
+    });
+    const { uc, asked } = setup({ 'sede-mx': weekdays9to13(MX) }, existing);
+    await expect(
+      uc.moveToOpening('a1', { start: wall(SUNDAY, 10, MX) }, ctx()),
+    ).rejects.toThrow('La sede no atiende los domingos');
+    expect(asked).toEqual(['sede-mx']);
+  });
+
+  // DX-562 (D6): mover «esta y las siguientes» de una serie.
+  describe('serie: checkSeriesMove, planSeriesMove y planSeriesCancellation', () => {
+    it('checkSeriesMove anota el horario de la sede (BUSINESS_HOURS) y sigue; ignora el solape con las citas que se mueven a la vez', async () => {
+      const sibling = fakeAppointment({ id: 'a2', ...slot(MONDAY, 14, MX) });
+      const stranger = fakeAppointment({ id: 'a9', ...slot(MONDAY, 14, MX) });
+      let overlapping: Appointment[] = [sibling];
+      const { uc, existing } = setup(
+        { 'sede-mx': weekdays9to13(MX) },
+        undefined,
+        {
+          findOverlapping: () => Promise.resolve(overlapping),
+          findOverlappingForPatient: () => Promise.resolve(overlapping),
+        },
+      );
+      const failures: { step: string; status: number }[] = [];
+      const collect = (f: { step: string; error: { getStatus(): number } }) =>
+        failures.push({ step: f.step, status: f.error.getStatus() });
+
+      const warnings = await uc.checkSeriesMove(
+        existing,
+        slot(MONDAY, 14, MX),
+        ['a1', 'a2'],
+        ctx(),
+        collect,
+      );
+      expect(failures).toEqual([{ step: 'BUSINESS_HOURS', status: 422 }]);
+      expect(warnings).toMatchObject({ warnings: [], warningCodes: [] });
+
+      // Una cita AJENA a la serie en esa hora sí cuenta como solape.
+      overlapping = [stranger];
+      failures.length = 0;
+      await uc.checkSeriesMove(
+        existing,
+        slot(MONDAY, 10, MX),
+        ['a1', 'a2'],
+        ctx(),
+        collect,
+      );
+      expect(failures.map((f) => f.step)).not.toContain('BUSINESS_HOURS');
+      expect(failures.length).toBeGreaterThan(0);
+      expect(failures.every((f) => f.status === 409)).toBe(true);
+    });
+
+    it('checkSeriesMove con sillón: lo carga en la sede de la cita y comprueba que esté libre sin contar la serie', async () => {
+      const existing = fakeAppointment({
+        locationId: 'sede-mx',
+        chairId: 'sillon-1',
+        ...slot(MONDAY, 11, MX),
+      });
+      const calls: unknown[] = [];
+      const chairs = {
+        load: (id: string, opts: unknown) => {
+          calls.push(['load', id, opts]);
+          return Promise.resolve({ id });
+        },
+        assertFree: (chair: unknown, range: unknown, opts: unknown) => {
+          calls.push(['assertFree', chair, range, opts]);
+          return Promise.resolve();
+        },
+      } as unknown as ChairAssignmentService;
+      const { schedule } = scheduleBySede({ 'sede-mx': weekdays9to13(MX) });
+      const uc = new UpdateAppointmentUseCase(
+        makeRepo({ findById: () => Promise.resolve(existing) }),
+        schedule,
+        makeStaff(),
+        makeAudit(),
+        makeBlocks(),
+        makeLocations(),
+        new TenantContextService(),
+        inMemoryAvailability(),
+        clock,
+        chairs,
+      );
+      const target = slot(MONDAY, 10, MX);
+      await uc.checkSeriesMove(existing, target, ['a1', 'a2'], ctx(), () => {
+        throw new Error('no debería fallar ninguna regla');
+      });
+      expect(calls).toEqual([
+        ['load', 'sillon-1', { locationId: 'sede-mx', requireActive: true }],
+        [
+          'assertFree',
+          { id: 'sillon-1' },
+          {
+            locationId: 'sede-mx',
+            ...target,
+            excludeId: 'a1',
+            alsoExcludeIds: ['a1', 'a2'],
+          },
+          { moving: true },
+        ],
+      ]);
+    });
+
+    it('checkSeriesMove con sillón y sin ChairAssignmentService configurado falla en voz alta', async () => {
+      const existing = fakeAppointment({
+        locationId: 'sede-mx',
+        chairId: 'sillon-1',
+        ...slot(MONDAY, 11, MX),
+      });
+      const { uc } = setup({ 'sede-mx': weekdays9to13(MX) }, existing);
+      await expect(
+        uc.checkSeriesMove(
+          existing,
+          slot(MONDAY, 10, MX),
+          ['a1'],
+          ctx(),
+          () => undefined,
+        ),
+      ).rejects.toThrow('ChairAssignmentService no está configurado');
+    });
+
+    it('planSeriesMove: la nueva hora condicionada al estado leído, sin confirmación y sin sobrecupo', () => {
+      const { uc } = setup({});
+      const target = slot(MONDAY, 10, MX);
+      const audit = ctx();
+      expect(
+        uc.planSeriesMove(fakeAppointment({ overbooked: true }), target, audit),
+      ).toEqual({
+        ...target,
+        expectStatus: AppointmentStatus.SCHEDULED,
+        confirmationSentAt: null,
+        callbackRequestedAt: null,
+        revokeConfirmations: true,
+        overbooked: false,
+        audit,
+      });
+      expect(
+        uc.planSeriesMove(fakeAppointment(), target, audit),
+      ).not.toHaveProperty('overbooked');
+    });
+
+    it('planSeriesCancellation: cancela con origen y motivo y limpia la confirmación; sin motivo es 400', async () => {
+      const { uc, existing } = setup({});
+      const audit = ctx();
+      const patch = await uc.planSeriesCancellation(
+        existing,
+        { byKind: 'STAFF_FOR_PATIENT', reasonCode: 'ILLNESS' },
+        audit,
+      );
+      expect(patch).toMatchObject({
+        status: AppointmentStatus.CANCELLED,
+        confirmationSentAt: null,
+        callbackRequestedAt: null,
+        audit,
+        cancel: { byKind: 'STAFF_FOR_PATIENT', reasonCode: 'ILLNESS' },
+      });
+      await expect(
+        uc.planSeriesCancellation(
+          existing,
+          { byKind: 'STAFF_FOR_PATIENT' },
+          audit,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+  });
+
+  // Carreras que la BD cierra al escribir (las comprueban los e2e; aquí el
+  // mapeo del error a su 409).
+  describe('carreras al escribir', () => {
+    const providerExclusion = () =>
+      new Prisma.PrismaClientUnknownRequestError(
+        'ERROR: conflicting key value violates exclusion constraint "appointments_no_overlap_per_provider" (23P01)',
+        { clientVersion: 'test' },
+      );
+
+    it('un bloqueo creado a la vez que se reagenda es 409 «se bloqueó ese horario»', async () => {
+      const { uc } = setup({}, undefined, {
+        update: () => Promise.reject(new ScheduleBlockedRaceError()),
+      });
+      await expect(uc.execute('a1', slot(MONDAY, 10, MX))).rejects.toThrow(
+        new ConflictException(SCHEDULE_BLOCKED_RACE_MESSAGE),
+      );
+    });
+
+    it('reactivar un sobrecupo cuyo hueco ocupó otra cita a la vez: 409 OVERBOOK_SLOT_TAKEN', async () => {
+      const existing = fakeAppointment({
+        status: AppointmentStatus.CANCELLED,
+        overbooked: true,
+        ...slot(MONDAY, 11, MX),
+      });
+      const { uc } = setup({}, existing, {
+        update: () => Promise.reject(providerExclusion()),
+      });
+      const error = await uc
+        .execute('a1', { status: AppointmentStatus.SCHEDULED })
+        .then(
+          () => null,
+          (e: unknown) => e,
+        );
+      expect(error).toBeInstanceOf(ConflictException);
+      expect((error as ConflictException).getResponse()).toMatchObject({
+        code: 'OVERBOOK_SLOT_TAKEN',
+        canKeepOverbooked: true,
+      });
+    });
+
+    it('deshacer la llegada de un sobrecupo cuyo hueco se ocupó a la vez: 409 OVERBOOK_SLOT_TAKEN; otro error se propaga', async () => {
+      const existing = fakeAppointment({
+        status: AppointmentStatus.ARRIVED,
+        overbooked: true,
+        ...slot(MONDAY, 11, MX),
+      });
+      let failure: Error = providerExclusion();
+      const { uc } = setup({}, existing, {
+        undoArrival: () => Promise.reject(failure),
+      });
+      const error = await uc.undoArrival('a1', ctx()).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      expect((error as ConflictException).getResponse()).toMatchObject({
+        code: 'OVERBOOK_SLOT_TAKEN',
+      });
+      failure = new Error('la BD se cayó');
+      await expect(uc.undoArrival('a1', ctx())).rejects.toThrow(
+        'la BD se cayó',
+      );
+    });
   });
 });
