@@ -712,11 +712,71 @@ describe('Consentimientos informados — /consent-templates y /patients/:id/cons
         .expect(201);
       expect((ok.body as ConsentBody).body).toBe(preview.body);
     });
+
+    it('DX-060: con un tutor, la vista previa por POST y lo firmado abren con la cláusula de representación; sin plan no dice «No especificado»', async () => {
+      await as(clinicA)
+        .patch(`/consent-templates/${templateA.id}`, {
+          body: 'Yo, {{paciente}}, autorizo a realizar: {{tratamiento}}.',
+        })
+        .expect(200);
+      const guardian = {
+        signerType: 'GUARDIAN',
+        guardianName: 'Marta Pérez',
+        guardianDocument: 'V-12.345.678',
+        guardianRelationship: 'MOTHER',
+      };
+      const preview = (
+        await as(clinicA, dentistA)
+          .post(`/patients/${patientA}/consents/preview`, {
+            templateId: templateA.id,
+            ...guardian,
+          })
+          .expect(200)
+      ).body as { body: string; templateVersion: number; previewedAt: string };
+      expect(preview.body).toMatch(
+        /^Firma en representación del paciente: Marta Pérez, identificado\(a\) con V-12\.345\.678, otorga este consentimiento en nombre de .+, como su madre\./,
+      );
+      expect(preview.body).toContain(
+        'autorizo a realizar: el tratamiento indicado por el profesional en la consulta.',
+      );
+      expect(preview.body).not.toContain('No especificado');
+
+      // Un tutor sin documento: 400; una relación que no existe: 400.
+      await as(clinicA, dentistA)
+        .post(`/patients/${patientA}/consents/preview`, {
+          templateId: templateA.id,
+          signerType: 'GUARDIAN',
+          guardianName: 'Marta Pérez',
+        })
+        .expect(400);
+      await as(clinicA, dentistA)
+        .post(`/patients/${patientA}/consents/preview`, {
+          templateId: templateA.id,
+          ...guardian,
+          guardianRelationship: 'VECINA',
+        })
+        .expect(400);
+
+      const signed = await as(clinicA, dentistA)
+        .post(
+          `/patients/${patientA}/consents`,
+          signBody(templateA, {
+            templateVersion: preview.templateVersion,
+            previewedAt: preview.previewedAt,
+            ...guardian,
+          }),
+        )
+        .expect(201);
+      const body = signed.body as ConsentBody & { signerName: string };
+      expect(body.body).toBe(preview.body);
+      expect(body.signerName).toBe('Marta Pérez');
+    });
   });
 
   describe('aislamiento entre clínicas', () => {
     // ISOLATION_COVERS: GET /patients/:patientId/consents
     // ISOLATION_COVERS: GET /patients/:patientId/consents/preview
+    // ISOLATION_COVERS: POST /patients/:patientId/consents/preview
     // ISOLATION_COVERS: POST /patients/:patientId/consents
     // ISOLATION_COVERS: GET /patients/:patientId/consents/:id
     it('la clínica B no ve ni crea consentimientos sobre pacientes de A', async () => {
@@ -733,6 +793,11 @@ describe('Consentimientos informados — /consent-templates y /patients/:id/cons
         .get(
           `/patients/${patientA}/consents/preview?templateId=${templateB.id}`,
         )
+        .expect(404);
+      await as(clinicB)
+        .post(`/patients/${patientA}/consents/preview`, {
+          templateId: templateB.id,
+        })
         .expect(404);
       await as(clinicB)
         .post(`/patients/${patientA}/consents`, signBody(templateB))

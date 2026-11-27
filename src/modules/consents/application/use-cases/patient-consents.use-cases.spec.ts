@@ -162,14 +162,88 @@ describe('PreviewPatientConsentUseCase', () => {
     expect(result.body).toBe('Yo, Ana Pérez, autorizo.');
   });
 
-  it('sin plan, {{tratamiento}} dice que no se especificó', async () => {
+  it('DX-060: sin plan, {{tratamiento}} se lee con una frase natural, nunca «No especificado»', async () => {
     const { preview, template } = setup();
     const result = await preview.execute(
       'p1',
       { templateId: template.id },
       'dentist-1',
     );
-    expect(result.body).toContain('a realizar: No especificado.');
+    expect(result.body).not.toContain('No especificado');
+    expect(result.body).toContain(
+      'a realizar: el tratamiento indicado por el profesional en la consulta.',
+    );
+  });
+
+  it('DX-060: sin plan, una línea que solo rotula {{tratamiento}} se omite', async () => {
+    const { preview, templates } = setup();
+    const labelled = templates.seed({
+      title: 'Con rótulo',
+      body: 'Yo, {{paciente}}, autorizo el procedimiento.\n\nTratamiento: {{tratamiento}}\n\nGracias.',
+    });
+    const result = await preview.execute(
+      'p1',
+      { templateId: labelled.id },
+      'dentist-1',
+    );
+    expect(result.body).toBe(
+      'Yo, Ana Pérez, autorizo el procedimiento.\n\nGracias.',
+    );
+    // Con plan, la línea sigue ahí con sus procedimientos.
+    const withPlan = await preview.execute(
+      'p1',
+      { templateId: labelled.id, treatmentPlanId: 'plan-1' },
+      'dentist-1',
+    );
+    expect(withPlan.body).toContain(
+      'Tratamiento: Exodoncia simple (diente 48); Resina (diente 36)',
+    );
+  });
+
+  it('DX-060: un plan sin procedimientos se trata como sin plan', async () => {
+    const { preview, template, consents } = setup();
+    consents.plans['plan-vacio'] = { patientId: 'p1', items: [] };
+    const result = await preview.execute(
+      'p1',
+      { templateId: template.id, treatmentPlanId: 'plan-vacio' },
+      'dentist-1',
+    );
+    expect(result.body).not.toContain('No especificado');
+    expect(result.body).toContain('el tratamiento indicado por el profesional');
+  });
+
+  it('DX-060: con un tutor, la vista previa abre con la cláusula de representación', async () => {
+    const { preview, template } = setup();
+    const result = await preview.execute(
+      'p1',
+      {
+        templateId: template.id,
+        signerType: 'GUARDIAN',
+        guardianName: ' Marta Pérez ',
+        guardianDocument: ' V-12.345.678 ',
+        guardianRelationship: 'MOTHER',
+      },
+      'dentist-1',
+    );
+    expect(result.body).toBe(
+      'Firma en representación del paciente: Marta Pérez, identificado(a) con V-12.345.678, ' +
+        'otorga este consentimiento en nombre de Ana Pérez, como su madre. Lo que este documento ' +
+        'dice en primera persona lo declara Marta Pérez en representación de Ana Pérez.\n\n' +
+        'Yo, Ana Pérez (Documento nacional 1020304050), autorizo a Dra. Laura Gómez de ' +
+        'Clínica Demo a realizar: el tratamiento indicado por el profesional en la consulta. ' +
+        'Fecha: 16 de octubre de 2026.',
+    );
+  });
+
+  it('DX-060: la vista previa de un tutor sin nombre o sin documento da 400', async () => {
+    const { preview, template } = setup();
+    await expect(
+      preview.execute(
+        'p1',
+        { templateId: template.id, signerType: 'GUARDIAN', guardianName: 'M' },
+        'dentist-1',
+      ),
+    ).rejects.toThrow(BadRequestException);
   });
 
   it('404 si el paciente no es de esta clínica', async () => {
@@ -301,6 +375,43 @@ describe('SignPatientConsentUseCase', () => {
     );
     expect(signed.signerName).toBe('Marta Pérez');
     expect(signed.signerDocument).toBe('DOC 999');
+  });
+
+  it('DX-060: con un tutor, el texto firmado identifica al tutor y su relación, igual que la vista previa', async () => {
+    const { sign, preview, get, template } = setup();
+    const guardian = {
+      signerType: 'GUARDIAN' as const,
+      guardianName: 'Marta Pérez',
+      guardianDocument: 'V-12.345.678',
+      guardianRelationship: 'LEGAL_GUARDIAN' as const,
+    };
+    const seen = await preview.execute(
+      'p1',
+      { templateId: template.id, ...guardian },
+      'dentist-1',
+    );
+    const signed = await sign.execute(
+      'p1',
+      signInput(template.id, guardian),
+      META,
+    );
+    expect(signed.body).toBe(seen.body);
+    expect(
+      signed.body.startsWith(
+        'Firma en representación del paciente: Marta Pérez, identificado(a) con V-12.345.678, ' +
+          'otorga este consentimiento en nombre de Ana Pérez, como su tutor legal.',
+      ),
+    ).toBe(true);
+    // La cláusula va en el cuerpo sellado: el hash la cubre.
+    const doc = await get.execute('p1', signed.id);
+    expect(doc.integrityOk).toBe(true);
+  });
+
+  it('DX-060: firma el paciente: sin cláusula de representación', async () => {
+    const { sign, template } = setup();
+    const signed = await sign.execute('p1', signInput(template.id), META);
+    expect(signed.body).not.toContain('Firma en representación');
+    expect(signed.body.startsWith('Yo, Ana Pérez')).toBe(true);
   });
 
   it('400 si firma un tutor sin nombre o sin documento', async () => {

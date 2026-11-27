@@ -198,7 +198,7 @@ class SignatureTemplateOptionDto {
   @ApiProperty() version!: number;
   @ApiProperty({
     description:
-      'El texto usa {{tratamiento}}: sin plan, el documento dirá «No especificado»',
+      'El texto usa {{tratamiento}}: sin plan, el documento dirá «el tratamiento indicado por el profesional en la consulta» (DX-060)',
   })
   usesTreatment!: boolean;
   @ApiProperty({

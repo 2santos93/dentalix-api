@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ConsentSignerType } from '@prisma/client';
+import { ConsentSignerType, ResponsibleRelationship } from '@prisma/client';
 import {
   IsEnum,
   IsISO8601,
@@ -65,6 +65,16 @@ export class SignPatientConsentDto {
   @IsString()
   @MaxLength(60)
   guardianDocument?: string;
+
+  @ApiPropertyOptional({
+    enum: ResponsibleRelationship,
+    enumName: 'ResponsibleRelationship',
+    description:
+      'DX-060: relación del tutor con el paciente (signerType=GUARDIAN). El texto firmado abre con la cláusula de representación; sin ella dice «representante».',
+  })
+  @IsOptional()
+  @IsEnum(ResponsibleRelationship)
+  guardianRelationship?: ResponsibleRelationship;
 
   @ApiProperty({
     description:

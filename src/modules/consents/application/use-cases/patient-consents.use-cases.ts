@@ -6,7 +6,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ConsentSignerType } from '@prisma/client';
+import { ConsentSignerType, ResponsibleRelationship } from '@prisma/client';
 import {
   PatientConsent,
   PatientConsentDocument,
@@ -35,7 +35,9 @@ import {
   formatConsentDate,
   renderConsent,
   usesVariable,
+  withoutTreatmentLabelLines,
 } from '../../domain/render-consent';
+import { representationClause } from '../../domain/representation-clause';
 import {
   computeConsentHash,
   computeCountersignatureHash,
@@ -81,12 +83,33 @@ export const CONSENT_PREVIEW_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 const CONSENT_PREVIEW_CLOCK_SKEW_MS = 5_000;
 export const CONSENT_PREVIEW_EXPIRED_MESSAGE =
   'La vista previa caducó: vuelve a leer el texto con el paciente antes de firmar.';
-const NO_TREATMENT = 'No especificado';
+/**
+ * DX-060 (m-2): `{{tratamiento}}` sin plan (o con un plan sin procedimientos).
+ * Se lee bien tras «a realizar:» o «autorizo …»; nunca «No especificado».
+ */
+export const NO_PLAN_TREATMENT =
+  'el tratamiento indicado por el profesional en la consulta';
+export const GUARDIAN_REQUIRED_MESSAGE =
+  'Si firma un tutor, su nombre y su documento son obligatorios';
 const NO_DOCUMENT = 'Sin documento';
 
 export interface PreviewPatientConsentInput {
   templateId: string;
   treatmentPlanId?: string;
+  /**
+   * DX-060: quién firma. Con un tutor, el texto abre con la cláusula de
+   * representación (nombre, documento y relación con el paciente).
+   */
+  signerType?: ConsentSignerType;
+  guardianName?: string;
+  guardianDocument?: string;
+  guardianRelationship?: ResponsibleRelationship;
+}
+
+interface Guardian {
+  name: string;
+  document: string;
+  relationship?: ResponsibleRelationship;
 }
 
 export interface ConsentPreview {
@@ -111,8 +134,6 @@ export interface SignPatientConsentInput extends PreviewPatientConsentInput {
    */
   previewedAt?: string;
   signerType: ConsentSignerType;
-  guardianName?: string;
-  guardianDocument?: string;
   patientSignature: string;
   professionalSignature: string;
 }
@@ -138,11 +159,31 @@ function documentOf(
   );
 }
 
+function hasTreatment(plan: ConsentSigningContext['plan']): boolean {
+  return !!plan && plan.items.length > 0;
+}
+
 function treatmentOf(plan: ConsentSigningContext['plan']): string {
-  if (!plan || plan.items.length === 0) return NO_TREATMENT;
+  if (!plan || plan.items.length === 0) return NO_PLAN_TREATMENT;
   return plan.items
     .map((item) => `${item.label} (diente ${item.toothNumber})`)
     .join('; ');
+}
+
+function requiredTrimmed(value: string | undefined): string | null {
+  const trimmed = value?.trim() ?? '';
+  return trimmed === '' ? null : trimmed;
+}
+
+/** El tutor de la entrada, validado; `null` si firma el paciente. */
+function guardianOf(input: PreviewPatientConsentInput): Guardian | null {
+  if (input.signerType !== ConsentSignerType.GUARDIAN) return null;
+  const name = requiredTrimmed(input.guardianName);
+  const document = requiredTrimmed(input.guardianDocument);
+  if (!name || !document) {
+    throw new BadRequestException(GUARDIAN_REQUIRED_MESSAGE);
+  }
+  return { name, document, relationship: input.guardianRelationship };
 }
 
 /**
@@ -165,7 +206,11 @@ async function prepare(
   body: string;
   /** El documento del paciente tal como va en el cuerpo (R18). */
   document: string | null;
+  /** Quien firma por el paciente, ya validado (o `null`). */
+  guardian: Guardian | null;
 }> {
+  // Las validaciones baratas, antes de tocar la base.
+  const guardian = guardianOf(input);
   const template = await templates.findById(input.templateId);
   if (!template) {
     throw new NotFoundException(CONSENT_TEMPLATE_NOT_FOUND_MESSAGE);
@@ -191,8 +236,13 @@ async function prepare(
     context.patient,
     await documentTypeNames.get(context.location.id),
   );
-  const body = renderConsent(template.body, {
-    paciente: `${context.patient.firstName} ${context.patient.lastName}`,
+  const patientName = `${context.patient.firstName} ${context.patient.lastName}`;
+  // DX-060 (m-2): sin procedimientos, la línea que solo los rotulaba sobra.
+  const source = hasTreatment(context.plan)
+    ? template.body
+    : withoutTreatmentLabelLines(template.body);
+  const rendered = renderConsent(source, {
+    paciente: patientName,
     documento: document ?? NO_DOCUMENT,
     profesional: context.professionalName,
     clinica: context.clinicName,
@@ -206,7 +256,18 @@ async function prepare(
       : '',
     tratamiento: treatmentOf(context.plan),
   });
-  return { template, context, title: template.title, body, document };
+  // DX-060 (m-3): con un tutor, el documento abre diciendo quién firma y por
+  // quién. Se añade tras renderizar: lo que escribió el tutor nunca se
+  // interpreta como variable.
+  const body = guardian
+    ? `${representationClause({
+        representativeName: guardian.name,
+        representativeDocument: guardian.document,
+        relationship: guardian.relationship,
+        patientName,
+      })}\n\n${rendered}`
+    : rendered;
+  return { template, context, title: template.title, body, document, guardian };
 }
 
 /** El documento resuelto, listo para mostrar y sellar. */
@@ -308,11 +369,6 @@ function renderInstant(previewedAt: string | undefined, signedAt: Date): Date {
   return at;
 }
 
-function requiredTrimmed(value: string | undefined): string | null {
-  const trimmed = value?.trim() ?? '';
-  return trimmed === '' ? null : trimmed;
-}
-
 function parseSignature(value: string, noun: string): string {
   try {
     return parseSignaturePng(value, noun);
@@ -347,31 +403,21 @@ export class SignPatientConsentUseCase {
     input: SignPatientConsentInput,
     meta: SignPatientConsentMeta,
   ): Promise<PatientConsent> {
-    // Las validaciones baratas, antes de tocar la base.
-    let guardian: { name: string; document: string } | null = null;
-    if (input.signerType === ConsentSignerType.GUARDIAN) {
-      const name = requiredTrimmed(input.guardianName);
-      const document = requiredTrimmed(input.guardianDocument);
-      if (!name || !document) {
-        throw new BadRequestException(
-          'Si firma un tutor, su nombre y su documento son obligatorios',
-        );
-      }
-      guardian = { name, document };
-    }
-
     const signedAt = this.now();
     // DX-058: `{{fecha}}` es la de la vista previa, no la de este instante:
     // pasada la medianoche, el texto firmado seguiría siendo el que se leyó.
-    const { template, context, title, body, document } = await prepare(
-      this.templates,
-      this.consents,
-      this.documentTypeNames,
-      renderInstant(input.previewedAt, signedAt),
-      patientId,
-      input,
-      meta.recordedById,
-    );
+    // El tutor (400 si le falta nombre o documento) se valida en `prepare`,
+    // antes de tocar la base.
+    const { template, context, title, body, document, guardian } =
+      await prepare(
+        this.templates,
+        this.consents,
+        this.documentTypeNames,
+        renderInstant(input.previewedAt, signedAt),
+        patientId,
+        input,
+        meta.recordedById,
+      );
     if (template.version !== input.templateVersion) {
       throw new ConflictException(CONSENT_TEMPLATE_CHANGED_MESSAGE);
     }
