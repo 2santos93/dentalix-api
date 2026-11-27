@@ -223,6 +223,8 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   // --- consentimientos, indicaciones y anamnesis ---
   'GET /patients/:patientId/consents/preview ?templateId',
   'GET /patients/:patientId/consents/preview ?treatmentPlanId',
+  'POST /patients/:patientId/consents/preview body.templateId',
+  'POST /patients/:patientId/consents/preview body.treatmentPlanId',
   'POST /patients/:patientId/consents body.templateId',
   'POST /patients/:patientId/consents body.treatmentPlanId',
   'POST /post-op-templates body.appointmentTypeIds[]',

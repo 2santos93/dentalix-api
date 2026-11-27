@@ -429,6 +429,8 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
   'PATCH /consent-templates/:id': ADMIN_ONLY,
   'GET /patients/:patientId/consents': CLINICAL,
   'GET /patients/:patientId/consents/preview': CLINICAL,
+  // DX-060: la misma vista previa con quién firma (el tutor va en el cuerpo).
+  'POST /patients/:patientId/consents/preview': CLINICAL,
   'POST /patients/:patientId/consents': CLINICAL,
   'GET /patients/:patientId/consents/:id': CLINICAL,
   // DX-243: firma del profesional de uno firmado a distancia (el que lo envió

@@ -3,6 +3,7 @@ import {
   findUnknownVariables,
   formatConsentDate,
   renderConsent,
+  withoutTreatmentLabelLines,
   type ConsentVariables,
 } from './render-consent';
 import { regionalFormat } from '../../../shared/format/regional-format';
@@ -104,5 +105,32 @@ describe('formatConsentDate', () => {
         ),
       ).toBe('17 de octubre de 2026');
     }
+  });
+});
+
+describe('withoutTreatmentLabelLines (DX-060, m-2)', () => {
+  it('quita la línea que solo rotula {{tratamiento}} y el renglón en blanco que la separaba', () => {
+    const body = [
+      'Yo, {{paciente}}, autorizo el procedimiento.',
+      '',
+      'Tratamiento: {{ Tratamiento }}.',
+      '',
+      'Fecha: {{fecha}}.',
+    ].join('\n');
+    expect(withoutTreatmentLabelLines(body)).toBe(
+      [
+        'Yo, {{paciente}}, autorizo el procedimiento.',
+        '',
+        'Fecha: {{fecha}}.',
+      ].join('\n'),
+    );
+  });
+
+  it('no toca {{tratamiento}} dentro de una frase ni otras líneas rotuladas', () => {
+    const body = [
+      'Yo, {{paciente}}, autorizo a {{profesional}} a realizar un blanqueamiento dental: {{tratamiento}}.',
+      'Fecha: {{fecha}}.',
+    ].join('\n');
+    expect(withoutTreatmentLabelLines(body)).toBe(body);
   });
 });

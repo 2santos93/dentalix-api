@@ -714,6 +714,12 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'CONSENT',
     patient: P,
   },
+  // DX-060: la vista previa con quién firma (POST: el tutor no va en la URL).
+  'POST /patients/:patientId/consents/preview': {
+    action: 'VIEW',
+    resource: 'CONSENT',
+    patient: P,
+  },
   'POST /patients/:patientId/consents': {
     action: 'SIGN',
     resource: 'CONSENT',

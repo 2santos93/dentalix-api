@@ -49,6 +49,32 @@ export function usesVariable(body: string, name: ConsentVariable): boolean {
   return false;
 }
 
+/**
+ * DX-060 (m-2): una línea que solo rotula el tratamiento («Tratamiento:
+ * {{tratamiento}}») no aporta nada sin plan: se quita, con el renglón en
+ * blanco que la separaba de la siguiente. El rótulo es corto (≤ 60 caracteres)
+ * y sin puntuación de frase; un `{{tratamiento}}` dentro de una frase se queda
+ * y lo rellena quien renderiza.
+ */
+const TREATMENT_LABEL_LINE =
+  /^[ \t]*[^\n.:;{}]{1,60}:[ \t]*\{\{\s*tratamiento\s*\}\}[ \t]*\.?[ \t]*$/i;
+
+export function withoutTreatmentLabelLines(body: string): string {
+  const lines = body.split('\n');
+  const kept: string[] = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!TREATMENT_LABEL_LINE.test(lines[i])) {
+      kept.push(lines[i]);
+      continue;
+    }
+    const nextBlank = (lines[i + 1] ?? '').trim() === '';
+    const prevBlank = kept.length === 0 || kept[kept.length - 1].trim() === '';
+    // Un solo separador entre lo de antes y lo de después.
+    if (nextBlank && prevBlank) i += 1;
+  }
+  return kept.join('\n');
+}
+
 /** Variables del texto que no existen (en minúscula, sin repetir, en orden). */
 export function findUnknownVariables(body: string): string[] {
   const unknown = new Set<string>();

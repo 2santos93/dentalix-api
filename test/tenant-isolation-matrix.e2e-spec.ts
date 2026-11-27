@@ -4371,22 +4371,34 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
           'Plan de tratamiento no encontrado',
         ],
       ] as const
-    ).map(([field, patch, message]): IsolationCase => ({
-      name: `POST /patients/:patientId/consents body.${field} de A`,
-      verb: 'post',
-      path: () => `/patients/${b.patientId}/consents`,
-      body: () => ({
-        templateId: b.consentTemplateId,
-        templateVersion: 1,
-        signerType: 'PATIENT',
-        patientSignature: SIGNATURE_PNG,
-        professionalSignature: SIGNATURE_PNG,
-        ...patch(),
-      }),
-      bodyIds: [field],
-      status: 404,
-      message,
-    })),
+    ).flatMap(([field, patch, message]): IsolationCase[] => [
+      {
+        // DX-060: la vista previa por POST (con quién firma).
+        name: `POST /patients/:patientId/consents/preview body.${field} de A`,
+        verb: 'post',
+        path: () => `/patients/${b.patientId}/consents/preview`,
+        body: () => ({ templateId: b.consentTemplateId, ...patch() }),
+        bodyIds: [field],
+        status: 404,
+        message,
+      },
+      {
+        name: `POST /patients/:patientId/consents body.${field} de A`,
+        verb: 'post',
+        path: () => `/patients/${b.patientId}/consents`,
+        body: () => ({
+          templateId: b.consentTemplateId,
+          templateVersion: 1,
+          signerType: 'PATIENT',
+          patientSignature: SIGNATURE_PNG,
+          professionalSignature: SIGNATURE_PNG,
+          ...patch(),
+        }),
+        bodyIds: [field],
+        status: 404,
+        message,
+      },
+    ]),
     {
       name: 'POST /post-op-templates body.appointmentTypeIds[] de A',
       verb: 'post',
@@ -4809,6 +4821,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
       routes: [
         'GET /patients/:patientId/consents',
         'GET /patients/:patientId/consents/preview',
+        'POST /patients/:patientId/consents/preview',
         'POST /patients/:patientId/consents',
         'GET /patients/:patientId/consents/:id',
       ],

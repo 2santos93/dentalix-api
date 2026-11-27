@@ -229,7 +229,7 @@ export interface SignatureRequestOptions {
     id: string;
     title: string;
     version: number;
-    /** El texto pinta {{tratamiento}}: sin plan dirá «No especificado». */
+    /** El texto pinta {{tratamiento}}: sin plan, una frase neutra (DX-060). */
     usesTreatment: boolean;
     /** La última vez que el paciente lo firmó y quedó completo (o null). */
     lastCompletedAt: Date | null;

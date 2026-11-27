@@ -59,7 +59,10 @@ import {
   SignedConsentPdfRetryDto,
   SignedPdfCopyResentDto,
 } from './dto/patient-consent.dto';
-import { PreviewPatientConsentQueryDto } from './dto/preview-patient-consent-query.dto';
+import {
+  PreviewPatientConsentBodyDto,
+  PreviewPatientConsentQueryDto,
+} from './dto/preview-patient-consent-query.dto';
 import {
   CountersignPatientConsentDto,
   SignPatientConsentDto,
@@ -152,6 +155,45 @@ export class PatientConsentsController {
     );
   }
 
+  /**
+   * DX-060: la vista previa con quién firma (la cláusula de representación de
+   * un tutor). POST para que el nombre y el documento del tutor no vayan en la
+   * URL; no guarda nada.
+   */
+  @Audit({
+    action: 'VIEW',
+    resource: 'CONSENT',
+    patient: { param: 'patientId' },
+  })
+  @Post('preview')
+  @HttpCode(200)
+  @ApiOkResponse({ type: ConsentPreviewDto })
+  @ApiNotFoundResponse({
+    description: 'Paciente, plantilla o plan no encontrados en esta clínica',
+  })
+  @ApiBadRequestResponse({
+    description:
+      'Plantilla desactivada, o firma un tutor sin nombre o documento',
+  })
+  previewWithSigner(
+    @Param('patientId', ParseUUIDPipe) patientId: string,
+    @Body() dto: PreviewPatientConsentBodyDto,
+    @Req() req: AuthenticatedRequest,
+  ): Promise<ConsentPreview> {
+    return this.previewConsent.execute(
+      patientId,
+      {
+        templateId: dto.templateId,
+        treatmentPlanId: dto.treatmentPlanId,
+        signerType: dto.signerType,
+        guardianName: dto.guardianName,
+        guardianDocument: dto.guardianDocument,
+        guardianRelationship: dto.guardianRelationship,
+      },
+      req.user.sub,
+    );
+  }
+
   @Audit({
     action: 'SIGN',
     resource: 'CONSENT',
@@ -187,6 +229,7 @@ export class PatientConsentsController {
         signerType: dto.signerType,
         guardianName: dto.guardianName,
         guardianDocument: dto.guardianDocument,
+        guardianRelationship: dto.guardianRelationship,
         patientSignature: dto.patientSignature,
         professionalSignature: dto.professionalSignature,
       },
