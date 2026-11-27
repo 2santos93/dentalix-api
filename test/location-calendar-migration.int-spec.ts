@@ -352,10 +352,11 @@ describe('DX-316 · trigger y reglas de la BD del calendario de la sede (int)', 
     expect(await calendarOf(id)).toEqual([]);
   });
 
-  it('deleting a clinic removes the calendar and holidays of its locations (tenant FK CASCADE)', async () => {
-    // Como location_reminder_settings: es configuración de la sede. Con
-    // RESTRICT, `tenant.deleteMany` de las limpiezas e2e fallaba por la fila
-    // que el trigger crea en cada sede.
+  it('a clinic with locations cannot be deleted; its calendar and holidays stay (DX-058-bis)', async () => {
+    // DX-058-bis: `locations` tiene FK RESTRICT a `tenants`, así que borrar la
+    // clínica ya no deja sedes huérfanas ni se lleva su calendario. Las FK de
+    // clínica del calendario y los festivos siguen en CASCADE (DX-316), pero
+    // solo pueden actuar cuando la clínica ya no tiene sedes.
     const tenantC = (
       await raw.tenant.create({
         data: { name: 'Clínica DX-316 C', subdomain: SUBDOMAINS[2] },
@@ -370,14 +371,21 @@ describe('DX-316 · trigger y reglas de la BD del calendario de la sede (int)', 
     await insertHoliday('2027-01-04', 'Cierre anual', false, tenantC, id);
     expect(await calendarOf(id)).toHaveLength(1);
 
-    await raw.tenant.delete({ where: { id: tenantC } });
+    await expect(raw.tenant.delete({ where: { id: tenantC } })).rejects.toThrow(
+      /locations_tenantId_fkey/,
+    );
 
-    expect(await calendarOf(id)).toEqual([]);
+    expect(await calendarOf(id)).toHaveLength(1);
     const holidays = await raw.$queryRaw<{ n: bigint }[]>`
       SELECT count(*) AS n FROM "location_holidays" WHERE "tenantId" = ${tenantC}::uuid`;
-    expect(Number(holidays[0].n)).toBe(0);
-    // `locations` no tiene FK al tenant: la sede huérfana se borra a mano.
+    expect(Number(holidays[0].n)).toBe(1);
+
+    // En orden: festivos, sede (el calendario cae con ella) y clínica.
+    await raw.$executeRaw`
+      DELETE FROM "location_holidays" WHERE "locationId" = ${id}::uuid`;
     await raw.$executeRaw`DELETE FROM "locations" WHERE "id" = ${id}::uuid`;
+    expect(await calendarOf(id)).toEqual([]);
+    await raw.tenant.delete({ where: { id: tenantC } });
   });
 
   it('a location with holidays cannot be hard-deleted', async () => {
