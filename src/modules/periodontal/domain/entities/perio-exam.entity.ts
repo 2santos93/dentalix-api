@@ -35,8 +35,14 @@ export interface PerioIndices {
   bopPercent: number;
   /** % de sitios examinados con placa (1 decimal). */
   plaquePercent: number;
+  /** Sitios con sondaje ≥ 4 mm (fijo, como en DX-007). */
   sites4mmOrMore: number;
+  /** Sitios con sondaje ≥ 6 mm (fijo, como en DX-007). */
   sites6mmOrMore: number;
+  /** DX-066: sitios con sondaje ≥ el umbral de alerta de la clínica. */
+  sitesAlertOrMore: number;
+  /** DX-066: sitios con sondaje ≥ el umbral severo de la clínica. */
+  sitesSevereOrMore: number;
 }
 
 export interface PerioExamHeader {
@@ -70,4 +76,59 @@ export interface PerioExamDetail extends PerioExamHeader {
   sites: PerioSiteMeasureWithCal[];
   teeth: PerioToothMeasure[];
   indices: PerioIndices;
+  /** DX-066: umbrales de la clínica con los que se colorea y se cuenta. */
+  thresholds: PerioThresholdsView;
+}
+
+/** DX-066: umbrales de sondaje de la clínica (mm). */
+export interface PerioThresholdsView {
+  pdAlertMm: number;
+  pdSevereMm: number;
+}
+
+/** DX-066: un examen dentro de la comparación (sin medidas). */
+export interface PerioComparisonExam {
+  id: string;
+  examDate: string;
+  providerId: string;
+  providerName: string;
+  finalizedAt: Date | null;
+  indices: PerioIndices;
+}
+
+/** Valor de un sitio en un examen de la comparación. */
+export interface PerioComparisonValue {
+  probingMm: number | null;
+  calMm: number | null;
+  bleeding: boolean;
+  /** El diente estaba omitido (ausente / no sondable) en ese examen. */
+  skipped: boolean;
+  /** Δ sondaje frente al examen anterior de la selección (null en el 1.º o sin dato). */
+  deltaProbingMm: number | null;
+  /** Δ NIC frente al examen anterior de la selección. */
+  deltaCalMm: number | null;
+}
+
+/** Un sitio en todos los exámenes comparados, en el orden de `exams`. */
+export interface PerioComparisonSite {
+  toothFdi: number;
+  site: PerioSite;
+  values: PerioComparisonValue[];
+  /** Δ sondaje del último examen frente al primero (null sin los dos datos). */
+  deltaProbingMm: number | null;
+  /** Δ NIC del último frente al primero. */
+  deltaCalMm: number | null;
+  /** Δ sondaje o Δ NIC (último − primero) ≥ `worseningMm`. */
+  worsened: boolean;
+  /** Δ sondaje o Δ NIC (último − primero) ≤ −`worseningMm`. */
+  improved: boolean;
+}
+
+export interface PerioComparison {
+  thresholds: PerioThresholdsView;
+  /** Umbral de cambio relevante (2 mm). */
+  worseningMm: number;
+  /** Por fecha de examen ascendente (el más antiguo primero). */
+  exams: PerioComparisonExam[];
+  sites: PerioComparisonSite[];
 }

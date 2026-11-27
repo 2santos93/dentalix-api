@@ -86,6 +86,9 @@ model Tenant {
   orthoOverdueDays                        Int                              @default(30) @db.SmallInt
   /// DX-556: meses tras los que un prospecto PERDIDO se anonimiza (1–120, CHECK tenants_lead_lost_retention_months_check; 12 de fábrica). Solo ADMIN (PUT /leads/settings).
   leadLostRetentionMonths                 Int                              @default(12) @db.SmallInt
+  /// DX-066: sondaje (mm) desde el que un sitio del periodontograma está en alerta (2–10, 4 de fábrica) y desde el que es severo (3–12, 6 de fábrica); alerta < severo (CHECK tenants_perio_pd_thresholds_check). Colorean la carta y cuentan en los índices. Solo ADMIN (PUT /perio/settings, auditado).
+  perioPdAlertMm                          Int                              @default(4) @db.SmallInt
+  perioPdSevereMm                         Int                              @default(6) @db.SmallInt
   /// DX-374: de dónde sale la tasa de cambio del día de la clínica: el
   /// proveedor (AUTOMATIC, lo de siempre) o las tasas manuales que registra
   /// el ADMIN (MANUAL). Lo cambia el ADMIN (PUT /exchange/settings, auditado).

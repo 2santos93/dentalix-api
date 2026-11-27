@@ -382,6 +382,10 @@ export const ID_INPUTS_COVERED_ELSEWHERE: Record<string, string> = {
   'POST /appointments body.chairId': 'chairs.e2e-spec.ts',
   'PATCH /appointments/:id body.chairId': 'chairs.e2e-spec.ts',
   'GET /appointments ?chairIds[]': 'chairs.e2e-spec.ts',
+  // DX-066: «B manda exámenes de A a la comparación → 404 y nada se
+  // devuelve» (desde el paciente de A y desde uno propio).
+  'GET /patients/:patientId/perio-exams/compare ?examIds[]':
+    'perio-exams.e2e-spec.ts',
   // DX-492: «Buscar hueco», «Atender sin cita» y «Agendar aquí» con sillón.
   'GET /appointments/openings ?chairIds[]': 'chairs.e2e-spec.ts',
   'POST /appointments/walk-in body.chairId': 'chairs.e2e-spec.ts',
