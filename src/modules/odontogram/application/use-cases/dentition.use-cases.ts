@@ -26,6 +26,10 @@ import {
   type OdontogramClock,
 } from '../odontogram-clock';
 
+/** DX-132: 422 de una erupción hacia dentición temporal. */
+export const ERUPTION_TO_PRIMARY_MESSAGE =
+  'Una erupción deja la posición en dentición mixta o permanente, no temporal';
+
 /** Tope de posiciones por petición: la boca entera. */
 export const MAX_DENTITION_POSITIONS = 32;
 
@@ -127,6 +131,13 @@ export class RecordDentitionEventsUseCase {
       throw new BadRequestException(
         'Indica de 1 a 32 posiciones distintas con su código FDI permanente (11-18, 21-28, 31-38, 41-48)',
       );
+    }
+    // DX-132: la erupción del permanente nunca deja la posición en temporal.
+    if (
+      reason === DentitionEventReason.ERUPTION &&
+      dentition === DentitionType.PRIMARY
+    ) {
+      throw new UnprocessableEntityException(ERUPTION_TO_PRIMARY_MESSAGE);
     }
     const molars = positions.filter((p) => !hasPrimaryPredecessor(p));
     if (dentition === DentitionType.MIXED && molars.length > 0) {

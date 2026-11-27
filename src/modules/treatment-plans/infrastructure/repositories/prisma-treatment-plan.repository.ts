@@ -9,7 +9,6 @@ import {
   ClinicRole,
   ExchangeRateSource,
   Prisma,
-  ToothRecordStatus,
   TreatmentPlanItemStatus,
 } from '@prisma/client';
 import { PrismaService } from '../../../../shared/prisma/prisma.service';
@@ -25,7 +24,6 @@ import {
   DecideTemplateItems,
   TemplateApplicationAudit,
   DiscountStamp,
-  DoneMirrorInput,
   CreateTreatmentPlanRepoInput,
   PlanFacts,
   TreatmentPlanRepository,
@@ -60,6 +58,7 @@ import {
 } from '../../../discounts/domain/reference-in-plan';
 import type { AuditAttributionSide } from '../../../audit/domain/audit-metadata';
 import { writeAuditEvent } from '../../../audit/infrastructure/prisma-audit-event.repository';
+import { mirrorPlanItemIntoOdontogram } from '../../../odontogram/infrastructure/plan-item-mirror';
 import {
   NO_PROCEDURE_RECALLS,
   procedureRecallUpdates,
@@ -784,7 +783,45 @@ export class PrismaTreatmentPlanRepository implements TreatmentPlanRepository {
         previous.status !== TreatmentPlanItemStatus.DONE &&
         item.status === TreatmentPlanItemStatus.DONE;
       if (mirror && becameDone) {
-        await mirrorIntoOdontogram(tx, tenantId, item, mirror);
+        // Pieza B / DX-132: copia (o re-copia, si la anterior se anuló) en el
+        // odontograma con la regla posición/dentición del alta manual (422).
+        const mirrored = await mirrorPlanItemIntoOdontogram(tx, {
+          tenantId,
+          patientId: mirror.patientId,
+          planItemId: item.id,
+          toothNumber: item.toothNumber,
+          surfaces: item.surfaces,
+          kind: mirror.kind,
+          catalogItemId: item.catalogItemId,
+          performedById: mirror.performedById,
+          locationId: this.tenantContext.getLocationId() ?? null,
+          now: new Date(),
+        });
+        // DX-132: la re-copia es un registro clínico nuevo: su propio evento
+        // (el PATCH del ítem ya queda auditado por el interceptor).
+        if (
+          mirrored.kind === 'CREATED' &&
+          mirrored.replacesRecordId !== null &&
+          audit
+        ) {
+          await writeAuditEvent(tx, {
+            tenantId,
+            locationId: audit.locationId,
+            actor: {
+              kind: 'user',
+              userId: audit.actor.userId,
+              role: audit.actor.role,
+            },
+            action: 'CREATE',
+            resourceType: 'ODONTOGRAM',
+            resourceId: mirrored.recordId,
+            patient: { kind: 'patient', id: mirror.patientId },
+            requestId: audit.requestId,
+            ip: audit.ip,
+            userAgent: audit.userAgent,
+            metadata: { reason: 'PLAN_ITEM_MIRROR_RECOPIED' },
+          });
+        }
       }
 
       // DX-015-bis: el reloj del recall lo mueve el procedimiento, en esta
@@ -1210,39 +1247,4 @@ function attributionSide(item: PrismaTreatmentPlanItem): AuditAttributionSide {
     locationId: item.performedLocationId,
     completedAt: item.completedAt?.toISOString() ?? null,
   };
-}
-
-/**
- * Registro COMPLETED del odontograma para un ítem que acaba de pasar a DONE,
- * dentro de la transacción del cambio de estado. Solo INSERTA (el odontograma
- * es append-only). Comprueba antes que el ítem no se haya espejado ya (un ítem
- * que vuelve a DONE tras revertirse no se duplica); el índice único parcial
- * `tooth_records_source_plan_item_key` es el respaldo de la base.
- */
-async function mirrorIntoOdontogram(
-  tx: Prisma.TransactionClient,
-  tenantId: string,
-  item: PrismaTreatmentPlanItem,
-  mirror: DoneMirrorInput,
-): Promise<void> {
-  const already = await tx.toothRecord.findFirst({
-    where: { sourcePlanItemId: item.id, deletedAt: null },
-    select: { id: true },
-  });
-  if (already) return;
-
-  await tx.toothRecord.create({
-    data: {
-      tenantId,
-      patientId: mirror.patientId,
-      toothNumber: item.toothNumber,
-      surfaces: item.surfaces,
-      kind: mirror.kind,
-      catalogItemId: item.catalogItemId,
-      status: ToothRecordStatus.COMPLETED,
-      performedById: mirror.performedById,
-      sourcePlanItemId: item.id,
-      recordedAt: new Date(),
-    },
-  });
 }

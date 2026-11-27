@@ -18,6 +18,8 @@ import { assertPatientInClinic } from '../../../patients/application/assert-pati
 export const TOOTH_RECORD_NOT_FOUND_MESSAGE =
   'Registro del odontograma no encontrado';
 export const VOID_REASON_MAX = 500;
+export const VOID_REASON_REQUIRED_MESSAGE =
+  'El motivo de la anulación es obligatorio';
 
 @Injectable()
 export class VoidToothRecordUseCase {
@@ -43,7 +45,7 @@ export class VoidToothRecordUseCase {
   ): Promise<ToothRecord> {
     const trimmed = reason.trim();
     if (trimmed === '') {
-      throw new BadRequestException('El motivo de la anulación es obligatorio');
+      throw new BadRequestException(VOID_REASON_REQUIRED_MESSAGE);
     }
     if (trimmed.length > VOID_REASON_MAX) {
       throw new BadRequestException(

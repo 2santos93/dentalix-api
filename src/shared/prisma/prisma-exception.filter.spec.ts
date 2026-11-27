@@ -64,9 +64,9 @@ describe('conflictMessageForTarget', () => {
   });
 
   it('maps the odontogram mirror index (DX-042)', () => {
-    expect(conflictMessageForTarget('tooth_records_source_plan_item_key')).toBe(
-      'Ese procedimiento ya está registrado en el odontograma.',
-    );
+    expect(
+      conflictMessageForTarget('tooth_records_source_plan_item_mirror_key'),
+    ).toBe('Ese procedimiento ya está registrado en el odontograma.');
   });
 
   it('maps a second void of the same odontogram record (DX-120)', () => {
