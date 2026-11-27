@@ -13,6 +13,7 @@ import {
 import { APPOINTMENT_REPOSITORY } from '../../domain/ports/appointment-repository.port';
 import type {
   AppointmentRepository,
+  CompletedFlowAppointment,
   InClinicAppointment,
 } from '../../domain/ports/appointment-repository.port';
 import { LOCATION_REPOSITORY } from '../../../locations/domain/ports/location-repository.port';
@@ -34,6 +35,7 @@ import type { ChairSummary } from '../../../chairs/domain/entities/chair.entity'
 import { requireLocationTimeZone } from '../../../../shared/locations/location-time-zone';
 import { requireLocationFormat } from '../../../../shared/locations/location-regional';
 import type { HourCycle } from '../../../../shared/format/regional-format';
+import { classifyTiming } from '../../../reports/domain/timing';
 
 export const IN_CLINIC_NO_LOCATION_MESSAGE =
   'Elige una sede para ver quién está en la clínica.';
@@ -95,6 +97,62 @@ export interface InClinicItem {
   triageNote: string | null;
 }
 
+/** DX-275: el paso del flujo cuya hora falta. */
+export type FlowMark = 'ARRIVED' | 'IN_CHAIR' | 'READY_FOR_CHECKOUT';
+
+/**
+ * DX-275: una cita completada del día que el informe «Tiempos» deja fuera:
+ * sin alguna de las tres horas (WITHOUT_TIMES) o con horas imposibles
+ * (INCOHERENT, los umbrales del informe). Nombre y horas, sin historia.
+ */
+export interface CompletedWithoutTimesItem {
+  appointmentId: string;
+  patientId: string;
+  patientFirstName: string | null;
+  patientLastName: string | null;
+  providerId: string;
+  providerName: string | null;
+  start: Date;
+  end: Date;
+  arrivedAt: Date | null;
+  seatedAt: Date | null;
+  readyForCheckoutAt: Date | null;
+  timingIssue: 'WITHOUT_TIMES' | 'INCOHERENT';
+  /** Los pasos sin hora (vacío en INCOHERENT). */
+  missingMarks: FlowMark[];
+}
+
+/** Las completadas del día fuera del informe de tiempos, por hora. */
+export function completedWithoutTimes(
+  rows: readonly CompletedFlowAppointment[],
+): CompletedWithoutTimesItem[] {
+  return rows.flatMap((a): CompletedWithoutTimesItem[] => {
+    const { kind } = classifyTiming(a);
+    if (kind === 'MEASURED') return [];
+    const missingMarks: FlowMark[] = [];
+    if (a.arrivedAt === null) missingMarks.push('ARRIVED');
+    if (a.seatedAt === null) missingMarks.push('IN_CHAIR');
+    if (a.readyForCheckoutAt === null) missingMarks.push('READY_FOR_CHECKOUT');
+    return [
+      {
+        appointmentId: a.id,
+        patientId: a.patientId,
+        patientFirstName: a.patientFirstName,
+        patientLastName: a.patientLastName,
+        providerId: a.providerId,
+        providerName: a.providerName,
+        start: a.start,
+        end: a.end,
+        arrivedAt: a.arrivedAt,
+        seatedAt: a.seatedAt,
+        readyForCheckoutAt: a.readyForCheckoutAt,
+        timingIssue: kind,
+        missingMarks,
+      },
+    ];
+  });
+}
+
 export interface InClinicView<Item extends InClinicItem = InClinicItem> {
   date: string;
   locationId: string;
@@ -109,6 +167,11 @@ export interface InClinicView<Item extends InClinicItem = InClinicItem> {
   waiting: Item[];
   inChair: Item[];
   readyForCheckout: Item[];
+  /**
+   * DX-275: las citas del día ya completadas que el informe «Tiempos» no
+   * podrá medir (la marca «sin tiempos» del panel), por hora de la cita.
+   */
+  completedWithoutTimes: CompletedWithoutTimesItem[];
 }
 
 /** Cuándo entró en el grupo en el que está. */
@@ -205,12 +268,15 @@ export class ListInClinicUseCase {
     const range = civilDayRange(date, timeZone);
     const mine = input.role === ClinicRole.DENTIST;
 
-    const rows = await this.repo.listInClinic({
+    const params = {
       locationId: location.id,
       from: range.start,
       to: range.end,
       ...(mine ? { providerId: input.userId } : {}),
-    });
+    };
+    const rows = await this.repo.listInClinic(params);
+    // DX-275: las completadas del día sin tiempos válidos.
+    const completed = await this.repo.listCompletedFlow(params);
     // DX-273: el aviso de reserva en otra cita, en una consulta por lote.
     const reserved = await this.repo.findPlanItemsReservedElsewhere(
       rows.map((r) => r.id),
@@ -232,6 +298,7 @@ export class ListInClinicUseCase {
       waiting: group(AppointmentStatus.ARRIVED),
       inChair: group(AppointmentStatus.IN_CHAIR),
       readyForCheckout: group(AppointmentStatus.READY_FOR_CHECKOUT),
+      completedWithoutTimes: completedWithoutTimes(completed),
     };
   }
 }

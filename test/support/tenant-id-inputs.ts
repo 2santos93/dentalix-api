@@ -193,6 +193,11 @@ export const ID_INPUTS_IN_MATRIX: readonly string[] = [
   'GET /reports/retention/patients ?providerId',
   'GET /reports/retention/patients.csv ?locationId',
   'GET /reports/retention/patients.csv ?providerId',
+  // DX-275: «Tiempos» y su CSV.
+  'GET /reports/timing ?locationId',
+  'GET /reports/timing ?providerId',
+  'GET /reports/timing.csv ?locationId',
+  'GET /reports/timing.csv ?providerId',
   'GET /reports/scheduled-production ?locationId',
   'GET /reports/scheduled-production ?providerId',
   'GET /reports/scheduled-production/unlinked ?locationId',

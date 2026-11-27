@@ -65,6 +65,7 @@ import {
   CancellationWrite,
   CreateAppointmentRepoInput,
   InClinicAppointment,
+  CompletedFlowAppointment,
   ListAppointmentsByRangeParams,
   ListInClinicParams,
   ListUpcomingAppointmentsParams,
@@ -1019,6 +1020,56 @@ export class PrismaAppointmentRepository implements AppointmentRepository {
         include: INCLUDE_PATIENT_NAME,
       });
       return mapToEntity(appointment);
+    });
+  }
+
+  async listCompletedFlow(
+    params: ListInClinicParams,
+  ): Promise<CompletedFlowAppointment[]> {
+    return this.prisma.runWithTenant(async (tx) => {
+      // DX-275: las completadas de UN día de la sede, por
+      // `appointments_tenant_location_start_idx`. RLS acota a la clínica.
+      const appointments = await tx.appointment.findMany({
+        where: {
+          locationId: params.locationId,
+          deletedAt: null,
+          status: AppointmentStatus.COMPLETED,
+          start: { gte: params.from, lt: params.to },
+          ...(params.providerId ? { providerId: params.providerId } : {}),
+        },
+        orderBy: [{ start: 'asc' }, { id: 'asc' }],
+        select: {
+          id: true,
+          patientId: true,
+          providerId: true,
+          start: true,
+          end: true,
+          arrivedAt: true,
+          seatedAt: true,
+          readyForCheckoutAt: true,
+          patient: { select: { firstName: true, lastName: true } },
+        },
+      });
+      const providerIds = [...new Set(appointments.map((a) => a.providerId))];
+      // El nombre, por la membresía (con RLS), como en `listInClinic`.
+      const memberships =
+        providerIds.length === 0
+          ? []
+          : await tx.clinicMembership.findMany({
+              where: { userId: { in: providerIds } },
+              orderBy: { createdAt: 'desc' },
+              select: { userId: true, user: { select: { fullName: true } } },
+            });
+      const names = new Map<string, string>();
+      for (const m of memberships) {
+        if (!names.has(m.userId)) names.set(m.userId, m.user.fullName);
+      }
+      return appointments.map(({ patient, ...a }) => ({
+        ...a,
+        patientFirstName: patient?.firstName ?? null,
+        patientLastName: patient?.lastName ?? null,
+        providerName: names.get(a.providerId) ?? null,
+      }));
     });
   }
 
