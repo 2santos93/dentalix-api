@@ -23,4 +23,12 @@ export interface AuditEventRepository {
   ): Promise<AuditEventView[]>;
   /** Zona de la sede activa o, sin ella, de la sede principal. */
   clinicTimeZone(tenantId: string, locationId?: string): Promise<string>;
+  /**
+   * DX-095: nombre del paciente del filtro, bajo RLS (uno de otra clínica o
+   * inexistente da `null`). Leerlo no deja evento: es el registro de accesos.
+   */
+  patientName(
+    tenantId: string,
+    patientId: string,
+  ): Promise<{ id: string; fullName: string } | null>;
 }

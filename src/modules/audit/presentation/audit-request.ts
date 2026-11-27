@@ -44,6 +44,11 @@ export interface AuditScope {
   tenantId: string;
   locationId: string | null;
   requestId: string | null;
+  /**
+   * DX-095: los campos que declara el DTO del cuerpo de la ruta (ver
+   * `auditBodyDtoFields`). Sin él (`null` o ausente), no se cruza.
+   */
+  bodyDtoFields?: ReadonlySet<string> | null;
 }
 
 function uuidOrNull(value: unknown): string | null {
@@ -266,7 +271,13 @@ function handlerMetadata(
   options: AuditOptions,
   req: AuditedRequest,
 ): Record<string, unknown> {
-  const { healthRegistration, ...rest } = req.auditMetadata ?? {};
+  // DX-095: `changedFields` del handler solo cuenta en un UPDATE, y ahí lo
+  // resuelve `changedFieldsOf` (cruzado con el DTO).
+  const {
+    healthRegistration,
+    changedFields: _changedFields,
+    ...rest
+  } = req.auditMetadata ?? {};
   return options.resource === 'LOCATION'
     ? { ...rest, healthRegistration }
     : rest;
@@ -313,8 +324,26 @@ function bodyFields(body: unknown): string[] {
 }
 
 /**
+ * DX-095: `changedFields` de un UPDATE. Si el handler sabe qué cambió de
+ * verdad (comparó con lo guardado), deja la lista en
+ * `req.auditMetadata.changedFields` y manda: un campo que llega igual no
+ * figura, y una lista vacía es «no cambió nada». Si no, los campos enviados.
+ * En los dos casos se cruzan con el DTO de la ruta, cuando lo hay: un campo
+ * que la ValidationPipe descarta (`whitelist`) no se cambió.
+ */
+function changedFieldsOf(req: AuditedRequest, scope: AuditScope): string[] {
+  const fromHandler = req.auditMetadata?.changedFields;
+  const fields = Array.isArray(fromHandler)
+    ? fromHandler.filter((f): f is string => typeof f === 'string')
+    : bodyFields(req.body);
+  const dto = scope.bodyDtoFields;
+  return dto ? fields.filter((f) => dto.has(f)) : fields;
+}
+
+/**
  * Evento de una petición que terminó bien. La metadata lleva los parámetros de
- * la ruta y, en un UPDATE, los nombres de los campos enviados, saneada con
+ * la ruta y, en un UPDATE, los nombres de los campos cambiados (DX-095: los
+ * que dice el handler o, si no, los enviados; cruzados con el DTO), saneada con
  * `sanitizeAuditMetadata`: un valor que no sea un id o un nombre de campo no
  * llega a la tabla. `null` sin sesión de clínica.
  */
@@ -340,7 +369,7 @@ export function buildAuditDraft(
     metadata: sanitizeAuditMetadata({
       ...handlerMetadata(options, req),
       ...(options.action === 'UPDATE'
-        ? { changedFields: bodyFields(req.body) }
+        ? { changedFields: changedFieldsOf(req, scope) }
         : {}),
       // DX-379 (B): el handler puede añadir ids a los de la ruta (p. ej.
       // `repricingId`, la fila con el antes y el después). Los de la ruta van

@@ -268,6 +268,90 @@ describe('buildAuditDraft (DX-009)', () => {
     expect(JSON.stringify(draft)).not.toMatch(/Penicilina|4121234567/);
   });
 
+  describe('changedFields exactos (DX-095)', () => {
+    const PATCH_PATIENT: AuditOptions = {
+      action: 'UPDATE',
+      resource: 'PATIENT',
+      resourceId: { param: 'id' },
+      patient: { param: 'id' },
+    };
+
+    it('cruzado con el DTO: un campo de más que la ValidationPipe descarta no figura', () => {
+      const draft = buildAuditDraft(
+        PATCH_PATIENT,
+        req({
+          params: { id: PATIENT },
+          body: { phone: '4121234567', tenantId: TENANT, isAdmin: true },
+        }),
+        { id: PATIENT },
+        { ...scope, bodyDtoFields: new Set(['phone', 'firstName']) },
+      );
+      expect(draft?.metadata).toEqual({
+        changedFields: ['phone'],
+        params: { id: PATIENT },
+      });
+    });
+
+    it('los que el handler sabe que cambiaron mandan sobre los enviados (los iguales no figuran)', () => {
+      const draft = buildAuditDraft(
+        PATCH_PATIENT,
+        req({
+          params: { id: PATIENT },
+          body: { phone: '4121234567', firstName: 'Ana', email: 'a@b.ve' },
+          auditMetadata: { changedFields: ['phone'] },
+        }),
+        { id: PATIENT },
+        { ...scope, bodyDtoFields: new Set(['phone', 'firstName', 'email']) },
+      );
+      expect(draft?.metadata).toEqual({
+        changedFields: ['phone'],
+        params: { id: PATIENT },
+      });
+    });
+
+    it('el handler dice que no cambió nada: el evento queda, sin changedFields', () => {
+      const draft = buildAuditDraft(
+        PATCH_PATIENT,
+        req({
+          params: { id: PATIENT },
+          body: { phone: '4121234567' },
+          auditMetadata: { changedFields: [] },
+        }),
+        { id: PATIENT },
+        scope,
+      );
+      expect(draft?.metadata).toEqual({ params: { id: PATIENT } });
+    });
+
+    it('los del handler también se cruzan con el DTO', () => {
+      const draft = buildAuditDraft(
+        PATCH_PATIENT,
+        req({
+          params: { id: PATIENT },
+          body: { phone: '4121234567' },
+          auditMetadata: { changedFields: ['phone', 'internalOnly'] },
+        }),
+        { id: PATIENT },
+        { ...scope, bodyDtoFields: new Set(['phone']) },
+      );
+      expect(draft?.metadata.changedFields).toEqual(['phone']);
+    });
+
+    it('fuera de un UPDATE no hay changedFields aunque el handler los ponga', () => {
+      const draft = buildAuditDraft(
+        { ...PATCH_PATIENT, action: 'CREATE' },
+        req({
+          params: { id: PATIENT },
+          body: { phone: '4121234567' },
+          auditMetadata: { changedFields: ['phone'] },
+        }),
+        { id: PATIENT },
+        scope,
+      );
+      expect(draft?.metadata.changedFields).toBeUndefined();
+    });
+  });
+
   it('DX-319: añade el antes/después que el handler deja en la petición, saneado', () => {
     const LOCATION = '66666666-6666-4666-8666-666666666666';
     const healthRegistration = {

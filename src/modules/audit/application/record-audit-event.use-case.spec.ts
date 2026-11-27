@@ -31,6 +31,7 @@ function repoWith(
     insert,
     list: jest.fn(),
     clinicTimeZone: jest.fn(),
+    patientName: jest.fn(),
   };
 }
 

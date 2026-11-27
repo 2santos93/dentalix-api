@@ -49,6 +49,12 @@ export const ACCOUNT_CLAIM_BLOCKED_MESSAGE =
 /** Motivo del evento de auditoría al reclamar una cuenta no verificada. */
 export const ACCOUNT_CLAIM_AUDIT_REASON = 'INVITATION_ACCOUNT_CLAIM';
 
+/**
+ * DX-095: motivo del LOGIN que deja aceptar una invitación (abre la primera
+ * sesión del miembro sin pasar por /login).
+ */
+export const INVITATION_LOGIN_AUDIT_REASON = 'INVITATION_LOGIN';
+
 export interface AcceptInvitationInput {
   token: string;
   password: string;
@@ -249,6 +255,22 @@ export class AcceptInvitationUseCase {
       ip: input.meta?.ip ?? null,
       userAgent: input.meta?.userAgent ?? null,
       kind: 'CONTINUATION',
+    });
+    // DX-095: es un inicio de sesión como el de /login, y queda como tal en
+    // la auditoría (con su motivo, para distinguirlo). Como el resto de
+    // eventos, si la escritura falla la aceptación no se rompe.
+    await this.audit.record({
+      tenantId,
+      locationId: null,
+      actor: { kind: 'user', userId, role: invitation.role },
+      action: 'LOGIN',
+      resourceType: 'SESSION',
+      resourceId: null,
+      patient: null,
+      requestId: input.meta?.requestId ?? null,
+      ip: input.meta?.ip ?? null,
+      userAgent: input.meta?.userAgent ?? null,
+      metadata: { reason: INVITATION_LOGIN_AUDIT_REASON },
     });
     return pair;
   }

@@ -54,7 +54,10 @@ import {
   ListPatientsOutput,
 } from '../application/use-cases/list-patients.use-case';
 import { GetPatientUseCase } from '../application/use-cases/get-patient.use-case';
-import { UpdatePatientUseCase } from '../application/use-cases/update-patient.use-case';
+import {
+  UpdatePatientUseCase,
+  type UpdatePatientSignals,
+} from '../application/use-cases/update-patient.use-case';
 import { Patient } from '../domain/entities/patient.entity';
 import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { RolesGuard } from '../../auth/presentation/guards/roles.guard';
@@ -177,7 +180,11 @@ type PatientPageOutput = Omit<ListPatientsOutput, 'items'> & {
 
 // RolesGuard (a nivel de clase) ya rechazó cualquier token sin rol de clínica
 // (los de plataforma), así que aquí `user` es siempre un token de clínica.
-type AuthenticatedRequest = EvidenceRequest & { user: TenantJwtPayload };
+type AuthenticatedRequest = EvidenceRequest & {
+  user: TenantJwtPayload;
+  /** DX-095: metadata del evento que solo conoce el handler. */
+  auditMetadata?: Record<string, unknown>;
+};
 
 @ApiTags('patients')
 @ApiBearerAuth()
@@ -618,6 +625,8 @@ export class PatientsController {
   ): Promise<PatientOutput> {
     // DX-172: el contexto, para el evento con antes/después de la captación.
     const ctx = auditRequestContext(req, this.tenantContext);
+    // DX-095: el evento UPDATE PATIENT lista solo los campos que cambiaron.
+    const signals: UpdatePatientSignals = {};
     const patient = await this.updatePatient.execute(
       id,
       {
@@ -632,7 +641,9 @@ export class PatientsController {
             : new Date(dto.birthDate),
       },
       ctx,
+      signals,
     );
+    req.auditMetadata = { changedFields: signals.changedFields ?? [] };
     return this.presentOne(patient);
   }
 

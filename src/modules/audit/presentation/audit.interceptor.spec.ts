@@ -1,11 +1,13 @@
 import {
   BadRequestException,
+  Body,
   CallHandler,
   ExecutionContext,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { IsOptional, IsString } from 'class-validator';
 import { lastValueFrom, of, throwError } from 'rxjs';
 import { AuditInterceptor } from './audit.interceptor';
 import { AUDIT_OPTIONS, type AuditOptions } from './audit-options';
@@ -26,10 +28,15 @@ function handlerWith(options: AuditOptions | undefined): () => void {
   return handler;
 }
 
-function ctx(req: AuditedRequest, handler: () => void): ExecutionContext {
+function ctx(
+  req: AuditedRequest,
+  handler: (...args: never[]) => void,
+  controller: object = class NoController {},
+): ExecutionContext {
   return {
     getType: () => 'http',
     getHandler: () => handler,
+    getClass: () => controller,
     switchToHttp: () => ({ getRequest: () => req }),
   } as unknown as ExecutionContext;
 }
@@ -53,12 +60,13 @@ function setup() {
     options: AuditOptions | undefined,
     next: CallHandler<T>,
     tenant: string | null = TENANT,
+    route?: { controller: object; handler: (...args: never[]) => void },
   ): Promise<T> =>
     requestContext.run({ requestId: 'req-00000042' }, () => {
-      const call = () =>
-        lastValueFrom(
-          interceptor.intercept(ctx(req, handlerWith(options)), next),
-        );
+      const context = route
+        ? ctx(req, route.handler, route.controller)
+        : ctx(req, handlerWith(options));
+      const call = () => lastValueFrom(interceptor.intercept(context, next));
       return tenant ? tenantContext.run(tenant, LOCATION, call) : call();
     }) as Promise<T>;
   return { drafts, recorder: { record }, run };
@@ -105,6 +113,34 @@ describe('AuditInterceptor (DX-009)', () => {
       userAgent: 'Firefox',
     });
     expect(JSON.stringify(drafts)).not.toContain('Penicilina');
+  });
+
+  it('DX-095: en un UPDATE, changedFields se cruza con el DTO del cuerpo de la ruta', async () => {
+    class PatchPhoneDto {
+      @IsOptional()
+      @IsString()
+      phone?: string;
+    }
+    class PhoneController {
+      update(@Body() _dto: PatchPhoneDto): void {}
+    }
+    const UPDATE_PATIENT: AuditOptions = {
+      action: 'UPDATE',
+      resource: 'PATIENT',
+      patient: { param: 'patientId' },
+    };
+    // Como el método `update` del controlador: el interceptor lee su nombre.
+    const update = handlerWith(UPDATE_PATIENT);
+    Object.defineProperty(update, 'name', { value: 'update' });
+    const { drafts, run } = setup();
+    await run(
+      { ...clinicalReq(), body: { phone: '4121234567', smuggled: 'x' } },
+      UPDATE_PATIENT,
+      { handle: () => of({}) },
+      TENANT,
+      { controller: PhoneController, handler: update },
+    );
+    expect(drafts[0]?.metadata.changedFields).toEqual(['phone']);
   });
 
   it('DX-259: si el handler marca la petición como ya auditada (repetición idempotente), no escribe otro evento', async () => {

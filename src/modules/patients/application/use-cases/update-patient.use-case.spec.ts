@@ -140,6 +140,42 @@ describe('UpdatePatientUseCase', () => {
     });
   });
 
+  it('DX-095: deja en `signals.changedFields` solo los campos enviados que de verdad cambiaron', async () => {
+    const existing = fakePatient({
+      phone: '4121234567',
+      email: 'ana@example.com',
+      birthDate: new Date('1990-05-01T00:00:00.000Z'),
+    });
+    const repo = makeRepo({
+      findById: (): Promise<Patient | null> => Promise.resolve(existing),
+      update: (): Promise<Patient> =>
+        Promise.resolve(fakePatient({ ...existing, phone: '4149876543' })),
+    });
+    const uc = new UpdatePatientUseCase(
+      repo,
+      makeReferenceLookup(),
+      new FakePatientCommunicationRepository(),
+    );
+    const signals: { changedFields?: string[] } = {};
+
+    await uc.execute(
+      existing.id,
+      {
+        // El formulario manda la ficha entera: nombre, email (con otra
+        // capitalización) y fecha iguales; solo el teléfono cambia.
+        firstName: 'Ana',
+        email: '  Ana@Example.com ',
+        birthDate: new Date('1990-05-01T00:00:00.000Z'),
+        phone: '4149876543',
+        notes: undefined,
+      },
+      undefined,
+      signals,
+    );
+
+    expect(signals.changedFields).toEqual(['phone']);
+  });
+
   it('throws NotFoundException when the patient does not exist (or belongs to another tenant)', async () => {
     const repo = makeRepo({
       findById: (): Promise<Patient | null> => Promise.resolve(null),

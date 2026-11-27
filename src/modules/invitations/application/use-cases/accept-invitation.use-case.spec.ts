@@ -134,12 +134,13 @@ describe('AcceptInvitationUseCase', () => {
     });
     const tokens = makeTokens();
     const ctx = new TenantContextService();
+    const audit = makeAudit();
     const uc = new AcceptInvitationUseCase(
       repo,
       makePassword(),
       tokens,
       ctx,
-      makeAudit(),
+      audit,
       { needsSecondFactor: () => Promise.resolve(true) } as never,
       sessionsStub,
     );
@@ -149,6 +150,52 @@ describe('AcceptInvitationUseCase', () => {
     expect(result).toEqual({ loginRequired: true });
     expect(jest.mocked(tokens).issue.mock.calls).toHaveLength(0);
     expect(await repo.listPending()).toHaveLength(0);
+    // DX-095: sin sesión no hay LOGIN; lo dejará el /login con el segundo factor.
+    expect(audit.recordMock).not.toHaveBeenCalled();
+  });
+
+  it('DX-095: abrir la sesión al aceptar deja un LOGIN del miembro, con su rol, IP y request id, y el motivo INVITATION_LOGIN', async () => {
+    const repo = new InMemoryInvitationRepository();
+    repo.seedInvitation({
+      token: 'tok-login',
+      email: 'recepcion@clinic.com',
+      role: ClinicRole.RECEPTION,
+    });
+    const ctx = new TenantContextService();
+    const audit = makeAudit();
+    const uc = new AcceptInvitationUseCase(
+      repo,
+      makePassword(),
+      makeTokens(),
+      ctx,
+      audit,
+      noSecondFactor,
+      sessionsStub,
+    );
+
+    await ctx.run('t1', () =>
+      uc.execute({
+        token: 'tok-login',
+        password: 'longenough1',
+        meta: { requestId: 'req-7', ip: '10.0.0.7', userAgent: 'Safari' },
+      }),
+    );
+
+    const user = await repo.findUserByEmailGlobal('recepcion@clinic.com');
+    expect(audit.recordMock).toHaveBeenCalledTimes(1);
+    expect(audit.recordMock).toHaveBeenCalledWith({
+      tenantId: 't1',
+      locationId: null,
+      actor: { kind: 'user', userId: user?.id, role: ClinicRole.RECEPTION },
+      action: 'LOGIN',
+      resourceType: 'SESSION',
+      resourceId: null,
+      patient: null,
+      requestId: 'req-7',
+      ip: '10.0.0.7',
+      userAgent: 'Safari',
+      metadata: { reason: 'INVITATION_LOGIN' },
+    });
   });
 
   it('DX-359: aceptar con una cuenta NUEVA deja el alta del miembro (actor = él mismo), sin contraseña, hash ni token', async () => {
@@ -200,8 +247,11 @@ describe('AcceptInvitationUseCase', () => {
         },
       },
     ]);
-    // El reclamo (PASSWORD_RESET) es otro caso: aquí no hay ninguno.
-    expect(audit.recordMock).not.toHaveBeenCalled();
+    // El reclamo (PASSWORD_RESET) es otro caso: aquí no hay ninguno. Solo el
+    // inicio de sesión que abre la aceptación (DX-095).
+    expect(
+      audit.recordMock.mock.calls.map(([e]: [{ action: string }]) => e.action),
+    ).toEqual(['LOGIN']);
     const stored = JSON.stringify(repo.auditEvents);
     for (const secret of [
       'longenough1',
@@ -551,7 +601,12 @@ describe('AcceptInvitationUseCase', () => {
       expect(user?.passwordHash).toBe('HASH');
       expect(user?.tokenVersion).toBe(4);
       expect(user?.emailVerifiedAt).toBeInstanceOf(Date);
-      expect(audit.recordMock).not.toHaveBeenCalled();
+      // Sin reclamo (PASSWORD_RESET): solo el inicio de sesión (DX-095).
+      expect(
+        audit.recordMock.mock.calls.map(
+          ([e]: [{ action: string }]) => e.action,
+        ),
+      ).toEqual(['LOGIN']);
     });
 
     it('cuenta SIN verificar: reclamar exige una contraseña válida (8+)', async () => {

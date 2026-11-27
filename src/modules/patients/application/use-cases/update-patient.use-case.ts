@@ -20,8 +20,19 @@ import { normalizeMobile } from '../../domain/communication/mobile-number';
 import { whatsappMobileRequiredError } from './patient-communication.use-cases';
 import { docTypeLabelInput } from '../doc-type-label-input';
 import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import { changedFields } from '../../../audit/domain/changed-fields';
 
 export type UpdatePatientInput = UpdatePatientRepoInput;
+
+/** DX-095: lo que el controlador necesita para el evento de auditoría. */
+export interface UpdatePatientSignals {
+  /**
+   * Campos enviados cuyo valor guardado cambió (la ficha leída antes de
+   * escribir frente a la que devolvió la escritura). Un formulario que manda
+   * la ficha entera deja solo lo que de verdad se editó.
+   */
+  changedFields?: string[];
+}
 
 @Injectable()
 export class UpdatePatientUseCase {
@@ -36,6 +47,7 @@ export class UpdatePatientUseCase {
     id: string,
     patch: UpdatePatientInput,
     audit?: AuditRequestContext,
+    signals?: UpdatePatientSignals,
   ): Promise<Patient> {
     const existing = await this.repo.findById(id);
     if (!existing) {
@@ -85,6 +97,16 @@ export class UpdatePatientUseCase {
       normalizedPatch.docTypeLabel = docTypeLabelInput(patch.docTypeLabel);
     }
 
-    return this.repo.update(id, normalizedPatch, audit);
+    const updated = await this.repo.update(id, normalizedPatch, audit);
+    if (signals) {
+      signals.changedFields = changedFields(
+        existing,
+        updated,
+        Object.keys(patch).filter(
+          (key) => patch[key as keyof UpdatePatientInput] !== undefined,
+        ),
+      );
+    }
+    return updated;
   }
 }

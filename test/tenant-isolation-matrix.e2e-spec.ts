@@ -2765,7 +2765,8 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     },
     // --- auditoría (DX-009) ---
     // Sin `:param`, pero con ids de A en los filtros: B recibe su propia
-    // lista vacía, nunca un evento de A.
+    // lista vacía, nunca un evento de A. DX-095: ni el nombre del paciente de
+    // A (`patient: null`).
     ...(
       [
         ['patientId', () => a.patientId],
@@ -2781,6 +2782,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         items: [],
         nextCursor: null,
         timeZone: 'America/Caracas',
+        patient: null,
       },
     })),
     // --- indicaciones postoperatorias (DX-222) ---

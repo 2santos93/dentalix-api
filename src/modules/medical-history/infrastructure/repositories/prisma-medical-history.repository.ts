@@ -104,16 +104,24 @@ export async function insertMedicalHistoryVersionInTx(
     source: MedicalHistorySource;
     /** DX-574: Idempotency-Key del guardado del personal. */
     idempotency?: IdempotencyRequest;
+    /** DX-095: la versión vigente antes de esta, leída bajo el candado. */
+    onPrevious?: (previous: PrismaMedicalHistoryVersion | null) => void;
   },
 ): Promise<PrismaMedicalHistoryVersion> {
   const { tenantId, patientId, data } = input;
   const { safetyFlags, hasCriticalAlert } = deriveSafetyFlags(data);
   await lockPatientAnamnesis(tx, tenantId, patientId);
-  const latest = await tx.medicalHistoryVersion.findFirst({
-    where: { patientId, deletedAt: null },
-    orderBy: { version: 'desc' },
-    select: { version: true },
-  });
+  // DX-095: la fila entera solo si alguien la quiere (auditar qué cambió).
+  const latest = input.onPrevious
+    ? await latestMedicalHistoryVersionInTx(tx, patientId)
+    : await tx.medicalHistoryVersion.findFirst({
+        where: { patientId, deletedAt: null },
+        orderBy: { version: 'desc' },
+        select: { version: true },
+      });
+  if (input.onPrevious) {
+    input.onPrevious(latest as PrismaMedicalHistoryVersion | null);
+  }
   const version = (latest?.version ?? 0) + 1;
 
   return tx.medicalHistoryVersion.create({
@@ -178,6 +186,7 @@ export class PrismaMedicalHistoryRepository implements MedicalHistoryRepository 
     data: MedicalHistoryVersionData,
     createdById?: string,
     idempotency?: IdempotencyRequest,
+    onPrevious?: (previous: MedicalHistory | null) => void,
   ): Promise<MedicalHistory> {
     const tenantId = this.requireTenantId();
     const row = await this.prisma.runWithTenant((tx) =>
@@ -188,6 +197,10 @@ export class PrismaMedicalHistoryRepository implements MedicalHistoryRepository 
         createdById: createdById ?? null,
         source: 'STAFF',
         idempotency,
+        onPrevious: onPrevious
+          ? (previous) =>
+              onPrevious(previous ? mapMedicalHistoryVersion(previous) : null)
+          : undefined,
       }),
     );
     return mapMedicalHistoryVersion(row);
