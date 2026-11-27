@@ -52,6 +52,19 @@ export const REGIONAL_TOKYO_FIXTURE: RegionalFixture = {
   defaultPhoneRegion: 'JP',
 };
 
+/**
+ * Sede en Ciudad de México (UTC−6 todo el año desde 2022): con Tokio, dos
+ * sedes a 15 horas de distancia (DX-069, horario de atención por sede).
+ */
+export const REGIONAL_MEXICO_CITY_FIXTURE: RegionalFixture = {
+  country: 'MX',
+  currency: 'MXN',
+  timeZone: 'America/Mexico_City',
+  locale: 'es-MX',
+  hourCycle: 'h23',
+  defaultPhoneRegion: 'MX',
+};
+
 /** Sede con reloj de 12 h; un número sin «+» se lee con su región (DX-329). */
 export const REGIONAL_NEW_YORK_FIXTURE: RegionalFixture = {
   country: 'US',
