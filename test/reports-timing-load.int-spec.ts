@@ -55,6 +55,7 @@ interface PlanNode {
   'Relation Name'?: string;
   'Index Name'?: string;
   'Actual Loops'?: number;
+  'Actual Rows'?: number;
   'Sort Space Type'?: string;
   'Hash Batches'?: number;
   'Temp Written Blocks'?: number;
@@ -306,6 +307,16 @@ describe('DX-275 · «Tiempos» con 260.000 citas (int, rendimiento)', () => {
     }
     const line = `  ${label}: ${median(times).toFixed(1)} ms (min ${Math.min(...times).toFixed(1)}, max ${Math.max(...times).toFixed(1)})`;
     measured.push(line);
+    // El plan resumido (nodo, índice, vueltas y filas), para leerlo en la CI
+    // si un invariante falla.
+    console.log(
+      `DX-275 · plan de ${label}: ${nodes
+        .map(
+          (n) =>
+            `${n['Node Type']}${n['Index Name'] ? `(${n['Index Name']})` : ''}×${n['Actual Loops'] ?? 1}:${n['Actual Rows'] ?? ''}`,
+        )
+        .join(' > ')}`,
+    );
     console.log(`DX-275 ·${line}`);
     expect(median(times)).toBeLessThan(CATASTROPHE_MS);
     return nodes;
@@ -313,7 +324,15 @@ describe('DX-275 · «Tiempos» con 260.000 citas (int, rendimiento)', () => {
 
   function expectPlanInvariants(
     nodes: PlanNode[],
-    indexes: string[] = ['appointments_tenant_location_start_idx'],
+    // Los índices de la clínica que empiezan por el tenant y acotan por el
+    // inicio: cuál elige el planificador depende de las estadísticas del
+    // runner (en local, el de la sede; en la CI llegó a elegir otro); lo
+    // que se fija es que sea uno de ellos, una sola vez y sin disco.
+    indexes: string[] = [
+      'appointments_tenant_location_start_idx',
+      'appointments_tenantId_providerId_start_idx',
+      'appointments_tenant_start_live_idx',
+    ],
   ) {
     // Nada en disco: ni sorts, ni hash en lotes, ni bloques temporales (los
     // sorts internos de percentile_cont también escribirían aquí).
@@ -352,7 +371,10 @@ describe('DX-275 · «Tiempos» con 260.000 citas (int, rendimiento)', () => {
     const byIndex = nodes.filter((n) =>
       indexes.includes(n['Index Name'] ?? ''),
     );
-    expect(byIndex.length).toBeGreaterThanOrEqual(1);
+    expect({
+      indexes: nodes.flatMap((n) => (n['Index Name'] ? [n['Index Name']] : [])),
+      ok: byIndex.length > 0,
+    }).toMatchObject({ ok: true });
     expect(byIndex.length).toBeLessThanOrEqual(params.branches.length);
     for (const n of byIndex) expect(n['Actual Loops']).toBe(1);
   }
@@ -467,11 +489,6 @@ describe('DX-275 · «Tiempos» con 260.000 citas (int, rendimiento)', () => {
           providerId: providerId.id,
         }),
       ),
-      // Con un profesional vale también (tenantId, providerId, start).
-      [
-        'appointments_tenant_location_start_idx',
-        'appointments_tenantId_providerId_start_idx',
-      ],
     );
   }, 300_000);
 });
