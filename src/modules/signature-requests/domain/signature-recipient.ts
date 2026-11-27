@@ -1,4 +1,8 @@
-import type { ConsentSignerType, ContactChannel } from '@prisma/client';
+import type {
+  ConsentSignerType,
+  ContactChannel,
+  ResponsibleRelationship,
+} from '@prisma/client';
 import { firstNameOnly } from '../../appointment-confirmations/application/confirmation-token';
 import {
   noticeRecipient,
@@ -26,7 +30,11 @@ export interface SignatureRecipientInput {
     document: string | null;
   };
   /** Responsables vivos, con su documento ya en texto. */
-  responsibles: (NoticeResponsible & { documentText: string | null })[];
+  responsibles: (NoticeResponsible & {
+    documentText: string | null;
+    /** DX-060-bis: precarga la relación del tutor en la cláusula. */
+    relationship?: ResponsibleRelationship | null;
+  })[];
   majorityAge: number;
   /** Día civil de la sede (YYYY-MM-DD). */
   today: string;
@@ -43,6 +51,11 @@ export type SignatureRecipient =
       /** Nombre completo de quien firma (queda sellado). */
       signerName: string;
       signerDocument: string | null;
+      /**
+       * DX-060-bis: relación del responsable con el paciente (GUARDIAN), o
+       * `null` (paciente, o responsable sin ella).
+       */
+      signerRelationship: ResponsibleRelationship | null;
       email: string;
       /** Nombre de pila con el que se le saluda. */
       greetingName: string;
@@ -95,6 +108,7 @@ export function resolveSignatureRecipient(
       signerType: 'PATIENT',
       signerName: `${patient.firstName} ${patient.lastName}`.trim(),
       signerDocument: patient.document,
+      signerRelationship: null,
       email,
       greetingName: firstNameOnly(patient.firstName) ?? patient.firstName,
       patientFirstName: null,
@@ -116,6 +130,7 @@ export function resolveSignatureRecipient(
     signerType: 'GUARDIAN',
     signerName: responsible.name.trim(),
     signerDocument: responsible.documentText,
+    signerRelationship: responsible.relationship ?? null,
     email,
     greetingName: firstNameOnly(responsible.name) ?? responsible.name,
     patientFirstName: firstNameOnly(patient.firstName),

@@ -543,6 +543,11 @@ export interface PublicSignatureDocument {
   signerName: string;
   /** Firma un responsable sin documento registrado: lo escribe al firmar. */
   signerDocumentRequired: boolean;
+  /**
+   * DX-060-bis: si firma el responsable, el paciente por quien firma (bajo la
+   * firma: «En representación de {paciente}»); `null` si firma el paciente.
+   */
+  representedPatientName: string | null;
   professionalName: string;
   sentAt: Date;
   expiresAt: Date;
@@ -582,6 +587,8 @@ function documentOf(
     signerType: request.signerType,
     signerName: request.signerName,
     signerDocumentRequired: documentRequired(request),
+    representedPatientName:
+      request.signerType === 'GUARDIAN' ? ctx.patientName : null,
     professionalName: request.professionalName,
     sentAt: request.createdAt,
     expiresAt: request.expiresAt,

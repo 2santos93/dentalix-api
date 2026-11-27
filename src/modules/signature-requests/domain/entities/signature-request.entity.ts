@@ -132,6 +132,11 @@ export interface SignatureRequestListRow {
 /** Marca de la clínica y formato de la sede para la página pública. */
 export interface PublicSignatureContext {
   request: SignatureRequestRecord;
+  /**
+   * DX-060-bis: nombre del paciente (el de la ficha ahora). Solo se muestra
+   * cuando firma su responsable: «En representación de {paciente}».
+   */
+  patientName: string;
   clinic: { name: string; logoUrl: string | null; primaryColor: string | null };
   location: {
     timeZone: string;

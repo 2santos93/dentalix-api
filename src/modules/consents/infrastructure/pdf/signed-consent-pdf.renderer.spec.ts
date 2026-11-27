@@ -59,6 +59,21 @@ describe('PdfkitSignedConsentPdfRenderer (DX-422)', () => {
     expect(lines).toContain(HASH);
   });
 
+  it('DX-060-bis: bajo la firma del responsable, «En representación de {paciente}»; sin él, nada', async () => {
+    const guardian = paintedLines(
+      await renderer.render({
+        ...model('Autorizo.'),
+        signerLabel: 'Claudia Navarro (responsable) · V-20111222',
+        signerOnBehalfOf: 'En representación de Ana Pérez',
+      }),
+    );
+    const at = guardian.indexOf('Claudia Navarro (responsable) · V-20111222');
+    expect(at).toBeGreaterThan(-1);
+    expect(guardian[at + 1]).toBe('En representación de Ana Pérez');
+    const patient = paintedLines(await renderer.render(model('Autorizo.')));
+    expect(patient.some((l) => l.startsWith('En representación'))).toBe(false);
+  });
+
   it('pinta el texto firmado tal cual, línea a línea (acentos, ñ, €, —)', async () => {
     const body = 'Primera línea: ñandú, ¿sí? 1,5 €\n\nSegunda — «fin».';
     const lines = paintedLines(await renderer.render(model(body)));

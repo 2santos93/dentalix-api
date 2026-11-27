@@ -366,6 +366,7 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
             where: { patientId, deletedAt: null },
             select: {
               id: true,
+              relationship: true,
               documentType: true,
               docTypeLabel: true,
               docNumber: true,
@@ -398,6 +399,9 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
           ];
         }),
       );
+      const relationshipById = new Map(
+        documents.map((d) => [d.id, d.relationship]),
+      );
       return {
         patient,
         responsibles: responsibles.map((r) => ({
@@ -407,6 +411,7 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
             docTypeLabel: null,
             docNumber: null,
           },
+          relationship: relationshipById.get(r.id) ?? null,
         })),
         majorityReview,
         majorityAge,
@@ -666,6 +671,7 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
           location: {
             select: { id: true, timeZone: true, locale: true, hourCycle: true },
           },
+          patient: { select: { firstName: true, lastName: true } },
         },
       });
       if (!row) return null;
@@ -675,9 +681,10 @@ export class PrismaSignatureRequestRepository implements SignatureRequestReposit
           select: { name: true, logoKey: true, primaryColor: true },
         }),
       );
-      const { location, ...request } = row;
+      const { location, patient, ...request } = row;
       return {
         request: toRecord(request),
+        patientName: `${patient.firstName} ${patient.lastName}`.trim(),
         clinic: tenant,
         location: {
           timeZone: requireLocationTimeZone(location),

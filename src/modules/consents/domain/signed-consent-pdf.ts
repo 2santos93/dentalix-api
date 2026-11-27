@@ -29,6 +29,11 @@ export interface SignedConsentPdfSource {
   signerType: ConsentSignerType;
   signerName: string;
   signerDocument: string | null;
+  /**
+   * DX-060-bis: nombre del paciente (el de la ficha). Si firmó su
+   * responsable, va bajo su firma: «En representación de {paciente}».
+   */
+  patientName?: string;
   professionalName: string;
   /** PNG en base64, sin prefijo `data:`. */
   patientSignature: string;
@@ -66,6 +71,11 @@ export interface SignedConsentPdfModel {
   /** El texto firmado, carácter a carácter. */
   body: string;
   signerLabel: string;
+  /**
+   * DX-060-bis: bajo la firma del responsable, «En representación de
+   * {paciente}» (como la vista imprimible); sin él, nada.
+   */
+  signerOnBehalfOf?: string | null;
   professionalLabel: string;
   patientSignature: string;
   professionalSignature: string;
@@ -182,6 +192,7 @@ function assertPrintable(
     src.body,
     src.signerName,
     src.signerDocument ?? '',
+    src.patientName ?? '',
     src.professionalName,
     src.destinationMasked,
     src.userAgent ?? '',
@@ -256,6 +267,7 @@ function modelTexts(model: SignedConsentPdfModel): string[] {
     model.title,
     model.body,
     model.signerLabel,
+    model.signerOnBehalfOf ?? '',
     model.professionalLabel,
     ...model.evidence.flatMap((row) => [row.label, row.value]),
   ];
@@ -298,6 +310,10 @@ export function buildSignedConsentPdfModel(
     title: src.title,
     body: src.body,
     signerLabel,
+    signerOnBehalfOf:
+      guardian && src.patientName
+        ? `En representación de ${src.patientName}`
+        : null,
     professionalLabel: src.professionalName,
     patientSignature: src.patientSignature,
     professionalSignature: src.professionalSignature,

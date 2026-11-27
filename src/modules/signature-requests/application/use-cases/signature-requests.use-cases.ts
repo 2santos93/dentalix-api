@@ -11,6 +11,8 @@ import {
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import {
+  ConsentSignerType,
+  ResponsibleRelationship,
   SignatureRequestChannel,
   SignatureRequestType,
   TreatmentPlanStatus,
@@ -20,7 +22,11 @@ import {
   CONSENT_TEMPLATE_REPOSITORY,
   type ConsentTemplateRepository,
 } from '../../../consents/domain/ports/consent-template-repository.port';
-import { ConsentDocumentRenderer } from '../../../consents/application/use-cases/patient-consents.use-cases';
+import {
+  ConsentDocumentRenderer,
+  guardianOf,
+  withRepresentation,
+} from '../../../consents/application/use-cases/patient-consents.use-cases';
 import { usesVariable } from '../../../consents/domain/render-consent';
 import {
   composeQuoteContent,
@@ -247,6 +253,12 @@ export interface SignatureRequestOptions {
     destinationMasked: string | null;
     signerType: 'PATIENT' | 'GUARDIAN' | null;
     signerName: string | null;
+    /**
+     * DX-060-bis: con un tutor, su documento y su relación según la ficha
+     * (precargan el modal, que puede corregirlos); `null` si no constan.
+     */
+    signerDocument: string | null;
+    signerRelationship: ResponsibleRelationship | null;
     minor: boolean;
   };
 }
@@ -312,6 +324,12 @@ export class GetSignatureRequestOptionsUseCase {
             destinationMasked: maskEmail(recipient.email),
             signerType: recipient.signerType,
             signerName: recipient.signerName,
+            // El del paciente no hace falta: solo el tutor lo escribe.
+            signerDocument:
+              recipient.signerType === ConsentSignerType.GUARDIAN
+                ? recipient.signerDocument
+                : null,
+            signerRelationship: recipient.signerRelationship,
             minor: recipient.minor,
           }
         : {
@@ -320,6 +338,8 @@ export class GetSignatureRequestOptionsUseCase {
             destinationMasked: null,
             signerType: null,
             signerName: null,
+            signerDocument: null,
+            signerRelationship: null,
             minor: false,
           },
     };
@@ -338,6 +358,15 @@ export interface CreateSignatureRequestInput {
    * la de la sede si es distinta de la del plan; si no, ninguna.
    */
   secondCurrency?: string;
+  /**
+   * DX-060-bis (solo CONSENT, cuando firma el responsable de un menor):
+   * nombre, documento y relación del tutor, como en la firma en la clínica.
+   * Sin ellos, los del responsable en la ficha. El texto congelado abre con
+   * la cláusula de representación; sin nombre o sin documento, 400.
+   */
+  guardianName?: string;
+  guardianDocument?: string;
+  guardianRelationship?: ResponsibleRelationship;
 }
 
 export interface CreatedSignatureRequest extends SignatureRequestSummary {
@@ -433,6 +462,27 @@ export class CreateSignatureRequestUseCase {
     if (!recipient.ok) {
       throw new UnprocessableEntityException(recipient.reason);
     }
+    // DX-060-bis: si firma el responsable, el texto lleva la misma cláusula
+    // de representación que en la clínica (400 sin nombre o sin documento).
+    const guardian =
+      recipient.signerType === ConsentSignerType.GUARDIAN
+        ? guardianOf({
+            signerType: ConsentSignerType.GUARDIAN,
+            guardianName: input.guardianName ?? recipient.signerName,
+            guardianDocument:
+              input.guardianDocument ?? recipient.signerDocument ?? undefined,
+            guardianRelationship:
+              input.guardianRelationship ??
+              recipient.signerRelationship ??
+              undefined,
+          })
+        : null;
+    const { patient } = prepared.context;
+    const body = withRepresentation(
+      prepared.body,
+      guardian,
+      `${patient.firstName} ${patient.lastName}`,
+    );
     // El formato de la sede pinta la caducidad del email (409 si le falta).
     const format = requireLocationFormat(prepared.context.location);
     await this.email.assertCanSend(recipient.email);
@@ -450,12 +500,13 @@ export class CreateSignatureRequestUseCase {
         templateVersion: prepared.template.version,
         treatmentPlanId: input.treatmentPlanId ?? null,
         title: prepared.title,
-        body: prepared.body,
+        body,
         professionalUserId: professional.id,
         professionalName: prepared.context.professionalName,
         signerType: recipient.signerType,
-        signerName: recipient.signerName,
-        signerDocument: recipient.signerDocument,
+        // Quien firma es quien nombra la cláusula (sellado con el texto).
+        signerName: guardian?.name ?? recipient.signerName,
+        signerDocument: guardian?.document ?? recipient.signerDocument,
         destination: recipient.email,
         destinationMasked,
         tokenHash: hashSignatureToken(token),
