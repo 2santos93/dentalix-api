@@ -28,8 +28,9 @@ import { purgeTenantsBySubdomain } from './support/tenant-purge';
 // La puerta NO es el tiempo (el mismo SHA mide el doble entre runners de la
 // CI): son invariantes del plan, medidos con EXPLAIN ANALYZE como
 // dentalix_app (runWithTenant, RLS, con el work_mem del informe): ningún Seq
-// Scan de citas, las citas leídas una sola vez por (tenantId, locationId,
-// start) —un rango por zona—, nada en disco (ni sorts ni hash en lotes ni
+// Scan de citas, las atendidas leídas una sola vez y solo de índice por el
+// parcial de DX-275 (la agenda, por los índices de la clínica por inicio),
+// nada en disco (ni sorts ni hash en lotes ni
 // bloques temporales). El tiempo se imprime y solo
 // falla por encima de un techo de catástrofe. Las cifras del total se
 // comprueban contra la referencia en TypeScript sobre las mismas filas.
@@ -55,6 +56,7 @@ interface PlanNode {
   'Relation Name'?: string;
   'Index Name'?: string;
   'Actual Loops'?: number;
+  'Heap Fetches'?: number;
   'Actual Rows'?: number;
   'Sort Space Type'?: string;
   'Hash Batches'?: number;
@@ -322,17 +324,21 @@ describe('DX-275 · «Tiempos» con 260.000 citas (int, rendimiento)', () => {
     return nodes;
   }
 
+  /** Las atendidas del período: el parcial de DX-275, solo índice. */
+  const TIMING_INDEX = ['appointments_tenant_location_start_completed_idx'];
+  /** Toda la agenda no cancelada: los de la clínica por inicio. */
+  const AGENDA_INDEXES = [
+    'appointments_tenant_location_start_idx',
+    'appointments_tenantId_providerId_start_idx',
+    'appointments_tenant_start_live_idx',
+  ];
+
   function expectPlanInvariants(
     nodes: PlanNode[],
-    // Los índices de la clínica que empiezan por el tenant y acotan por el
-    // inicio: cuál elige el planificador depende de las estadísticas del
-    // runner (en local, el de la sede; en la CI llegó a elegir otro); lo
-    // que se fija es que sea uno de ellos, una sola vez y sin disco.
-    indexes: string[] = [
-      'appointments_tenant_location_start_idx',
-      'appointments_tenantId_providerId_start_idx',
-      'appointments_tenant_start_live_idx',
-    ],
+    // Los índices de la clínica que acotan por el inicio (nunca uno por
+    // paciente, que recorre toda la historia: en la CI, sin el índice de
+    // DX-275, el planificador llegó a elegir el de DX-145).
+    indexes: readonly string[],
   ) {
     // Nada en disco: ni sorts, ni hash en lotes, ni bloques temporales (los
     // sorts internos de percentile_cont también escribirían aquí).
@@ -376,7 +382,13 @@ describe('DX-275 · «Tiempos» con 260.000 citas (int, rendimiento)', () => {
       ok: byIndex.length > 0,
     }).toMatchObject({ ok: true });
     expect(byIndex.length).toBeLessThanOrEqual(params.branches.length);
-    for (const n of byIndex) expect(n['Actual Loops']).toBe(1);
+    for (const n of byIndex) {
+      expect(n['Actual Loops']).toBeLessThanOrEqual(1 + workers);
+      // Solo índice: con el mapa de visibilidad al día, casi sin ir a la tabla.
+      if (n['Node Type'] === 'Index Only Scan') {
+        expect(n['Heap Fetches'] ?? 0).toBeLessThan(1000);
+      }
+    }
   }
 
   it('los datos son los del criterio: 260.000 citas, ~130.000 en el año del informe', async () => {
@@ -462,15 +474,17 @@ describe('DX-275 · «Tiempos» con 260.000 citas (int, rendimiento)', () => {
     );
   }, 300_000);
 
-  it('tiempos de toda la clínica (un año): sin Seq Scan de citas, las citas una sola vez por el índice, nada en disco', async () => {
+  it('tiempos de toda la clínica (un año): solo índice por el parcial de DX-275, sin Seq Scan de citas, nada en disco', async () => {
     expectPlanInvariants(
       await measure('tiempos (toda la clínica)', timingGroupsSql(params)),
+      TIMING_INDEX,
     );
   }, 300_000);
 
   it('agenda por profesional y semana (un año): mismos invariantes', async () => {
     expectPlanInvariants(
       await measure('agenda (toda la clínica)', bookedMinutesSql(params)),
+      AGENDA_INDEXES,
     );
   }, 300_000);
 
@@ -489,6 +503,7 @@ describe('DX-275 · «Tiempos» con 260.000 citas (int, rendimiento)', () => {
           providerId: providerId.id,
         }),
       ),
+      [...TIMING_INDEX, 'appointments_tenantId_providerId_start_idx'],
     );
   }, 300_000);
 });

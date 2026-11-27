@@ -1,0 +1,11 @@
+-- DX-275: «Tiempos» lee las citas ATENDIDAS de un período por sede (y zona)
+-- con sus horas del flujo (DX-200), su profesional y su tipo. Con solo
+-- (tenantId, locationId, start) el planificador podía preferir el parcial de
+-- DX-145 (por paciente: recorre TODA la historia atendida de la clínica, no
+-- el período). Este parcial de las atendidas vivas por (tenantId, locationId,
+-- start) con lo que el informe lee en el INCLUDE acota la pasada al período y
+-- la sirve solo de índice.
+-- "appointments" es tabla caliente (DX-148): CONCURRENTLY, sola en su fichero.
+-- Aditiva. IF NOT EXISTS: idempotente.
+-- Vuelta atrás: DROP INDEX CONCURRENTLY "appointments_tenant_location_start_completed_idx".
+CREATE INDEX CONCURRENTLY IF NOT EXISTS "appointments_tenant_location_start_completed_idx" ON "appointments" ("tenantId", "locationId", "start") INCLUDE ("providerId", "appointmentTypeId", "end", "arrivedAt", "seatedAt", "readyForCheckoutAt") WHERE "status" = 'COMPLETED' AND "deletedAt" IS NULL;

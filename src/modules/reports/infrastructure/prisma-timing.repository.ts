@@ -149,8 +149,10 @@ export const TIMING_WORK_MEM = '32MB';
 export const TIMING_SESSION_SQL = Prisma.sql`SELECT set_config('work_mem', ${TIMING_WORK_MEM}, true)`;
 
 /**
- * Tiempos de las citas ATENDIDAS del período, en UNA pasada por el índice
- * (tenantId, locationId, start) y agregados con GROUPING SETS: por
+ * Tiempos de las citas ATENDIDAS del período, en UNA pasada solo de índice
+ * por el parcial de DX-275 (`appointments_tenant_location_start_completed_idx`:
+ * atendidas vivas por tenantId, locationId, start, con las horas del flujo,
+ * el profesional y el tipo en el INCLUDE) y agregados con GROUPING SETS: por
  * profesional, por tipo de cita, por semana y el total. Cada cita se
  * clasifica con la regla de `classifyTiming` (mismos umbrales):
  * 1 = sin tiempos, 2 = incoherente, 0 = medida. Medias y p90

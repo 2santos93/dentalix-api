@@ -2012,6 +2012,11 @@ model Appointment {
   //     "patientId", start DESC, id DESC) INCLUDE ("locationId",
   //     "providerId") WHERE status = 'COMPLETED' AND "deletedAt" IS NULL
   //     -> DX-260: «Retención», sede y profesional de la última atendida.
+  //   appointments_tenant_location_start_completed_idx ("tenantId",
+  //     "locationId", start) INCLUDE ("providerId", "appointmentTypeId",
+  //     "end", "arrivedAt", "seatedAt", "readyForCheckoutAt") WHERE status =
+  //     'COMPLETED' AND "deletedAt" IS NULL
+  //     -> DX-275: «Tiempos», las atendidas del período por sede, solo índice.
   //   appointments_tenant_location_wants_earlier_idx ("tenantId",
   //     "locationId", start) WHERE "wantsEarlier" AND "deletedAt" IS NULL
   //     AND status IN ('SCHEDULED', 'CONFIRMED')
