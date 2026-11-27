@@ -416,6 +416,12 @@ model Tenant {
   onlineBookingRequests      OnlineBookingRequest[]
   onlineBookingVerifications OnlineBookingVerification[]
 
+  // DX-058-bis (DB-016): las tres raíces que no tenían FK directa a tenants.
+  // El resto cuelga de ellas por FK compuestas (tenantId, …).
+  patients          Patient[]
+  locations         Location[]
+  locationSchedules LocationSchedule[]
+
   @@map("tenants")
 }
 
@@ -624,6 +630,8 @@ enum ClinicCountry {
 model Location {
   id                           String         @id @default(uuid()) @db.Uuid
   tenantId                     String         @db.Uuid
+  /// DX-058-bis (DB-016): FK directa a tenants (RESTRICT): no hay sede de una clínica inexistente.
+  tenant                       Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   name                         String
   address                      String?
   /// DX-312: país de la sede, ISO 3166-1 alfa-2 de `countries` (columna
@@ -948,6 +956,8 @@ enum Sex {
 model Patient {
   id                           String                @id @default(uuid()) @db.Uuid
   tenantId                     String                @db.Uuid
+  /// DX-058-bis (DB-016): FK directa a tenants (RESTRICT): no hay paciente de una clínica inexistente.
+  tenant                       Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   firstName                    String
   lastName                     String
   /// Código anterior a DX-327, congelado (ver `LegacyDocumentCode`).
@@ -4079,6 +4089,8 @@ model UserLoginDevice {
 model LocationSchedule {
   id         String    @id @default(uuid()) @db.Uuid
   tenantId   String    @db.Uuid
+  /// DX-058-bis (DB-016): FK directa a tenants (RESTRICT): no hay horario de una clínica inexistente.
+  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   /// Puntero suave a `Location` (sin relación Prisma, mismo criterio que
   /// ToothRecord.sourcePlanItemId): evita añadir la back-relation al modelo
   /// Location mientras otro flujo lo edita. FK a nivel DB queda como follow-up.

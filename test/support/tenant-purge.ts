@@ -21,7 +21,7 @@ interface FkRow {
 /**
  * Tablas de clínica de `public` (sin particiones: se borran por su madre) y
  * las columnas que las atan al tenant: las de sus FKs a `tenants` y, si no
- * tiene ninguna, `tenantId` (p. ej. `locations`, sin FK a `tenants`).
+ * tiene ninguna, `tenantId` (p. ej. `audit_events`, sin FK a `tenants` a propósito).
  */
 function tenantTableRows(db: SqlRunner): Promise<TenantTableRow[]> {
   return db.$queryRawUnsafe<TenantTableRow[]>(`
