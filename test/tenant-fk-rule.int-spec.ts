@@ -9,8 +9,10 @@ import { Prisma, PrismaClient } from '@prisma/client';
 // ajustes de envío). README, «Migraciones en caliente».
 //
 // Las tablas de abajo son anteriores a la regla y no la cumplen (las del
-// núcleo nunca la tuvieron). La lista está CONGELADA: solo puede encoger
-// (DX-058 añadirá sus FK con NOT VALID y VALIDATE en migraciones separadas).
+// núcleo nunca la tuvieron). La lista está CONGELADA: solo puede encoger.
+// DX-058-bis sacó las tres raíces (patients, locations, location_schedules),
+// con NOT VALID y VALIDATE en migraciones separadas; el resto cuelga de ellas
+// por FK compuestas (tenantId, …).
 // Una tabla nueva sin la FK hace fallar este test.
 const WITHOUT_DIRECT_TENANT_FK = [
   'appointment_plan_items',
@@ -32,14 +34,11 @@ const WITHOUT_DIRECT_TENANT_FK = [
   'inventory_items',
   'inventory_movements',
   'location_schedule_ranges',
-  'location_schedules',
-  'locations',
   'medical_history_versions',
   'membership_locations',
   'patient_consents',
   'patient_ledgers',
   'patient_retention_actions',
-  'patients',
   'payment_base_retries',
   'payment_plans',
   'payments',
