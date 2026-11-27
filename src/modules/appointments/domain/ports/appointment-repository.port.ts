@@ -254,6 +254,24 @@ export interface InClinicAppointment extends Appointment {
   urgent: boolean;
 }
 
+/**
+ * DX-275: una cita completada del día con sus horas del flujo, para marcar en
+ * el panel las que el informe «Tiempos» dejará fuera. Sin historia clínica.
+ */
+export interface CompletedFlowAppointment {
+  id: string;
+  patientId: string;
+  patientFirstName: string | null;
+  patientLastName: string | null;
+  providerId: string;
+  providerName: string | null;
+  start: Date;
+  end: Date;
+  arrivedAt: Date | null;
+  seatedAt: Date | null;
+  readyForCheckoutAt: Date | null;
+}
+
 export const APPOINTMENT_REPOSITORY = Symbol('APPOINTMENT_REPOSITORY');
 
 export interface AppointmentRepository {
@@ -344,6 +362,14 @@ export interface AppointmentRepository {
    * cuyo `start` cae en `[from, to)`, opcionalmente de un profesional.
    */
   listInClinic(params: ListInClinicParams): Promise<InClinicAppointment[]>;
+
+  /**
+   * DX-275: citas vivas COMPLETED de la sede cuyo `start` cae en `[from, to)`
+   * (opcionalmente de un profesional), con sus horas del flujo.
+   */
+  listCompletedFlow(
+    params: ListInClinicParams,
+  ): Promise<CompletedFlowAppointment[]>;
 
   /**
    * DX-273: por cita, sus tratamientos (vínculo vivo pero sin reserva) que

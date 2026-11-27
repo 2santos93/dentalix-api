@@ -697,3 +697,12 @@ export const CLINIC_EXPORT_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 // teléfonos de pacientes: solo ADMIN (RETENTION_PATIENTS_CSV_ROLES).
 export const RETENTION_REPORT_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 export const RETENTION_PATIENTS_CSV_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
+// «Tiempos» (DX-275): espera, duración real y ocupación de la agenda. ADMIN
+// ve todo el equipo; un DENTIST, solo lo suyo (lo acota el caso de uso).
+// Recepción y asistente, no; tampoco con FINANCIAL_REPORTS_VIEW: no es un
+// reporte financiero.
+export const TIMING_REPORT_ROLES: ClinicRole[] = [
+  ClinicRole.DENTIST,
+  ClinicRole.ADMIN,
+];

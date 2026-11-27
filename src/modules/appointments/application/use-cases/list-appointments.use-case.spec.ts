@@ -74,6 +74,7 @@ function makeRepo(
     findOverlappingForChair: (): Promise<Appointment[]> => Promise.resolve([]),
     undoArrival: () => Promise.resolve(null),
     listInClinic: () => Promise.resolve([]),
+    listCompletedFlow: () => Promise.resolve([]),
     currentCancellationPolicy: () => Promise.resolve(null),
     update: (): Promise<never> =>
       Promise.reject(new Error('not implemented in this fake')),

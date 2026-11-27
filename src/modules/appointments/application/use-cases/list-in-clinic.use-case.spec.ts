@@ -81,6 +81,93 @@ describe('ListInClinicUseCase (DX-200)', () => {
     });
   });
 
+  it('DX-275: marca las completadas del día que «Tiempos» no medirá (sin horas o incoherentes); el DENTIST, solo las suyas', async () => {
+    const { repo, uc } = setup();
+    const day = (hhmm: string) => at(`2026-10-19T${hhmm}:00.000Z`);
+    // Completada sin pasar por el flujo.
+    const bare = repo.seed({
+      locationId: 'ccs',
+      providerId: 'dent-1',
+      status: AppointmentStatus.COMPLETED,
+      start: day('12:00'),
+      end: day('12:30'),
+    });
+    // Del sillón a la salida sin «Listo para cobrar».
+    const noReady = repo.seed({
+      locationId: 'ccs',
+      providerId: 'dent-1',
+      status: AppointmentStatus.COMPLETED,
+      start: day('12:30'),
+      end: day('13:00'),
+      arrivedAt: day('12:25'),
+      seatedAt: day('12:35'),
+    });
+    // Las tres horas, pero «Listo» marcado a la vez que el sillón (< 1 min).
+    const incoherent = repo.seed({
+      locationId: 'ccs',
+      providerId: 'dent-2',
+      status: AppointmentStatus.COMPLETED,
+      start: day('11:00'),
+      end: day('11:30'),
+      arrivedAt: day('10:55'),
+      seatedAt: day('11:05'),
+      readyForCheckoutAt: day('11:05'),
+    });
+    // Completa y coherente: no se marca. Otra sede y otro día, tampoco.
+    repo.seed({
+      locationId: 'ccs',
+      providerId: 'dent-1',
+      status: AppointmentStatus.COMPLETED,
+      start: day('10:00'),
+      end: day('10:30'),
+      arrivedAt: day('09:55'),
+      seatedAt: day('10:02'),
+      readyForCheckoutAt: day('10:31'),
+    });
+    repo.seed({
+      locationId: 'mad',
+      status: AppointmentStatus.COMPLETED,
+      start: day('12:00'),
+      end: day('12:30'),
+    });
+    repo.seed({
+      locationId: 'ccs',
+      status: AppointmentStatus.COMPLETED,
+      start: at('2026-10-18T14:00:00.000Z'),
+      end: at('2026-10-18T14:30:00.000Z'),
+    });
+
+    const view = await uc.execute(
+      { locationId: 'ccs', role: ClinicRole.RECEPTION, userId: 'rec-1' },
+      NOW,
+    );
+    expect(
+      view.completedWithoutTimes.map((i) => [
+        i.appointmentId,
+        i.timingIssue,
+        i.missingMarks,
+      ]),
+    ).toEqual([
+      [incoherent.id, 'INCOHERENT', []],
+      [bare.id, 'WITHOUT_TIMES', ['ARRIVED', 'IN_CHAIR', 'READY_FOR_CHECKOUT']],
+      [noReady.id, 'WITHOUT_TIMES', ['READY_FOR_CHECKOUT']],
+    ]);
+    expect(view.completedWithoutTimes[1]).toMatchObject({
+      providerId: 'dent-1',
+      providerName: 'Dra. Uno',
+      arrivedAt: null,
+    });
+
+    const mine = await uc.execute(
+      { locationId: 'ccs', role: ClinicRole.DENTIST, userId: 'dent-1' },
+      NOW,
+    );
+    expect(mine.completedWithoutTimes.map((i) => i.appointmentId)).toEqual([
+      bare.id,
+      noReady.id,
+    ]);
+  });
+
   it('DX-492: cada persona trae su sillón', async () => {
     const { repo, uc } = setup();
     repo.chairDirectory.set('chair-1', {

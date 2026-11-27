@@ -173,6 +173,59 @@ export class InClinicItemDto {
   triageNote!: string | null;
 }
 
+/**
+ * DX-275: una cita del día ya completada que el informe «Tiempos» deja fuera
+ * (la marca «sin tiempos» del panel). Nombre y horas, sin historia clínica.
+ */
+export class CompletedWithoutTimesItemDto {
+  @ApiProperty({ format: 'uuid' })
+  appointmentId!: string;
+
+  @ApiProperty({ format: 'uuid' })
+  patientId!: string;
+
+  @ApiProperty({ type: String, nullable: true })
+  patientFirstName!: string | null;
+
+  @ApiProperty({ type: String, nullable: true })
+  patientLastName!: string | null;
+
+  @ApiProperty({ format: 'uuid' })
+  providerId!: string;
+
+  @ApiProperty({ type: String, nullable: true })
+  providerName!: string | null;
+
+  @ApiProperty({ format: 'date-time' })
+  start!: Date;
+
+  @ApiProperty({ format: 'date-time' })
+  end!: Date;
+
+  @ApiProperty({ type: String, format: 'date-time', nullable: true })
+  arrivedAt!: Date | null;
+
+  @ApiProperty({ type: String, format: 'date-time', nullable: true })
+  seatedAt!: Date | null;
+
+  @ApiProperty({ type: String, format: 'date-time', nullable: true })
+  readyForCheckoutAt!: Date | null;
+
+  @ApiProperty({
+    enum: ['WITHOUT_TIMES', 'INCOHERENT'],
+    description:
+      'WITHOUT_TIMES: se completó sin alguna de las tres horas (llegó, en sillón, listo para cobrar). INCOHERENT: tiene las tres pero fuera de los umbrales del informe «Tiempos» (GET /reports/timing, `thresholds`). En los dos casos el informe no la mide.',
+  })
+  timingIssue!: 'WITHOUT_TIMES' | 'INCOHERENT';
+
+  @ApiProperty({
+    enum: ['ARRIVED', 'IN_CHAIR', 'READY_FOR_CHECKOUT'],
+    isArray: true,
+    description: 'Los pasos sin hora, en orden; vacío en INCOHERENT.',
+  })
+  missingMarks!: ('ARRIVED' | 'IN_CHAIR' | 'READY_FOR_CHECKOUT')[];
+}
+
 export class InClinicViewDto {
   @ApiProperty({ example: '2026-10-19' })
   date!: string;
@@ -226,4 +279,11 @@ export class InClinicViewDto {
     description: 'Listo para cobrar (READY_FOR_CHECKOUT).',
   })
   readyForCheckout!: InClinicItemDto[];
+
+  @ApiProperty({
+    type: [CompletedWithoutTimesItemDto],
+    description:
+      'DX-275: citas del día ya completadas (en la sede del panel; a un DENTIST, solo las suyas) que el informe «Tiempos» no podrá medir, por hora de la cita: la marca «sin tiempos». Vacío si no hay.',
+  })
+  completedWithoutTimes!: CompletedWithoutTimesItemDto[];
 }

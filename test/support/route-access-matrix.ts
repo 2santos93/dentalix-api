@@ -1134,6 +1134,11 @@ export const ROUTE_ACCESS: Record<string, RouteAccess> = {
     'FINANCIAL_REPORTS_VIEW',
   ),
   'GET /reports/retention/patients.csv': ADMIN_ONLY,
+  // DX-275: «Tiempos» (espera, duración real y ocupación) y su CSV. ADMIN ve
+  // todo el equipo; DENTIST, solo lo suyo (lo acota el caso de uso).
+  // Recepción y asistente, nada, tampoco con FINANCIAL_REPORTS_VIEW.
+  'GET /reports/timing': roles('ADMIN', 'DENTIST'),
+  'GET /reports/timing.csv': roles('ADMIN', 'DENTIST'),
   // DX-561: efectividad del seguimiento automático, con el alcance del embudo.
   'GET /reports/quote-follow-up': orPermission(
     roles('ADMIN', 'DENTIST'),

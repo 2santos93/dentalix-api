@@ -123,6 +123,7 @@ function makeRepo(overrides: RepoOverrides = {}): AppointmentRepository {
     findOverlappingForChair: (): Promise<Appointment[]> => Promise.resolve([]),
     undoArrival: () => Promise.resolve(null),
     listInClinic: () => Promise.resolve([]),
+    listCompletedFlow: () => Promise.resolve([]),
     currentCancellationPolicy: () => Promise.resolve(null),
     ...rest,
     update: (id: string, patch: UpdateAppointmentRepoInput) =>
@@ -620,6 +621,7 @@ describe('UpdateAppointmentUseCase', () => {
           Promise.resolve([]),
         undoArrival: () => Promise.resolve(null),
         listInClinic: () => Promise.resolve([]),
+        listCompletedFlow: () => Promise.resolve([]),
         currentCancellationPolicy: () => Promise.resolve(null),
         update: (): Promise<Appointment> => Promise.reject(boom),
       });
