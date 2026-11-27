@@ -7,7 +7,16 @@ import { patientsInClinic } from '../../../patients/application/__fixtures__/pat
 import { InMemoryPerioExamRepository } from '../__fixtures__/in-memory-perio-exams';
 import type { PerioSiteMeasure } from '../../domain/entities/perio-exam.entity';
 import { PERIO_LIST_MAX } from '../../domain/perio-measures';
+import type { RecordAuditEventUseCase } from '../../../audit/application/record-audit-event.use-case';
+import type { AuditRequestContext } from '../../../audit/domain/audit-request-context';
+import { sanitizeAuditMetadata } from '../../../audit/domain/audit-metadata';
 import {
+  ComparePerioExamsUseCase,
+  GetPerioSettingsUseCase,
+  PERIO_COMPARE_MESSAGES,
+  PERIO_EXAM_FINAL_MESSAGE,
+  UpdatePerioNotesUseCase,
+  UpdatePerioSettingsUseCase,
   CreatePerioExamUseCase,
   DeletePerioExamUseCase,
   FinalizePerioExamUseCase,
@@ -51,6 +60,8 @@ function setup() {
     save: new SavePerioMeasuresUseCase(repo),
     finalize: new FinalizePerioExamUseCase(repo, now),
     remove: new DeletePerioExamUseCase(repo),
+    notes: new UpdatePerioNotesUseCase(repo),
+    compare: new ComparePerioExamsUseCase(repo, patients),
   };
 }
 
@@ -161,6 +172,8 @@ describe('SavePerioMeasuresUseCase / GetPerioExamUseCase', () => {
       plaquePercent: 0,
       sites4mmOrMore: 1,
       sites6mmOrMore: 0,
+      sitesAlertOrMore: 1,
+      sitesSevereOrMore: 0,
     });
   });
 
@@ -266,5 +279,232 @@ describe('ListPerioExamsUseCase', () => {
     await expect(list.execute('otro')).rejects.toBeInstanceOf(
       NotFoundException,
     );
+  });
+});
+
+describe('UpdatePerioNotesUseCase (DX-066)', () => {
+  it('cambia las notas de un DRAFT (recortadas) y vacío o null las borra', async () => {
+    const { create, notes } = setup();
+    const exam = await create.execute('p1', { notes: 'Antes' }, 'd');
+    expect(
+      (await notes.execute('p1', exam.id, '  Control en 3 meses  ')).notes,
+    ).toBe('Control en 3 meses');
+    expect((await notes.execute('p1', exam.id, '   ')).notes).toBeNull();
+    expect((await notes.execute('p1', exam.id, 'Otra')).notes).toBe('Otra');
+    expect((await notes.execute('p1', exam.id, null)).notes).toBeNull();
+  });
+
+  it('un FINAL es inmutable: 409 con el mensaje en español y las notas no cambian', async () => {
+    const { create, finalize, notes, get } = setup();
+    const exam = await create.execute('p1', { notes: 'Original' }, 'd');
+    await finalize.execute('p1', exam.id);
+    const error = await notes
+      .execute('p1', exam.id, 'Cambio')
+      .catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(ConflictException);
+    expect((error as ConflictException).message).toBe(PERIO_EXAM_FINAL_MESSAGE);
+    expect((await get.execute('p1', exam.id)).notes).toBe('Original');
+  });
+
+  it('404 si el examen no existe o es de otro paciente', async () => {
+    const { create, notes } = setup();
+    const exam = await create.execute('p1', {}, 'd');
+    await expect(notes.execute('p2', exam.id, 'x')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+    await expect(notes.execute('p1', 'nope', 'x')).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+});
+
+describe('ComparePerioExamsUseCase (DX-066)', () => {
+  async function finals(n: number) {
+    const ctx = setup();
+    const ids: string[] = [];
+    for (let i = 0; i < n; i += 1) {
+      const exam = await ctx.create.execute(
+        'p1',
+        { examDate: `2026-0${i + 1}-15` },
+        'd',
+      );
+      await ctx.save.execute('p1', exam.id, {
+        sites: [site(16, 'MB', { probingMm: 3 + i * 2, recessionMm: 1 })],
+        teeth: [],
+      });
+      await ctx.finalize.execute('p1', exam.id);
+      ids.push(exam.id);
+    }
+    return { ...ctx, ids };
+  }
+
+  it('compara 2, 3 y 4 exámenes FINAL con Δ por sitio', async () => {
+    const { compare, ids } = await finals(4);
+    for (const n of [2, 3, 4]) {
+      const result = await compare.execute('p1', ids.slice(0, n).reverse());
+      expect(result.exams).toHaveLength(n);
+      expect(result.exams[0].id).toBe(ids[0]);
+      const mb = result.sites[0];
+      expect(mb.values).toHaveLength(n);
+      expect(mb.deltaProbingMm).toBe((n - 1) * 2);
+      expect(mb.worsened).toBe(true);
+      expect(mb.values[1].deltaProbingMm).toBe(2);
+    }
+  });
+
+  it('los índices y los umbrales de la respuesta son los de la clínica', async () => {
+    const { compare, ids, repo } = await finals(2);
+    repo.perioThresholds = { pdAlertMm: 5, pdSevereMm: 7 };
+    const result = await compare.execute('p1', ids);
+    expect(result.thresholds).toEqual({ pdAlertMm: 5, pdSevereMm: 7 });
+    expect(result.exams.map((e) => e.indices.sitesAlertOrMore)).toEqual([0, 1]);
+  });
+
+  it.each([[1], [5]])('400 con %p exámenes', async (n) => {
+    const { compare, ids } = await finals(4);
+    const list = n === 5 ? [...ids, 'otro'] : ids.slice(0, n);
+    const error = await compare.execute('p1', list).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(BadRequestException);
+    expect((error as BadRequestException).message).toBe(
+      PERIO_COMPARE_MESSAGES.count,
+    );
+  });
+
+  it('400 si hay un id repetido o un borrador', async () => {
+    const { compare, ids, create } = await finals(2);
+    await expect(compare.execute('p1', [ids[0], ids[0]])).rejects.toThrow(
+      PERIO_COMPARE_MESSAGES.repeated,
+    );
+    const draft = await create.execute('p1', { examDate: '2026-09-01' }, 'd');
+    await expect(compare.execute('p1', [ids[0], draft.id])).rejects.toThrow(
+      PERIO_COMPARE_MESSAGES.notFinal,
+    );
+  });
+
+  it('404 si un examen no es del paciente o el paciente es de otra clínica', async () => {
+    const { compare, ids } = await finals(2);
+    await expect(
+      compare.execute('p1', [ids[0], 'inexistente']),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    await expect(compare.execute('otro', ids)).rejects.toBeInstanceOf(
+      NotFoundException,
+    );
+  });
+});
+
+describe('Umbrales del periodontograma (DX-066)', () => {
+  const ctx: AuditRequestContext = {
+    tenantId: 't-1',
+    locationId: null,
+    actor: { userId: 'admin-1', role: 'ADMIN' },
+    requestId: 'req-1',
+    ip: '127.0.0.1',
+    userAgent: 'jest',
+  };
+
+  function settingsSetup() {
+    const { repo } = setup();
+    const audit = { record: jest.fn<Promise<void>, [unknown]>() };
+    return {
+      repo,
+      audit,
+      get: new GetPerioSettingsUseCase(repo),
+      update: new UpdatePerioSettingsUseCase(
+        repo,
+        audit as unknown as RecordAuditEventUseCase,
+      ),
+    };
+  }
+
+  it('de fábrica 4 y 6', async () => {
+    const { get } = settingsSetup();
+    await expect(get.execute()).resolves.toEqual({
+      pdAlertMm: 4,
+      pdSevereMm: 6,
+    });
+  });
+
+  it('el cambio queda auditado con los campos y el antes y el después en código', async () => {
+    const { update, audit, get } = settingsSetup();
+    await expect(
+      update.execute({ pdAlertMm: 5, pdSevereMm: 7 }, ctx),
+    ).resolves.toEqual({ pdAlertMm: 5, pdSevereMm: 7 });
+    expect(await get.execute()).toEqual({ pdAlertMm: 5, pdSevereMm: 7 });
+    expect(audit.record).toHaveBeenCalledTimes(1);
+    const event = audit.record.mock.calls[0][0] as {
+      resourceType: string;
+      action: string;
+      metadata: Record<string, unknown>;
+    };
+    expect(event).toMatchObject({
+      action: 'UPDATE',
+      resourceType: 'CLINIC_SETTINGS',
+      resourceId: null,
+      patient: null,
+    });
+    // El sanitizador de la auditoría no le quita nada.
+    expect(sanitizeAuditMetadata(event.metadata)).toEqual({
+      reason: 'PERIO_SETTINGS',
+      changedFields: ['pdAlertMm', 'pdSevereMm'],
+      statusChange: { from: 'PD_A4_S6', to: 'PD_A5_S7' },
+    });
+  });
+
+  it('un campo ausente conserva el actual; sin cambio no hay evento', async () => {
+    const { update, audit } = settingsSetup();
+    await expect(update.execute({ pdSevereMm: 8 }, ctx)).resolves.toEqual({
+      pdAlertMm: 4,
+      pdSevereMm: 8,
+    });
+    expect(audit.record).toHaveBeenCalledTimes(1);
+    expect(
+      (
+        audit.record.mock.calls[0][0] as {
+          metadata: { changedFields: string[] };
+        }
+      ).metadata.changedFields,
+    ).toEqual(['pdSevereMm']);
+    await update.execute({ pdAlertMm: 4 }, ctx);
+    expect(audit.record).toHaveBeenCalledTimes(1);
+  });
+
+  it('400 en español: fuera de rango o alerta ≥ severo, sin escribir', async () => {
+    const { update, get, audit } = settingsSetup();
+    await expect(
+      update.execute({ pdAlertMm: 6, pdSevereMm: 6 }, ctx),
+    ).rejects.toThrow('El umbral de alerta debe ser menor que el severo');
+    await expect(update.execute({ pdAlertMm: 7 }, ctx)).rejects.toThrow(
+      'El umbral de alerta debe ser menor que el severo',
+    );
+    await expect(update.execute({ pdSevereMm: 20 }, ctx)).rejects.toThrow(
+      'El umbral severo debe ser un entero entre 3 y 12 mm',
+    );
+    await expect(update.execute({ pdAlertMm: 1 }, ctx)).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    expect(await get.execute()).toEqual({ pdAlertMm: 4, pdSevereMm: 6 });
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+
+  it('el detalle y la lista cuentan con los umbrales de la clínica', async () => {
+    const { repo, create, save, list } = setup();
+    repo.perioThresholds = { pdAlertMm: 3, pdSevereMm: 5 };
+    const exam = await create.execute('p1', {}, 'd');
+    const detail = await save.execute('p1', exam.id, {
+      sites: [
+        site(16, 'MB', { probingMm: 3 }),
+        site(16, 'B', { probingMm: 5 }),
+      ],
+      teeth: [],
+    });
+    expect(detail.thresholds).toEqual({ pdAlertMm: 3, pdSevereMm: 5 });
+    expect(detail.indices).toMatchObject({
+      sitesAlertOrMore: 2,
+      sitesSevereOrMore: 1,
+      sites4mmOrMore: 1,
+      sites6mmOrMore: 0,
+    });
+    const [row] = await list.execute('p1');
+    expect(row.indices).toEqual(detail.indices);
   });
 });

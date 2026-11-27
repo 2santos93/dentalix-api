@@ -37,7 +37,10 @@ import { AgreementsController } from '../agreements/presentation/agreements.cont
 import { LocationsController } from '../locations/presentation/locations.controller';
 import { LocationCalendarController } from '../location-calendar/presentation/location-calendar.controller';
 import { OdontogramController } from '../odontogram/presentation/odontogram.controller';
-import { PerioExamsController } from '../periodontal/presentation/perio-exams.controller';
+import {
+  PerioExamsController,
+  PerioSettingsController,
+} from '../periodontal/presentation/perio-exams.controller';
 import { PatientConsentsController } from '../consents/presentation/patient-consents.controller';
 import { PatientDataConsentsController } from '../data-consents/presentation/patient-data-consents.controller';
 import {
@@ -702,6 +705,20 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'PERIO_EXAM',
     resourceId: { param: 'id' },
     patient: P,
+  },
+  // DX-066: notas del DRAFT y comparación de 2–4 exámenes FINAL.
+  'PATCH /patients/:patientId/perio-exams/:id': {
+    action: 'UPDATE',
+    resource: 'PERIO_EXAM',
+    resourceId: { param: 'id' },
+    patient: P,
+    reason: 'PERIO_NOTES',
+  },
+  'GET /patients/:patientId/perio-exams/compare': {
+    action: 'VIEW',
+    resource: 'PERIO_EXAM',
+    patient: P,
+    reason: 'PERIO_COMPARISON',
   },
 
   'GET /patients/:patientId/consents': {
@@ -2565,6 +2582,10 @@ const AUDITED_IN_USE_CASE: Record<string, string> = {
   // y el después en códigos QT; sin evento si nada cambió.
   'PUT /treatment-plan-settings':
     'quote-settings.use-cases.spec.ts y treatment-plan-quote-validity.e2e-spec.ts',
+  // DX-066: CLINIC_SETTINGS con PERIO_SETTINGS, los campos cambiados y el
+  // antes y el después en códigos PD; sin evento si nada cambió.
+  'PUT /perio/settings':
+    'perio-exams.use-cases.spec.ts y perio-exams.e2e-spec.ts',
   // DX-448: CLINIC_SETTINGS con SLOT_OFFER_SETTINGS y configChange antes y
   // después, escrito por el repositorio en la transacción, sin sede (DX-363);
   // sin evento si nada cambió.
@@ -2936,6 +2957,7 @@ const CONTROLLERS: Type[] = [
   LocationCalendarController,
   OdontogramController,
   PerioExamsController,
+  PerioSettingsController,
   PatientConsentsController,
   PatientDataConsentsController,
   PatientPrescriptionsController,

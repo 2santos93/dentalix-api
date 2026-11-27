@@ -4804,7 +4804,7 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
     {
       spec: 'perio-exams.e2e-spec.ts',
       checks:
-        'B → 404 al listar, crear, leer, medir, finalizar y borrar exámenes del paciente de A, y B no tiene ningún examen',
+        'B → 404 al listar, crear, leer, medir, cambiar notas, comparar, finalizar y borrar exámenes del paciente de A, y B no tiene ningún examen',
       routes: [
         'GET /patients/:patientId/perio-exams',
         'POST /patients/:patientId/perio-exams',
@@ -4812,6 +4812,8 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         'PUT /patients/:patientId/perio-exams/:id/measures',
         'POST /patients/:patientId/perio-exams/:id/finalize',
         'DELETE /patients/:patientId/perio-exams/:id',
+        'PATCH /patients/:patientId/perio-exams/:id',
+        'GET /patients/:patientId/perio-exams/compare',
       ],
     },
     {
