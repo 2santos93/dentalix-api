@@ -59,6 +59,9 @@ ALTER TABLE "patient_ledgers" DROP CONSTRAINT "patient_ledgers_location_fkey";
 ALTER TABLE "payments" DROP CONSTRAINT "payments_exchange_rate_currency_fkey";
 
 -- DropForeignKey
+ALTER TABLE "tooth_records" DROP CONSTRAINT "tooth_records_replacesRecordId_fkey";
+
+-- DropForeignKey
 ALTER TABLE "tooth_records" DROP CONSTRAINT "tooth_records_voidsRecordId_fkey";
 
 -- DropForeignKey
@@ -197,7 +200,7 @@ CREATE UNIQUE INDEX "tenant_domains_tenant_host_key" ON "tenant_domains"("tenant
 CREATE UNIQUE INDEX "tenants_subdomain_key" ON "tenants"("subdomain");
 
 -- CreateIndex
-CREATE UNIQUE INDEX "tooth_records_source_plan_item_key" ON "tooth_records"("tenantId", "sourcePlanItemId");
+CREATE UNIQUE INDEX "tooth_records_source_plan_item_mirror_key" ON "tooth_records"("tenantId", "sourcePlanItemId", "replacesRecordId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "tooth_records_void_once_key" ON "tooth_records"("tenantId", "voidsRecordId");

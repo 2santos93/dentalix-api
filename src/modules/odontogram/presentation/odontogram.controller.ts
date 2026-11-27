@@ -100,7 +100,7 @@ export class OdontogramController {
   })
   @ApiUnprocessableEntityResponse({
     description:
-      'DX-120: el diente no corresponde a la dentición de su posición (temporal en permanente o al revés).',
+      'DX-120: el diente no corresponde a la dentición de su posición (temporal en permanente o al revés). code TOOTH_DENTITION_MISMATCH.',
   })
   create(
     @Param('patientId', ParseUUIDPipe) patientId: string,
@@ -173,7 +173,10 @@ export class OdontogramController {
       'Último evento de cada posición o, sin eventos, la que toca por la edad (< 6 años temporal, 6-12 mixta según la tabla de erupción, > 12 permanente). No escribe nada.',
   })
   @ApiOkResponse({ type: DentitionDto })
-  @ApiBadRequestResponse({ description: 'asOf inválido o futuro.' })
+  @ApiBadRequestResponse({
+    description:
+      'asOf inválido (code ODONTOGRAM_AS_OF_INVALID) o futuro (code ODONTOGRAM_AS_OF_FUTURE).',
+  })
   @ApiNotFoundResponse({
     description: 'Paciente no encontrado en esta clínica.',
   })
@@ -205,7 +208,7 @@ export class OdontogramController {
   })
   @ApiUnprocessableEntityResponse({
     description:
-      'Mixta o exfoliación en un molar sin temporal, o exfoliación que no deja la posición en permanente.',
+      'Mixta o exfoliación en un molar sin temporal, exfoliación que no deja la posición en permanente o erupción hacia temporal (DX-132).',
   })
   recordDentition(
     @Param('patientId', ParseUUIDPipe) patientId: string,
@@ -235,7 +238,10 @@ export class OdontogramController {
       'Registros vigentes por diente (sin los anulados). Con asOf, la carta al final de ese día: lo anulado después sigue y lo posterior no aparece.',
   })
   @ApiOkResponse({ type: [OdontogramGroupDto] })
-  @ApiBadRequestResponse({ description: 'asOf inválido o futuro.' })
+  @ApiBadRequestResponse({
+    description:
+      'asOf inválido (code ODONTOGRAM_AS_OF_INVALID) o futuro (code ODONTOGRAM_AS_OF_FUTURE).',
+  })
   projection(
     @Param('patientId', ParseUUIDPipe) patientId: string,
     @Query() query: AsOfQueryDto,
@@ -249,14 +255,24 @@ export class OdontogramController {
     patient: { param: 'patientId' },
   })
   @Get('teeth/:fdi/history')
+  @ApiOperation({
+    summary: 'Historial de un diente',
+    description:
+      'Más reciente primero; incluye los anulados, con su anulación. DX-132: con asOf, el historial al final de ese día en la zona de la sede (el mismo corte que la carta a esa fecha): lo posterior no sale y lo anulado después sale sin anular.',
+  })
   @ApiOkResponse({
     type: [ToothTimelineEntryDto],
     description: 'Más reciente primero; incluye los anulados, con su anulación',
   })
+  @ApiBadRequestResponse({
+    description:
+      'asOf inválido (code ODONTOGRAM_AS_OF_INVALID) o futuro (code ODONTOGRAM_AS_OF_FUTURE).',
+  })
   history(
     @Param('patientId', ParseUUIDPipe) patientId: string,
     @Param('fdi') fdi: string,
+    @Query() query: AsOfQueryDto,
   ): Promise<ToothTimelineEntry[]> {
-    return this.getToothTimeline.execute(patientId, fdi);
+    return this.getToothTimeline.execute(patientId, fdi, query.asOf);
   }
 }

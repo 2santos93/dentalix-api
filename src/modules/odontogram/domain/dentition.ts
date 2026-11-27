@@ -142,9 +142,17 @@ export interface PositionDentition {
   lastEvent: DentitionEvent | null;
 }
 
+/**
+ * De dónde sale la carta en conjunto (DX-132): MANUAL si TODAS las posiciones
+ * vienen de un evento registrado a mano (cambio, erupción o exfoliación; la
+ * web rotula «Ajustada a mano»); si no, AGE con fecha de nacimiento y DEFAULT
+ * (permanente) sin ella. Con eventos solo en parte de la boca sigue AGE o
+ * DEFAULT: cada posición dice su `source`.
+ */
+export type DentitionBasis = 'AGE' | 'DEFAULT' | 'MANUAL';
+
 export interface DentitionState {
-  /** AGE si hay fecha de nacimiento; DEFAULT (permanente) si no. */
-  basis: 'AGE' | 'DEFAULT';
+  basis: DentitionBasis;
   ageYears: number | null;
   overall: DentitionType;
   positions: PositionDentition[];
@@ -196,10 +204,62 @@ export function resolveDentition(input: {
       lastEvent: null,
     };
   });
+  const basis: DentitionBasis = positions.every((p) => p.source === 'EVENT')
+    ? 'MANUAL'
+    : ageYears === null
+      ? 'DEFAULT'
+      : 'AGE';
   return {
-    basis: ageYears === null ? 'DEFAULT' : 'AGE',
+    basis,
     ageYears,
     overall: overallDentition(positions.map((p) => p.dentition)),
     positions,
   };
 }
+
+/**
+ * DX-132: la dentición de la posición de `toothNumber` en `onDate` si el diente
+ * NO cabe en ella (un temporal en una posición permanente o al revés), o null
+ * si cabe. Misma regla para el alta manual y para el espejo del plan.
+ */
+export function toothDentitionConflict(input: {
+  toothNumber: string;
+  birthDate: Date | null;
+  onDate: string;
+  events: readonly DentitionEvent[];
+}): DentitionType | null {
+  const position = positionOfTooth(input.toothNumber);
+  const state = resolveDentition({
+    birthDate: input.birthDate,
+    onDate: input.onDate,
+    events: input.events.filter((e) => e.position === position),
+  });
+  const { dentition } = state.positions.find((p) => p.position === position)!;
+  return toothAllowedIn(input.toothNumber, dentition) ? null : dentition;
+}
+
+/** Código del 422 de diente fuera de su dentición (alta manual y espejo del plan). */
+export const TOOTH_DENTITION_MISMATCH_CODE = 'TOOTH_DENTITION_MISMATCH';
+
+/**
+ * Mensaje 422 cuando el diente no corresponde a la dentición de su posición.
+ * `action` cierra la frase: «registrar» en el alta manual, «marcarlo como
+ * realizado» en el plan de tratamiento (DX-132).
+ */
+export function dentitionMismatchMessage(
+  toothNumber: string,
+  dentition: DentitionType,
+  action = 'registrar',
+): string {
+  const position = positionOfTooth(toothNumber);
+  if (isPrimaryTooth(toothNumber)) {
+    return `El diente ${toothNumber} es temporal, pero la posición ${position} está en dentición permanente. Cambia la dentición de esa posición (mixta o temporal) antes de ${action}.`;
+  }
+  if (dentition === DentitionType.PRIMARY && !hasPrimaryPredecessor(position)) {
+    return `El diente ${toothNumber} aún no ha erupcionado según la dentición del paciente. Márcalo como erupcionado antes de ${action}.`;
+  }
+  return `El diente ${toothNumber} es permanente, pero la posición ${position} está en dentición temporal. Cambia la dentición de esa posición (mixta o permanente) antes de ${action}.`;
+}
+
+/** Acción del plan para `dentitionMismatchMessage`. */
+export const PLAN_ITEM_DONE_ACTION = 'marcarlo como realizado';

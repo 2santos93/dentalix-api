@@ -101,8 +101,12 @@ export class PositionDentitionDto {
 }
 
 export class DentitionDto {
-  @ApiProperty({ enum: ['AGE', 'DEFAULT'] })
-  basis!: 'AGE' | 'DEFAULT';
+  @ApiProperty({
+    enum: ['AGE', 'DEFAULT', 'MANUAL'],
+    description:
+      'AGE: según la edad; DEFAULT: sin fecha de nacimiento (permanente); MANUAL (DX-132): todas las posiciones vienen de un evento registrado a mano («Ajustada a mano»)',
+  })
+  basis!: 'AGE' | 'DEFAULT' | 'MANUAL';
 
   @ApiProperty({ type: Number, nullable: true })
   ageYears!: number | null;

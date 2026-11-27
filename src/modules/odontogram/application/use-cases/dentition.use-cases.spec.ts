@@ -44,6 +44,22 @@ describe('GetDentitionUseCase (DX-120)', () => {
     expect(events.events).toHaveLength(0);
   });
 
+  it('basis MANUAL tras cambiar a mano toda la carta (DX-132)', async () => {
+    const { get, record } = setup({ p1: '2022-05-01' });
+    expect((await get.execute('p1')).basis).toBe('AGE');
+    const all = [1, 2, 3, 4].flatMap((q) =>
+      [1, 2, 3, 4, 5, 6, 7, 8].map((n) => `${q}${n}`),
+    );
+    await record.execute(
+      'p1',
+      { positions: all, dentition: 'PERMANENT', reason: 'MANUAL' },
+      'u1',
+    );
+    const out = await get.execute('p1');
+    expect(out.basis).toBe('MANUAL');
+    expect(out.ageYears).toBe(4);
+  });
+
   it('niño de 4 años: temporal; adulto: permanente', async () => {
     const { get } = setup({ kid: '2022-05-01', adult: '1980-01-01' });
     expect((await get.execute('kid')).overall).toBe('PRIMARY');
@@ -142,6 +158,28 @@ describe('RecordDentitionEventsUseCase (DX-120)', () => {
       ),
     ).rejects.toThrow(/no tiene diente temporal/);
     expect(events.events).toHaveLength(0);
+  });
+
+  it('422: una erupción no deja la posición en temporal (DX-132)', async () => {
+    const { record, events } = setup({ p1: null });
+    await expect(
+      record.execute(
+        'p1',
+        { positions: ['15', '21'], dentition: 'PRIMARY', reason: 'ERUPTION' },
+        'u1',
+      ),
+    ).rejects.toThrow(
+      new UnprocessableEntityException(
+        'Una erupción deja la posición en dentición mixta o permanente, no temporal',
+      ),
+    );
+    // Hacia mixta o permanente sigue valiendo.
+    await record.execute(
+      'p1',
+      { positions: ['15'], dentition: 'MIXED', reason: 'ERUPTION' },
+      'u1',
+    );
+    expect(events.events).toHaveLength(1);
   });
 
   it('422: exfoliar deja la posición en permanente', async () => {

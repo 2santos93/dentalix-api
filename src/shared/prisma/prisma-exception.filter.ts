@@ -67,7 +67,7 @@ const CONFLICT_MESSAGES: { match: string; message: string }[] = [
     message: 'Ya existe un insumo con ese nombre en esta sede.',
   },
   {
-    match: 'tooth_records_source_plan_item_key',
+    match: 'tooth_records_source_plan_item_mirror_key',
     message: 'Ese procedimiento ya está registrado en el odontograma.',
   },
   {

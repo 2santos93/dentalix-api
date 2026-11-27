@@ -1,12 +1,16 @@
 import { DentitionType } from '@prisma/client';
 import {
   PERMANENT_POSITIONS,
+  PLAN_ITEM_DONE_ACTION,
   ageInYears,
+  dentitionMismatchMessage,
   dentitionByAge,
   overallDentition,
   positionOfTooth,
   resolveDentition,
   toothAllowedIn,
+  toothDentitionConflict,
+  type DentitionEvent,
 } from './dentition';
 
 const { PERMANENT, PRIMARY, MIXED } = DentitionType;
@@ -174,6 +178,144 @@ describe('dentición (DX-120)', () => {
     it('una posición MIXED admite los dos', () => {
       expect(toothAllowedIn('55', MIXED)).toBe(true);
       expect(toothAllowedIn('15', MIXED)).toBe(true);
+    });
+  });
+
+  describe('basis de la carta (DX-132)', () => {
+    const birthDate = new Date('2022-05-01T00:00:00.000Z'); // 4 años
+    const at = new Date('2026-10-15T10:00:00Z');
+    const manual = (positions: readonly string[]): DentitionEvent[] =>
+      positions.map((position, i) => ({
+        id: `e${i}`,
+        position,
+        dentition: PERMANENT,
+        reason: 'MANUAL',
+        recordedAt: at,
+        performedById: 'u1',
+      }));
+
+    it('MANUAL cuando los eventos cubren las 32 posiciones (ya no «Según la edad»)', () => {
+      const out = resolveDentition({
+        birthDate,
+        onDate: '2026-10-16',
+        events: manual(PERMANENT_POSITIONS),
+      });
+      expect(out.basis).toBe('MANUAL');
+      expect(out.ageYears).toBe(4);
+      expect(out.overall).toBe(PERMANENT);
+    });
+
+    it('sin fecha de nacimiento y la carta entera a mano: MANUAL, no DEFAULT', () => {
+      expect(
+        resolveDentition({
+          birthDate: null,
+          onDate: '2026-10-16',
+          events: manual(PERMANENT_POSITIONS),
+        }).basis,
+      ).toBe('MANUAL');
+    });
+
+    it('con eventos solo en parte de la boca sigue AGE (o DEFAULT sin edad)', () => {
+      const some = manual(PERMANENT_POSITIONS.slice(0, 31));
+      expect(
+        resolveDentition({ birthDate, onDate: '2026-10-16', events: some })
+          .basis,
+      ).toBe('AGE');
+      expect(
+        resolveDentition({
+          birthDate: null,
+          onDate: '2026-10-16',
+          events: some,
+        }).basis,
+      ).toBe('DEFAULT');
+    });
+
+    it('erupciones y exfoliaciones también cuentan: todas las registró el doctor', () => {
+      const events = manual(PERMANENT_POSITIONS).map((e, i) => ({
+        ...e,
+        reason: i % 2 === 0 ? ('ERUPTION' as const) : ('MANUAL' as const),
+      }));
+      expect(
+        resolveDentition({ birthDate, onDate: '2026-10-16', events }).basis,
+      ).toBe('MANUAL');
+    });
+  });
+
+  describe('toothDentitionConflict (DX-132: alta manual y espejo del plan)', () => {
+    const adult = new Date('1990-01-01T00:00:00.000Z');
+    const child = new Date('2022-05-01T00:00:00.000Z');
+
+    it('un temporal en una posición permanente: devuelve la dentición', () => {
+      expect(
+        toothDentitionConflict({
+          toothNumber: '55',
+          birthDate: adult,
+          onDate: '2026-10-16',
+          events: [],
+        }),
+      ).toBe(PERMANENT);
+    });
+
+    it('cabe: null', () => {
+      expect(
+        toothDentitionConflict({
+          toothNumber: '55',
+          birthDate: child,
+          onDate: '2026-10-16',
+          events: [],
+        }),
+      ).toBeNull();
+    });
+
+    it('solo mira los eventos de la posición del diente', () => {
+      const events: DentitionEvent[] = [
+        {
+          id: 'e1',
+          position: '15',
+          dentition: MIXED,
+          reason: 'MANUAL',
+          recordedAt: new Date('2026-10-01T10:00:00Z'),
+          performedById: 'u1',
+        },
+        {
+          id: 'e2',
+          position: '25',
+          dentition: PRIMARY,
+          reason: 'MANUAL',
+          recordedAt: new Date('2026-10-01T10:00:00Z'),
+          performedById: 'u1',
+        },
+      ];
+      const at = { birthDate: adult, onDate: '2026-10-16', events };
+      expect(toothDentitionConflict({ ...at, toothNumber: '55' })).toBeNull();
+      expect(toothDentitionConflict({ ...at, toothNumber: '65' })).toBeNull();
+      expect(toothDentitionConflict({ ...at, toothNumber: '25' })).toBe(
+        PRIMARY,
+      );
+      expect(toothDentitionConflict({ ...at, toothNumber: '64' })).toBe(
+        PERMANENT,
+      );
+    });
+  });
+
+  describe('dentitionMismatchMessage', () => {
+    it('el alta manual termina en «registrar»; el plan, en «marcarlo como realizado»', () => {
+      expect(dentitionMismatchMessage('55', PERMANENT)).toBe(
+        'El diente 55 es temporal, pero la posición 15 está en dentición permanente. Cambia la dentición de esa posición (mixta o temporal) antes de registrar.',
+      );
+      expect(
+        dentitionMismatchMessage('55', PERMANENT, PLAN_ITEM_DONE_ACTION),
+      ).toBe(
+        'El diente 55 es temporal, pero la posición 15 está en dentición permanente. Cambia la dentición de esa posición (mixta o temporal) antes de marcarlo como realizado.',
+      );
+      expect(
+        dentitionMismatchMessage('16', PRIMARY, PLAN_ITEM_DONE_ACTION),
+      ).toBe(
+        'El diente 16 aún no ha erupcionado según la dentición del paciente. Márcalo como erupcionado antes de marcarlo como realizado.',
+      );
+      expect(dentitionMismatchMessage('11', PRIMARY)).toMatch(
+        /^El diente 11 es permanente, pero la posición 11 está en dentición temporal/,
+      );
     });
   });
 });

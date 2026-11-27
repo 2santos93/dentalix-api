@@ -1729,7 +1729,8 @@ model ToothRecord {
   performedById    String?           @db.Uuid
   // Set when this record was auto-created because a TreatmentPlanItem was
   // marked DONE (Pieza B). Soft pointer (no FK/relation): used to dedupe so a
-  // given plan item mirrors into the odontogram at most once. Null for records
+  // given plan item has at most one live mirror in the odontogram (DX-132: a
+  // voided mirror is re-copied, see replacesRecordId). Null for records
   // created directly in the odontogram.
   sourcePlanItemId String?           @db.Uuid
   recordedAt       DateTime          @default(now())
@@ -1744,16 +1745,22 @@ model ToothRecord {
   // una relación 1:1 que exigiría otro índice único.
   voidsRecordId    String?           @db.Uuid
   voidReason       String?
+  // DX-132: en una RE-COPIA del espejo del plan (el ítem vuelve a DONE tras
+  // anularse su copia), la copia anulada a la que sustituye. FK compuesta
+  // (tenantId, patientId, replacesRecordId) y CHECK solo en SQL
+  // (20270206140000_dx132_tooth_records_replaces).
+  replacesRecordId String?           @db.Uuid
 
   // FK COMPUESTA (tenantId, patientId) -> patients(tenantId, id): exige que el
   // paciente sea del MISMO tenant (mismo criterio que Appointment.patient;
   // SEC-004, 20261015130000_tenant_composite_fks).
   patient Patient @relation(fields: [tenantId, patientId], references: [tenantId, id])
 
-  // PARCIAL (WHERE "sourcePlanItemId" IS NOT NULL AND "deletedAt" IS NULL): un
-  // ítem de plan se espeja como mucho una vez (DX-042). El WHERE vive en
-  // 20261016130000_domain_checks; aquí mismo nombre y columnas.
-  @@unique([tenantId, sourcePlanItemId], map: "tooth_records_source_plan_item_key")
+  // PARCIAL (WHERE "sourcePlanItemId" IS NOT NULL AND "deletedAt" IS NULL) y
+  // NULLS NOT DISTINCT: un ítem de plan se espeja como mucho una vez (DX-042)
+  // y cada copia anulada se re-copia como mucho una vez (DX-132). El WHERE y
+  // el NULLS NOT DISTINCT viven en 20270206140100; aquí mismo nombre y columnas.
+  @@unique([tenantId, sourcePlanItemId, replacesRecordId], map: "tooth_records_source_plan_item_mirror_key")
   // DX-120: destino de la FK de anulación (mismo paciente y misma clínica).
   @@unique([tenantId, patientId, id], map: "tooth_records_tenantId_patientId_id_key")
   // DX-120, PARCIAL (WHERE "voidsRecordId" IS NOT NULL): un registro se anula

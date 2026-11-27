@@ -7,7 +7,6 @@ import {
 } from '@nestjs/common';
 import {
   CatalogKind,
-  DentitionType,
   ToothRecordOrigin,
   ToothRecordStatus,
   ToothSurface,
@@ -20,11 +19,9 @@ import type { PatientRepository } from '../../../patients/domain/ports/patient-r
 import { DENTITION_EVENT_REPOSITORY } from '../../domain/ports/dentition-event-repository.port';
 import type { DentitionEventRepository } from '../../domain/ports/dentition-event-repository.port';
 import {
-  hasPrimaryPredecessor,
-  isPrimaryTooth,
-  positionOfTooth,
-  resolveDentition,
-  toothAllowedIn,
+  TOOTH_DENTITION_MISMATCH_CODE,
+  dentitionMismatchMessage,
+  toothDentitionConflict,
 } from '../../domain/dentition';
 import { civilDateIn } from '../../../../shared/time/civil-day';
 import { ODONTOGRAM_CLOCK, type OdontogramClock } from '../odontogram-clock';
@@ -87,20 +84,7 @@ export interface AddToothRecordInput {
   recordedAt?: Date;
 }
 
-/** Mensaje 422 cuando el diente no corresponde a la dentición de su posición. */
-export function dentitionMismatchMessage(
-  toothNumber: string,
-  dentition: DentitionType,
-): string {
-  const position = positionOfTooth(toothNumber);
-  if (isPrimaryTooth(toothNumber)) {
-    return `El diente ${toothNumber} es temporal, pero la posición ${position} está en dentición permanente. Cambia la dentición de esa posición (mixta o temporal) antes de registrar.`;
-  }
-  if (dentition === DentitionType.PRIMARY && !hasPrimaryPredecessor(position)) {
-    return `El diente ${toothNumber} aún no ha erupcionado según la dentición del paciente. Márcalo como erupcionado antes de registrar.`;
-  }
-  return `El diente ${toothNumber} es permanente, pero la posición ${position} está en dentición temporal. Cambia la dentición de esa posición (mixta o permanente) antes de registrar.`;
-}
+export { dentitionMismatchMessage } from '../../domain/dentition';
 
 @Injectable()
 export class AddToothRecordUseCase {
@@ -213,19 +197,19 @@ export class AddToothRecordUseCase {
     birthDate: Date | null,
     toothNumber: string,
   ): Promise<void> {
-    const position = positionOfTooth(toothNumber);
-    const state = resolveDentition({
+    const dentition = toothDentitionConflict({
+      toothNumber,
       birthDate,
       onDate: civilDateIn(this.now(), await this.repo.clinicTimeZone()),
-      events: (await this.dentitionEvents.listByPatient(patientId)).filter(
-        (e) => e.position === position,
-      ),
+      events: await this.dentitionEvents.listByPatient(patientId),
     });
-    const { dentition } = state.positions.find((p) => p.position === position)!;
-    if (!toothAllowedIn(toothNumber, dentition)) {
-      throw new UnprocessableEntityException(
-        dentitionMismatchMessage(toothNumber, dentition),
-      );
+    if (dentition !== null) {
+      throw new UnprocessableEntityException({
+        statusCode: 422,
+        error: 'Unprocessable Entity',
+        code: TOOTH_DENTITION_MISMATCH_CODE,
+        message: dentitionMismatchMessage(toothNumber, dentition),
+      });
     }
   }
 }

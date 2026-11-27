@@ -1461,9 +1461,20 @@ UPDATE`, que no estorba a las FK), así que dos «Traer» del mismo
   autor o un ADMIN (403); sin motivo, 400; una segunda vez, 409 (índice único
   parcial `tooth_records_void_once_key`). La carta deja de pintarlo y
   `teeth/:fdi/history` lo devuelve con su `void` (motivo, autor y fecha).
-- **Carta a una fecha**: `?asOf=YYYY-MM-DD` en `odontogram` y `dentition`
-  corta al final de ese día en la zona de la sede: lo anulado después sigue,
-  lo posterior no aparece. Futuro o inválido, 400.
+- **Carta a una fecha**: `?asOf=YYYY-MM-DD` en `odontogram`, `dentition` y
+  (DX-132) `teeth/:fdi/history` corta al final de ese día en la zona de la
+  sede de la petición (`X-Location-Id`; sin ella, la principal): lo anulado
+  después sigue (y en el historial sale sin anular), lo posterior no aparece.
+  Futuro, 400 `ODONTOGRAM_AS_OF_FUTURE`; inválido, 400
+  `ODONTOGRAM_AS_OF_INVALID`.
+- **Espejo del plan (DX-132)**: marcar DONE un ítem del plan copia el
+  procedimiento al odontograma con la MISMA regla posición/dentición que el
+  alta manual (422 `TOOTH_DENTITION_MISMATCH`, y el ítem no queda DONE). Si
+  la copia se anuló y el ítem vuelve a DONE, se inserta otra que la sustituye
+  (`replacesRecordId`, con su `audit_event` `PLAN_ITEM_MIRROR_RECOPIED`); el
+  único `tooth_records_source_plan_item_mirror_key` (NULLS NOT DISTINCT)
+  respalda una copia viva por ítem. `basis` de la dentición es `MANUAL` cuando
+  todas las posiciones vienen de un evento; `ERUPTION` hacia `PRIMARY`, 422.
 - **Inalterable en la BD**: `tooth_records` y `patient_dentition_events`
   rechazan UPDATE siempre y DELETE/TRUNCATE salvo a un superusuario (trigger
   `dx_forbid_odontogram_mutation`, `search_path` fijo — SEC-032). RLS forzada
