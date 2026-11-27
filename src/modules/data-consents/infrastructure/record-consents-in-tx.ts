@@ -14,6 +14,20 @@ export const NO_POLICY_MESSAGE =
 export const OUTDATED_POLICY_MESSAGE =
   'La política de tratamiento de datos cambió mientras se registraba la autorización. Recarga para ver la versión vigente.';
 
+/**
+ * DX-058: 409 `PRIVACY_POLICY_OUTDATED`. Se publicó otra versión mientras el
+ * personal llenaba el formulario: el código estable le dice a la web que
+ * recargue la política (y pida de nuevo las casillas) en vez de solo avisar.
+ */
+export function outdatedPolicyConflict(): ConflictException {
+  return new ConflictException({
+    statusCode: 409,
+    error: 'Conflict',
+    code: 'PRIVACY_POLICY_OUTDATED',
+    message: OUTDATED_POLICY_MESSAGE,
+  });
+}
+
 /** Tope del user-agent guardado: evidencia, no un campo para abusar. */
 const USER_AGENT_MAX = 512;
 
@@ -62,7 +76,7 @@ export async function recordConsentsInTx(
     throw new ConflictException(NO_POLICY_MESSAGE);
   }
   if (current.id !== input.policyVersionId) {
-    throw new ConflictException(OUTDATED_POLICY_MESSAGE);
+    throw outdatedPolicyConflict();
   }
 
   const recordedAt = new Date();

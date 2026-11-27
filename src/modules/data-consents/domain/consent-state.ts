@@ -14,8 +14,16 @@ export const CONSENT_SCOPES: DataConsentScope[] = [
   DataConsentScope.MARKETING,
 ];
 
+/**
+ * Más reciente primero. Dos filas en el mismo milisegundo (un doble envío)
+ * se desempatan por id descendente (DX-058): el mismo orden que
+ * `ORDER BY "recordedAt" DESC, "id" DESC` en la base, así que el estado
+ * vigente no depende del orden en que lleguen las filas.
+ */
 function latestFirst(a: DataConsentRecord, b: DataConsentRecord): number {
-  return b.recordedAt.getTime() - a.recordedAt.getTime();
+  const byTime = b.recordedAt.getTime() - a.recordedAt.getTime();
+  if (byTime !== 0) return byTime;
+  return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
 }
 
 /** Historial de la más reciente a la más antigua. */

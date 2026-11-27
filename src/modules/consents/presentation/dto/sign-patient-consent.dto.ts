@@ -2,6 +2,7 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ConsentSignerType } from '@prisma/client';
 import {
   IsEnum,
+  IsISO8601,
   IsInt,
   IsOptional,
   IsString,
@@ -32,6 +33,16 @@ export class SignPatientConsentDto {
   @IsOptional()
   @IsUUID()
   treatmentPlanId?: string;
+
+  @ApiPropertyOptional({
+    type: String,
+    format: 'date-time',
+    description:
+      'DX-058: `previewedAt` de la vista previa. Fija la fecha del texto ({{fecha}}) para que coincida con la que se leyó; 409 CONSENT_PREVIEW_EXPIRED si tiene más de 2 h. Sin él, la fecha es la de la firma.',
+  })
+  @IsOptional()
+  @IsISO8601({ strict: true })
+  previewedAt?: string;
 
   @ApiProperty({ enum: ConsentSignerType })
   @IsEnum(ConsentSignerType)

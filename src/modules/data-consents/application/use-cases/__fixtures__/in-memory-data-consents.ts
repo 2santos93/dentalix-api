@@ -48,7 +48,11 @@ export class InMemoryDataConsentRepository implements DataConsentRepository {
     return Promise.resolve(
       this.rows
         .filter((r) => r.patientId === patientId)
-        .sort((a, b) => b.recordedAt.getTime() - a.recordedAt.getTime()),
+        .sort(
+          (a, b) =>
+            b.recordedAt.getTime() - a.recordedAt.getTime() ||
+            (a.id < b.id ? 1 : a.id > b.id ? -1 : 0),
+        ),
     );
   }
 

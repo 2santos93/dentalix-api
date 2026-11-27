@@ -13,6 +13,7 @@ import {
   CreateCountersignatureRepoInput,
   CreatePatientConsentRepoInput,
   PatientConsentRepository,
+  TemplateVersionChangedError,
 } from '../../domain/ports/patient-consent-repository.port';
 
 /**
@@ -37,6 +38,11 @@ export class InMemoryPatientConsentRepository implements PatientConsentRepositor
     locale: 'es-ES',
     hourCycle: 'h23',
   };
+  /**
+   * DX-058: la versión de la plantilla que ve la transacción del INSERT. Sin
+   * definir, la misma que trae la firma (nadie la editó entretanto).
+   */
+  templateVersionAtInsert?: (templateId: string) => number;
   private nextId = 1;
 
   constructor(
@@ -84,6 +90,10 @@ export class InMemoryPatientConsentRepository implements PatientConsentRepositor
   }
 
   create(input: CreatePatientConsentRepoInput): Promise<PatientConsent> {
+    const atInsert = this.templateVersionAtInsert?.(input.templateId);
+    if (atInsert !== undefined && atInsert !== input.templateVersion) {
+      return Promise.reject(new TemplateVersionChangedError());
+    }
     const row: PatientConsent = {
       id: `pc-${this.nextId++}`,
       tenantId: 't1',

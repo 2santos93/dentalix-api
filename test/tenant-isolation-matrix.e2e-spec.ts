@@ -3338,6 +3338,53 @@ describe('Tenant isolation matrix (e2e, DX-068)', () => {
         },
       ];
     }),
+    // DX-260: «Retención» (informe, lista y sus CSV). Una sede de A es 404
+    // (no es de la clínica de B); el profesional de A da un informe o una
+    // lista sin pacientes.
+    ...(
+      [
+        '/reports/retention',
+        '/reports/retention.csv',
+        '/reports/retention/patients',
+        '/reports/retention/patients.csv',
+      ] as const
+    ).flatMap((route): IsolationCase[] => {
+      const range = `from=${day(-30)}&to=${day(0)}&${
+        route.includes('/patients') ? 'segment=active_start&' : ''
+      }`;
+      const empty = (body: unknown, text: string) => {
+        if (route === '/reports/retention.csv') {
+          expect(text).toContain('"Total","",0,0,0,0,0,,0');
+          expect(text).not.toContain('Total sede');
+        } else if (route === '/reports/retention/patients.csv') {
+          expect(text).toContain('"Pacientes",0');
+          // Nada tras la cabecera de columnas.
+          expect(text.trim().split('\r\n').pop()).toMatch(/^"Paciente",/);
+        } else if (route === '/reports/retention/patients') {
+          expect(body).toMatchObject({ items: [], total: 0 });
+        } else {
+          expect(body).toMatchObject({ rows: [], hasData: false });
+        }
+      };
+      return [
+        {
+          name: `GET ${route} ?locationId de A`,
+          verb: 'get',
+          path: () => `${route}?${range}locationId=${a.locationId}`,
+          queryIds: ['locationId'],
+          status: 404,
+          message: 'Sede no encontrada.',
+        },
+        {
+          name: `GET ${route} ?providerId de A`,
+          verb: 'get',
+          path: () => `${route}?${range}providerId=${a.dentistUserId}`,
+          queryIds: ['providerId'],
+          status: 200,
+          expectBody: empty,
+        },
+      ];
+    }),
     // DX-567: producción agendada (agregado y lista sin tratamiento). Una
     // sede de A es 403 (el mismo rechazo que una sede no permitida); el
     // profesional de A da un informe sin citas.

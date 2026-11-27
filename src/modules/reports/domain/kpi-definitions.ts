@@ -208,7 +208,7 @@ const roundPercent = (value: number, decimals: number): number =>
 const MAX_OCCUPANCY = 100;
 
 /** `numerator ÷ denominator` en % con 2 decimales; null si no hay base. */
-function percent(numerator: number, denominator: number): number | null {
+export function percent(numerator: number, denominator: number): number | null {
   return denominator > 0
     ? roundPercent((numerator / denominator) * 100, 2)
     : null;

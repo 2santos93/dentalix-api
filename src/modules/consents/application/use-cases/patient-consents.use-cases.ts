@@ -29,6 +29,7 @@ import {
   PATIENT_CONSENT_REPOSITORY,
   type ConsentSigningContext,
   type PatientConsentRepository,
+  TemplateVersionChangedError,
 } from '../../domain/ports/patient-consent-repository.port';
 import {
   formatConsentDate,
@@ -68,6 +69,18 @@ export const CONSENT_ALREADY_COUNTERSIGNED_MESSAGE =
   'El profesional ya firmó este consentimiento.';
 export const CONSENT_WRONG_PROFESSIONAL_MESSAGE = (name: string) =>
   `Solo ${name} puede firmar este consentimiento como profesional: es quien lo envió a firmar y quien nombra el texto.`;
+export const CONSENT_TEMPLATE_CHANGED_MESSAGE =
+  'La plantilla cambió desde la vista previa: revisa el texto de nuevo antes de firmar';
+/**
+ * DX-058: cuánto vale una vista previa para fijar `{{fecha}}`. Leer el texto
+ * con el paciente y firmar lleva minutos; dos horas cubren una consulta larga
+ * y acotan cuánto puede retroceder la fecha impresa un `previewedAt` manual.
+ */
+export const CONSENT_PREVIEW_MAX_AGE_MS = 2 * 60 * 60 * 1000;
+/** Desfase tolerado entre relojes de instancias de la API. */
+const CONSENT_PREVIEW_CLOCK_SKEW_MS = 5_000;
+export const CONSENT_PREVIEW_EXPIRED_MESSAGE =
+  'La vista previa caducó: vuelve a leer el texto con el paciente antes de firmar.';
 const NO_TREATMENT = 'No especificado';
 const NO_DOCUMENT = 'Sin documento';
 
@@ -82,11 +95,21 @@ export interface ConsentPreview {
   title: string;
   body: string;
   professionalName: string;
+  /**
+   * DX-058: el instante (reloj del servidor) con el que se pintó `{{fecha}}`.
+   * La firma lo devuelve para que el texto firmado lleve esa misma fecha.
+   */
+  previewedAt: Date;
 }
 
 export interface SignPatientConsentInput extends PreviewPatientConsentInput {
   /** La versión que vio el paciente en la vista previa. */
   templateVersion: number;
+  /**
+   * DX-058: `previewedAt` de esa vista previa (ISO). Fija `{{fecha}}`; sin él
+   * (cliente antiguo), la fecha es la de la firma.
+   */
+  previewedAt?: string;
   signerType: ConsentSignerType;
   guardianName?: string;
   guardianDocument?: string;
@@ -240,11 +263,12 @@ export class PreviewPatientConsentUseCase {
     input: PreviewPatientConsentInput,
     professionalUserId: string,
   ): Promise<ConsentPreview> {
+    const previewedAt = this.now();
     const { template, context, title, body } = await prepare(
       this.templates,
       this.consents,
       this.documentTypeNames,
-      this.now(),
+      previewedAt,
       patientId,
       input,
       professionalUserId,
@@ -255,8 +279,33 @@ export class PreviewPatientConsentUseCase {
       title,
       body,
       professionalName: context.professionalName,
+      previewedAt,
     };
   }
+}
+
+/**
+ * DX-058: el instante con el que se pinta `{{fecha}}` al firmar: el de la
+ * vista previa si llega y es reciente (409 `CONSENT_PREVIEW_EXPIRED` si no:
+ * hay que volver a leer el texto), o el de la firma para un cliente antiguo.
+ */
+function renderInstant(previewedAt: string | undefined, signedAt: Date): Date {
+  if (previewedAt === undefined) return signedAt;
+  const at = new Date(previewedAt);
+  const age = signedAt.getTime() - at.getTime();
+  if (
+    Number.isNaN(age) ||
+    age > CONSENT_PREVIEW_MAX_AGE_MS ||
+    age < -CONSENT_PREVIEW_CLOCK_SKEW_MS
+  ) {
+    throw new ConflictException({
+      statusCode: 409,
+      error: 'Conflict',
+      code: 'CONSENT_PREVIEW_EXPIRED',
+      message: CONSENT_PREVIEW_EXPIRED_MESSAGE,
+    });
+  }
+  return at;
 }
 
 function requiredTrimmed(value: string | undefined): string | null {
@@ -312,19 +361,19 @@ export class SignPatientConsentUseCase {
     }
 
     const signedAt = this.now();
+    // DX-058: `{{fecha}}` es la de la vista previa, no la de este instante:
+    // pasada la medianoche, el texto firmado seguiría siendo el que se leyó.
     const { template, context, title, body, document } = await prepare(
       this.templates,
       this.consents,
       this.documentTypeNames,
-      signedAt,
+      renderInstant(input.previewedAt, signedAt),
       patientId,
       input,
       meta.recordedById,
     );
     if (template.version !== input.templateVersion) {
-      throw new ConflictException(
-        'La plantilla cambió desde la vista previa: revisa el texto de nuevo antes de firmar',
-      );
+      throw new ConflictException(CONSENT_TEMPLATE_CHANGED_MESSAGE);
     }
     // Las firmas se descomprimen para buscar tinta: aunque el coste está
     // acotado (SEC-026), solo se paga con el paciente, el plan y la plantilla
@@ -357,25 +406,34 @@ export class SignPatientConsentUseCase {
       signedAt,
     });
 
-    return this.consents.create({
-      patientId,
-      templateId: template.id,
-      templateVersion: template.version,
-      treatmentPlanId: input.treatmentPlanId ?? null,
-      title,
-      body,
-      signerType: input.signerType,
-      signerName,
-      signerDocument,
-      professionalName: context.professionalName,
-      patientSignature,
-      professionalSignature,
-      contentHash,
-      signedAt,
-      recordedById: meta.recordedById,
-      ipAddress: meta.ipAddress,
-      userAgent: meta.userAgent,
-    });
+    // El repositorio repite la comprobación de versión dentro de la
+    // transacción del INSERT (DX-058): esta de arriba es el atajo barato.
+    return this.consents
+      .create({
+        patientId,
+        templateId: template.id,
+        templateVersion: template.version,
+        treatmentPlanId: input.treatmentPlanId ?? null,
+        title,
+        body,
+        signerType: input.signerType,
+        signerName,
+        signerDocument,
+        professionalName: context.professionalName,
+        patientSignature,
+        professionalSignature,
+        contentHash,
+        signedAt,
+        recordedById: meta.recordedById,
+        ipAddress: meta.ipAddress,
+        userAgent: meta.userAgent,
+      })
+      .catch((error: unknown) => {
+        if (error instanceof TemplateVersionChangedError) {
+          throw new ConflictException(CONSENT_TEMPLATE_CHANGED_MESSAGE);
+        }
+        throw error;
+      });
   }
 }
 

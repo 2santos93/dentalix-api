@@ -690,3 +690,10 @@ export const NO_SHOWS_CSV_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
 
 /** DX-053: pedir, ver y descargar la exportación de los datos de la clínica. */
 export const CLINIC_EXPORT_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+
+// «Retención» (DX-260): ADMIN o quien tenga FINANCIAL_REPORTS_VIEW (DX-090,
+// `@AllowPermissions` en cada ruta; así la recepción puede verla si se le
+// concede). Odontólogo y asistente, no. El CSV de una lista lleva nombres y
+// teléfonos de pacientes: solo ADMIN (RETENTION_PATIENTS_CSV_ROLES).
+export const RETENTION_REPORT_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
+export const RETENTION_PATIENTS_CSV_ROLES: ClinicRole[] = [ClinicRole.ADMIN];
