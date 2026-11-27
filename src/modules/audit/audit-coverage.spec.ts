@@ -70,6 +70,7 @@ import { ProductionByProcedureController } from '../reports/presentation/product
 import { QuoteFunnelController } from '../reports/presentation/quote-funnel.controller';
 import { AcquisitionController } from '../reports/presentation/acquisition.controller';
 import { RetentionController } from '../reports/presentation/retention.controller';
+import { TimingController } from '../reports/presentation/timing.controller';
 import {
   PatientAcquisitionController,
   PatientSourcesController,
@@ -1732,6 +1733,13 @@ const EXPECTED: Record<string, AuditOptions> = {
     resource: 'PATIENT',
     reason: 'RETENTION_REPORT',
   },
+  // DX-275: «Tiempos» solo lleva agregados de agenda; su CSV sale de la
+  // clínica y queda registrado. El informe en pantalla, no.
+  'GET /reports/timing.csv': {
+    action: 'EXPORT',
+    resource: 'APPOINTMENT',
+    reason: 'TIMING_REPORT',
+  },
   'GET /patients/:id/acquisition': {
     action: 'VIEW',
     resource: 'PATIENT',
@@ -2893,6 +2901,7 @@ const KNOWN_UNAUDITED: Record<string, string> = {
 const CONTROLLERS: Type[] = [
   AcquisitionController,
   RetentionController,
+  TimingController,
   PatientSourcesController,
   PatientAcquisitionController,
   LeadsController,

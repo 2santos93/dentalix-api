@@ -55,6 +55,13 @@ export const ALLOWED: readonly Allowed[] = [
     reason: 'columna % del informe de descuentos',
   },
   {
+    file: 'src/modules/reports/domain/timing.ts',
+    text: 'Math.round(value * 10) / 10',
+    fn: 'export function round1',
+    reason:
+      'DX-275: minutos y porcentajes de «Tiempos» con 1 decimal, no importes',
+  },
+  {
     file: 'src/modules/reports/domain/kpi-definitions.ts',
     text: 'Math.round(value * 10 ** decimals) / 10 ** decimals',
     fn: 'const roundPercent',

@@ -26,6 +26,7 @@ import {
   AppointmentUpdate,
   CreateAppointmentRepoInput,
   InClinicAppointment,
+  CompletedFlowAppointment,
   ListInClinicParams,
   PlanItemClaim,
   ListAppointmentsByRangeParams,
@@ -489,6 +490,33 @@ export class InMemoryAppointmentRepository implements AppointmentRepository {
         urgent:
           r.appointmentTypeId !== null &&
           this.urgentTypeIds.has(r.appointmentTypeId),
+      }));
+    return Promise.resolve(items);
+  }
+
+  listCompletedFlow(
+    params: ListInClinicParams,
+  ): Promise<CompletedFlowAppointment[]> {
+    const items = this.rows
+      .filter(
+        (r) => r.deletedAt === null && r.status === AppointmentStatus.COMPLETED,
+      )
+      .filter((r) => r.locationId === params.locationId)
+      .filter((r) => r.start >= params.from && r.start < params.to)
+      .filter((r) => !params.providerId || r.providerId === params.providerId)
+      .sort((a, b) => a.start.getTime() - b.start.getTime())
+      .map((r) => ({
+        id: r.id,
+        patientId: r.patientId,
+        patientFirstName: r.patientFirstName,
+        patientLastName: r.patientLastName,
+        providerId: r.providerId,
+        providerName: this.providerNames.get(r.providerId) ?? null,
+        start: r.start,
+        end: r.end,
+        arrivedAt: r.arrivedAt,
+        seatedAt: r.seatedAt,
+        readyForCheckoutAt: r.readyForCheckoutAt,
       }));
     return Promise.resolve(items);
   }

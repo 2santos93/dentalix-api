@@ -119,6 +119,7 @@ function makeRepo(
     findOverlappingForChair: (): Promise<Appointment[]> => Promise.resolve([]),
     undoArrival: () => Promise.resolve(null),
     listInClinic: () => Promise.resolve([]),
+    listCompletedFlow: () => Promise.resolve([]),
     currentCancellationPolicy: () => Promise.resolve(null),
     update: (): Promise<AppointmentUpdate> =>
       Promise.reject(new Error('not implemented in this fake')),
@@ -1210,6 +1211,7 @@ describe('CreateAppointmentUseCase', () => {
           Promise.resolve([]),
         undoArrival: () => Promise.resolve(null),
         listInClinic: () => Promise.resolve([]),
+        listCompletedFlow: () => Promise.resolve([]),
         currentCancellationPolicy: () => Promise.resolve(null),
         create: (): Promise<Appointment> => Promise.reject(ormExclusionError()),
       });
@@ -1247,6 +1249,7 @@ describe('CreateAppointmentUseCase', () => {
           Promise.resolve([]),
         undoArrival: () => Promise.resolve(null),
         listInClinic: () => Promise.resolve([]),
+        listCompletedFlow: () => Promise.resolve([]),
         currentCancellationPolicy: () => Promise.resolve(null),
         create: (): Promise<Appointment> => Promise.reject(patientExclusion),
       });
@@ -1275,6 +1278,7 @@ describe('CreateAppointmentUseCase', () => {
           Promise.resolve([]),
         undoArrival: () => Promise.resolve(null),
         listInClinic: () => Promise.resolve([]),
+        listCompletedFlow: () => Promise.resolve([]),
         currentCancellationPolicy: () => Promise.resolve(null),
         create: (): Promise<Appointment> => Promise.reject(rawExclusionError()),
       });
@@ -1309,6 +1313,7 @@ describe('CreateAppointmentUseCase', () => {
           Promise.resolve([]),
         undoArrival: () => Promise.resolve(null),
         listInClinic: () => Promise.resolve([]),
+        listCompletedFlow: () => Promise.resolve([]),
         currentCancellationPolicy: () => Promise.resolve(null),
         create: (): Promise<Appointment> => Promise.reject(boom),
       });

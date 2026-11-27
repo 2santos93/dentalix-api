@@ -60,6 +60,10 @@ import {
 import { RETENTION_REPOSITORY } from './domain/ports/retention-repository.port';
 import { PrismaRetentionRepository } from './infrastructure/prisma-retention.repository';
 import { RetentionController } from './presentation/retention.controller';
+import { GetTimingUseCase } from './application/use-cases/get-timing.use-case';
+import { TIMING_REPOSITORY } from './domain/ports/timing-repository.port';
+import { PrismaTimingRepository } from './infrastructure/prisma-timing.repository';
+import { TimingController } from './presentation/timing.controller';
 import { ExchangeModule } from '../exchange/exchange.module';
 import { CATALOG_CURRENCY_READER } from '../dental-catalog/domain/ports/catalog-currency-reader.port';
 import { PrismaCatalogCurrencyReader } from '../dental-catalog/infrastructure/prisma-catalog-currency-reader';
@@ -91,6 +95,8 @@ import { PrismaCatalogCurrencyReader } from '../dental-catalog/infrastructure/pr
     ProfessionalReportsController,
     // DX-260: «Retención» por sede y profesional.
     RetentionController,
+    // DX-275: «Tiempos» (espera, duración real y ocupación).
+    TimingController,
   ],
   providers: [
     GetLocationsComparisonUseCase,
@@ -106,6 +112,7 @@ import { PrismaCatalogCurrencyReader } from '../dental-catalog/infrastructure/pr
     GetProfessionalProductivityUseCase,
     GetNoShowsUseCase,
     GetRetentionUseCase,
+    GetTimingUseCase,
     TokenService,
     TenantContextInterceptor,
     {
@@ -152,6 +159,7 @@ import { PrismaCatalogCurrencyReader } from '../dental-catalog/infrastructure/pr
       useClass: PrismaProfessionalReportsRepository,
     },
     { provide: RETENTION_REPOSITORY, useClass: PrismaRetentionRepository },
+    { provide: TIMING_REPOSITORY, useClass: PrismaTimingRepository },
     { provide: RETENTION_CLOCK, useValue: () => new Date() },
     {
       provide: CATALOG_CURRENCY_READER,
