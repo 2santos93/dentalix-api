@@ -33,6 +33,7 @@ const mother = {
   optedOut: false,
   createdAt: new Date('2026-10-01T12:00:00.000Z'),
   documentText: 'Cédula C01',
+  relationship: 'MOTHER' as const,
 };
 
 const minor: SignatureRecipientInput = {
@@ -54,6 +55,7 @@ describe('a quién va la firma a distancia (DX-243)', () => {
       signerType: 'PATIENT',
       signerName: 'Laura María Castro',
       signerDocument: 'Cédula 1020',
+      signerRelationship: null,
       email: 'laura@example.com',
       greetingName: 'Laura',
       patientFirstName: null,
@@ -77,6 +79,8 @@ describe('a quién va la firma a distancia (DX-243)', () => {
       signerType: 'GUARDIAN',
       signerName: 'Claudia Navarro',
       signerDocument: 'Cédula C01',
+      // DX-060-bis: precarga la relación de la cláusula de representación.
+      signerRelationship: 'MOTHER',
       email: 'claudia@example.com',
       greetingName: 'Claudia',
       patientFirstName: 'Sofía',

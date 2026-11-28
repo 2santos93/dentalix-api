@@ -134,12 +134,12 @@ export class PatientSignatureRequestsController {
     summary:
       'Enviar un consentimiento a firmar o un presupuesto a aceptar a distancia (email)',
     description:
-      'Congela el texto (plantilla, paciente, plan, profesional) y envía por email un enlace de un solo uso que caduca a las 72 h; el documento solo se ve tras un código de 6 dígitos. Un menor (mayoría de la clínica) firma por medio de su responsable. Anula la solicitud anterior del mismo paciente y plantilla aún sin firmar. BUDGET (DX-415): solo odontólogo o ADMIN; congela la foto del presupuesto de un plan «Presentado» y su hash, y anula el enlace anterior del mismo plan; si el plan cambia después, el enlace deja de servir.',
+      'Congela el texto (plantilla, paciente, plan, profesional) y envía por email un enlace de un solo uso que caduca a las 72 h; el documento solo se ve tras un código de 6 dígitos. Un menor (mayoría de la clínica) firma por medio de su responsable; DX-060-bis: el texto abre entonces con la cláusula de representación (nombre, documento y relación del tutor, como en la clínica). Anula la solicitud anterior del mismo paciente y plantilla aún sin firmar. BUDGET (DX-415): solo odontólogo o ADMIN; congela la foto del presupuesto de un plan «Presentado» y su hash, y anula el enlace anterior del mismo plan; si el plan cambia después, el enlace deja de servir.',
   })
   @ApiCreatedResponse({ type: SignatureRequestCreatedDto })
   @ApiBadRequestResponse({
     description:
-      'BUDGET sin plan o sin ítems, sin plantilla, plantilla desactivada, profesional no válido o host no válido',
+      'BUDGET sin plan o sin ítems, sin plantilla, plantilla desactivada, profesional no válido, host no válido o (DX-060-bis) firma un tutor sin nombre o sin documento',
   })
   @ApiUnprocessableEntityResponse({
     description:
@@ -167,6 +167,9 @@ export class PatientSignatureRequestsController {
         treatmentPlanId: dto.treatmentPlanId,
         professionalId: dto.professionalId,
         secondCurrency: dto.secondCurrency,
+        guardianName: dto.guardianName,
+        guardianDocument: dto.guardianDocument,
+        guardianRelationship: dto.guardianRelationship,
       },
       actorOf(req),
       { protocol: this.protocol, host: safeLinkHost(req.tenantHost?.host) },

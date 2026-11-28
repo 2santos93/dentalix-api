@@ -106,7 +106,7 @@ export interface PreviewPatientConsentInput {
   guardianRelationship?: ResponsibleRelationship;
 }
 
-interface Guardian {
+export interface Guardian {
   name: string;
   document: string;
   relationship?: ResponsibleRelationship;
@@ -175,8 +175,17 @@ function requiredTrimmed(value: string | undefined): string | null {
   return trimmed === '' ? null : trimmed;
 }
 
-/** El tutor de la entrada, validado; `null` si firma el paciente. */
-function guardianOf(input: PreviewPatientConsentInput): Guardian | null {
+/**
+ * El tutor de la entrada, validado; `null` si firma el paciente. DX-060-bis:
+ * también lo usa la firma a distancia con un tutor (400 sin nombre o sin
+ * documento, igual que en la clínica).
+ */
+export function guardianOf(
+  input: Pick<
+    PreviewPatientConsentInput,
+    'signerType' | 'guardianName' | 'guardianDocument' | 'guardianRelationship'
+  >,
+): Guardian | null {
   if (input.signerType !== ConsentSignerType.GUARDIAN) return null;
   const name = requiredTrimmed(input.guardianName);
   const document = requiredTrimmed(input.guardianDocument);
@@ -256,18 +265,29 @@ async function prepare(
       : '',
     tratamiento: treatmentOf(context.plan),
   });
-  // DX-060 (m-3): con un tutor, el documento abre diciendo quién firma y por
-  // quién. Se añade tras renderizar: lo que escribió el tutor nunca se
-  // interpreta como variable.
-  const body = guardian
-    ? `${representationClause({
-        representativeName: guardian.name,
-        representativeDocument: guardian.document,
-        relationship: guardian.relationship,
-        patientName,
-      })}\n\n${rendered}`
-    : rendered;
+  const body = withRepresentation(rendered, guardian, patientName);
   return { template, context, title: template.title, body, document, guardian };
+}
+
+/**
+ * DX-060 (m-3): con un tutor, el documento abre diciendo quién firma y por
+ * quién. Se añade tras renderizar: lo que escribió el tutor nunca se
+ * interpreta como variable. DX-060-bis: la firma a distancia con un tutor
+ * congela el texto con este mismo párrafo.
+ */
+export function withRepresentation(
+  rendered: string,
+  guardian: Guardian | null,
+  patientName: string,
+): string {
+  if (!guardian) return rendered;
+  const clause = representationClause({
+    representativeName: guardian.name,
+    representativeDocument: guardian.document,
+    relationship: guardian.relationship,
+    patientName,
+  });
+  return `${clause}\n\n${rendered}`;
 }
 
 /** El documento resuelto, listo para mostrar y sellar. */

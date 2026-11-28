@@ -80,6 +80,11 @@ export class InMemorySignatureRequestRepository implements SignatureRequestRepos
     readonly recipients: Record<string, SignatureRecipientContext> = {},
   ) {}
 
+  private patientNameOf(patientId: string): string {
+    const patient = this.recipients[patientId]?.patient;
+    return patient ? `${patient.firstName} ${patient.lastName}`.trim() : '';
+  }
+
   loadRecipientContext(
     patientId: string,
   ): Promise<SignatureRecipientContext | null> {
@@ -272,7 +277,12 @@ export class InMemorySignatureRequestRepository implements SignatureRequestRepos
     const row = this.rows.find((r) => r.tokenHash === tokenHash);
     return Promise.resolve(
       row
-        ? { request: { ...row }, clinic: this.clinic, location: this.location }
+        ? {
+            request: { ...row },
+            patientName: this.patientNameOf(row.patientId),
+            clinic: this.clinic,
+            location: this.location,
+          }
         : null,
     );
   }

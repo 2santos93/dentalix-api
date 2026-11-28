@@ -238,7 +238,7 @@ describe('Firma a distancia de consentimientos (e2e, DX-243)', () => {
         email: GUARDIAN_EMAIL,
         relationship: 'MOTHER',
         isPayer: false,
-        documentType: 'NATIONAL_ID',
+        docType: 'NATIONAL_ID',
         docNumber: 'C01',
       })
       .expect(201);
@@ -826,6 +826,110 @@ describe('Firma a distancia de consentimientos (e2e, DX-243)', () => {
       signerName: 'Claudia Navarro',
       signerDocument: expect.stringContaining('C01') as string,
     });
+  });
+
+  // DX-060-bis: la firma a distancia con tutor lleva la misma cláusula de
+  // representación que la firma en la clínica, dentro del texto sellado.
+  it('DX-060-bis: con tutor, el enlace lleva la cláusula de representación (precargada de la ficha o corregida al enviar) y la página dice por quién firma', async () => {
+    const options = await as(clinicA, reception)
+      .get(`/patients/${minorId}/signature-requests/options`)
+      .expect(200);
+    const recipientOption = (
+      options.body as {
+        recipient: { signerDocument: string; signerRelationship: string };
+      }
+    ).recipient;
+    expect(recipientOption).toMatchObject({
+      signerType: 'GUARDIAN',
+      signerName: 'Claudia Navarro',
+      signerRelationship: 'MOTHER',
+    });
+    expect(recipientOption.signerDocument).toContain('C01');
+
+    // Sin datos del tutor en la petición: los del responsable en la ficha.
+    const fromRecord = await send(minorId, GUARDIAN_EMAIL);
+    const fromRecordRow = await raw.signatureRequest.findUniqueOrThrow({
+      where: { id: fromRecord.created.id },
+    });
+    expect(fromRecordRow.body).toMatch(
+      new RegExp(
+        '^Firma en representación del paciente: Claudia Navarro, identificado\\(a\\) con [^,]*C01, ' +
+          'otorga este consentimiento en nombre de Sofía Ortiz, como su madre\\. ' +
+          'Lo que este documento dice en primera persona lo declara Claudia Navarro en representación de Sofía Ortiz\\.\n\nYo, Sofía Ortiz',
+      ),
+    );
+
+    // Corregidos al enviar: el texto y el firmante sellado los usan.
+    const { created, token } = await send(minorId, GUARDIAN_EMAIL, {
+      guardianName: 'Claudia Navarro de Ortiz',
+      guardianDocument: 'V-20111222',
+      guardianRelationship: 'LEGAL_GUARDIAN',
+    });
+    expect(created).toMatchObject({
+      signerType: 'GUARDIAN',
+      signerName: 'Claudia Navarro de Ortiz',
+    });
+    const row = await raw.signatureRequest.findUniqueOrThrow({
+      where: { id: created.id },
+    });
+    const clause =
+      'Firma en representación del paciente: Claudia Navarro de Ortiz, identificado(a) con V-20111222, ' +
+      'otorga este consentimiento en nombre de Sofía Ortiz, como su tutor legal. Lo que este documento ' +
+      'dice en primera persona lo declara Claudia Navarro de Ortiz en representación de Sofía Ortiz.';
+    expect(row.body.startsWith(`${clause}\n\n`)).toBe(true);
+    expect(row.signerDocument).toBe('V-20111222');
+
+    const code = await requestCode(token, GUARDIAN_EMAIL);
+    const session = await verify(token, code);
+    const doc = await pub(clinicA.host)
+      .get(`${token}/document`, session)
+      .expect(200);
+    expect(doc.body).toMatchObject({
+      body: row.body,
+      signerType: 'GUARDIAN',
+      signerName: 'Claudia Navarro de Ortiz',
+      signerDocumentRequired: false,
+      representedPatientName: 'Sofía Ortiz',
+    });
+    const signed = await pub(clinicA.host)
+      .post(`${token}/sign`, { signature: SIGNATURE, accepted: true }, session)
+      .expect(200);
+    expect(signed.body).toMatchObject({
+      representedPatientName: 'Sofía Ortiz',
+      signerDocument: 'V-20111222',
+    });
+    const consent = await raw.patientConsent.findFirstOrThrow({
+      where: { signatureRequestId: created.id },
+    });
+    expect(consent).toMatchObject({
+      body: row.body,
+      signerName: 'Claudia Navarro de Ortiz',
+      signerDocument: 'V-20111222',
+    });
+  });
+
+  it('DX-060-bis: con tutor, un nombre o documento en blanco o una relación inválida es 400 y no se crea nada', async () => {
+    const before = await raw.signatureRequest.count({
+      where: { patientId: minorId },
+    });
+    for (const extra of [
+      { guardianName: '   ' },
+      { guardianDocument: '' },
+      { guardianRelationship: 'VECINO' },
+    ]) {
+      await as(clinicA, reception)
+        .post(`/patients/${minorId}/signature-requests`, {
+          type: 'CONSENT',
+          channel: 'EMAIL',
+          templateId,
+          professionalId: dentistId,
+          ...extra,
+        })
+        .expect(400);
+    }
+    expect(
+      await raw.signatureRequest.count({ where: { patientId: minorId } }),
+    ).toBe(before);
   });
 
   // DX-019-ter: el consentimiento a distancia congela el logo del instante de

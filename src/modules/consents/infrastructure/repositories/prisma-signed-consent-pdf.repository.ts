@@ -61,6 +61,7 @@ export class PrismaSignedConsentPdfRepository
             },
           },
           signedPdf: { select: { status: true, notifyPatient: true } },
+          patient: { select: { firstName: true, lastName: true } },
         },
       });
       if (!row?.signatureRequest) return null;
@@ -94,6 +95,8 @@ export class PrismaSignedConsentPdfRepository
               signerType: row.signerType,
               signerName: row.signerName,
               signerDocument: row.signerDocument,
+              patientName:
+                `${row.patient.firstName} ${row.patient.lastName}`.trim(),
               professionalName: row.professionalName,
               patientSignature: row.patientSignature,
               professionalSignature: counter.professionalSignature,

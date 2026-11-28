@@ -203,6 +203,7 @@ export class PdfkitSignedConsentPdfRenderer implements SignedConsentPdfRenderer 
       PATIENT_SIGNATURE_HEADING,
       model.signerLabel,
       model.patientSignature,
+      model.signerOnBehalfOf ?? null,
     );
     await this.signature(
       doc,
@@ -219,6 +220,7 @@ export class PdfkitSignedConsentPdfRenderer implements SignedConsentPdfRenderer 
     heading: string,
     name: string,
     pngBase64: string,
+    note: string | null = null,
   ): Promise<void> {
     const needed = SIGNATURE_BOX.height + 50;
     if (doc.y + needed > doc.page.height - MARGIN) doc.addPage();
@@ -233,6 +235,12 @@ export class PdfkitSignedConsentPdfRenderer implements SignedConsentPdfRenderer 
     await imageWritten(image);
     doc.y = top + SIGNATURE_BOX.height + 4;
     paint(doc, name, 'regular', 10);
+    // DX-060-bis: «En representación de {paciente}» bajo la firma del tutor.
+    if (note) {
+      doc.fillColor(MUTED);
+      paint(doc, note, 'regular', 9);
+      doc.fillColor('black');
+    }
     doc.moveDown();
   }
 

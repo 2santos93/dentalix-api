@@ -222,6 +222,13 @@ export class PublicSignatureDocumentDto {
       'Firma un responsable sin documento registrado: debe escribirlo al firmar',
   })
   signerDocumentRequired!: boolean;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-060-bis: si firma el responsable, el nombre del paciente por quien firma (bajo la firma: «En representación de {paciente}»); null si firma el paciente',
+  })
+  representedPatientName!: string | null;
   @ApiProperty() professionalName!: string;
   @ApiProperty({ format: 'date-time' }) sentAt!: Date;
   @ApiProperty({ format: 'date-time' }) expiresAt!: Date;

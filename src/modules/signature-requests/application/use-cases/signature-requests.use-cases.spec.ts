@@ -9,7 +9,10 @@ import {
 import { FixedDocumentTypeNamesReader } from '../../../document-type-names/__fixtures__/fixed-document-type-names.reader';
 import { InMemoryConsentTemplateRepository } from '../../../consents/application/__fixtures__/in-memory-consent-templates';
 import { InMemoryPatientConsentRepository } from '../../../consents/application/__fixtures__/in-memory-patient-consents';
-import { ConsentDocumentRenderer } from '../../../consents/application/use-cases/patient-consents.use-cases';
+import {
+  ConsentDocumentRenderer,
+  GUARDIAN_REQUIRED_MESSAGE,
+} from '../../../consents/application/use-cases/patient-consents.use-cases';
 import { computeRemoteConsentHash } from '../../../consents/domain/consent-hash';
 import type {
   SignatureBudgetAcceptedEmailVars,
@@ -179,6 +182,7 @@ function setup(
     confirmations,
     repo,
     consents,
+    templates,
     template,
     tenantContext,
     links,
@@ -251,6 +255,35 @@ function tokenOf(ctx: Ctx, index = -1): string {
   const match = /\/firmar\/([A-Za-z0-9_-]{43})$/.exec(url);
   if (!match) throw new Error(`URL sin token: ${url}`);
   return match[1];
+}
+
+/** DX-060-bis: Ana, menor, con su madre Claudia como responsable. */
+function minorWithResponsible(
+  document: SignatureRecipientContext['responsibles'][number]['document'] = {
+    docType: 'NATIONAL_ID',
+    docTypeLabel: null,
+    docNumber: 'V-20111222',
+  },
+): SignatureRecipientContext {
+  return recipient(
+    {
+      birthDate: new Date('2015-02-11T00:00:00.000Z'),
+      email: 'familia@example.com',
+    },
+    [
+      {
+        id: 'r1',
+        name: 'Claudia Navarro',
+        email: 'claudia@example.com',
+        isPayer: false,
+        receivesNotices: true,
+        optedOut: false,
+        createdAt: new Date('2026-10-01T12:00:00.000Z'),
+        document,
+        relationship: 'MOTHER',
+      },
+    ],
+  );
 }
 
 async function send(ctx: Ctx, actor = DENTIST, extra = {}) {
@@ -379,6 +412,171 @@ describe('enviar a firmar a distancia (DX-243)', () => {
     expect(ctx.links[0].vars).toMatchObject({
       recipientFirstName: 'Claudia',
       patientFirstName: 'Ana',
+    });
+  });
+
+  describe('DX-060-bis: firma a distancia con tutor', () => {
+    const clause = (tutor: string, doc: string, relation: string) =>
+      `Firma en representación del paciente: ${tutor}, identificado(a) con ${doc}, ` +
+      `otorga este consentimiento en nombre de Ana Pérez, como su ${relation}. Lo que este documento ` +
+      `dice en primera persona lo declara ${tutor} en representación de Ana Pérez.`;
+    const rendered =
+      'Yo, Ana Pérez (Documento nacional 1020304050), autorizo a Dra. Laura Gómez.';
+
+    it('sin datos en la petición: el texto congelado abre con la cláusula, con los datos del responsable en la ficha', async () => {
+      const ctx = setup();
+      ctx.repo.recipients.p1 = minorWithResponsible();
+      await send(ctx);
+      const [row] = ctx.repo.rows;
+      expect(row.body).toBe(
+        `${clause('Claudia Navarro', 'Documento nacional V-20111222', 'madre')}\n\n${rendered}`,
+      );
+      expect(row).toMatchObject({
+        signerType: 'GUARDIAN',
+        signerName: 'Claudia Navarro',
+        signerDocument: 'Documento nacional V-20111222',
+        destination: 'claudia@example.com',
+      });
+    });
+
+    it('con nombre, documento y relación en la petición: el texto y el firmante sellado los usan (recortados)', async () => {
+      const ctx = setup();
+      ctx.repo.recipients.p1 = minorWithResponsible();
+      await send(ctx, DENTIST, {
+        guardianName: '  Claudia Navarro de Pérez ',
+        guardianDocument: ' V-20.111.222 ',
+        guardianRelationship: 'LEGAL_GUARDIAN',
+      });
+      const [row] = ctx.repo.rows;
+      expect(row.body).toBe(
+        `${clause('Claudia Navarro de Pérez', 'V-20.111.222', 'tutor legal')}\n\n${rendered}`,
+      );
+      expect(row).toMatchObject({
+        signerName: 'Claudia Navarro de Pérez',
+        signerDocument: 'V-20.111.222',
+        // El enlace sigue yendo al email del responsable.
+        destination: 'claudia@example.com',
+      });
+    });
+
+    it('es el mismo texto que la firma en la clínica con el mismo tutor', async () => {
+      const ctx = setup();
+      ctx.repo.recipients.p1 = minorWithResponsible();
+      await send(ctx, DENTIST, { guardianRelationship: 'FATHER' });
+      const inClinic = await new ConsentDocumentRenderer(
+        ctx.templates,
+        ctx.consents,
+        new FixedDocumentTypeNamesReader(),
+      ).render(
+        'p1',
+        {
+          templateId: ctx.template.id,
+          signerType: 'GUARDIAN',
+          guardianName: 'Claudia Navarro',
+          guardianDocument: 'Documento nacional V-20111222',
+          guardianRelationship: 'FATHER',
+        },
+        'dentist-1',
+        SENT_AT,
+      );
+      expect(ctx.repo.rows[0].body).toBe(inClinic.body);
+    });
+
+    it('sin documento del tutor (ni en la ficha ni en la petición) o con el nombre en blanco: 400 y no se crea ni se envía nada', async () => {
+      const ctx = setup();
+      ctx.repo.recipients.p1 = minorWithResponsible({
+        docType: null,
+        docTypeLabel: null,
+        docNumber: null,
+      });
+      await expect(send(ctx)).rejects.toThrow(GUARDIAN_REQUIRED_MESSAGE);
+      await expect(
+        send(ctx, DENTIST, { guardianName: '   ', guardianDocument: 'V-1' }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(ctx.repo.rows).toHaveLength(0);
+      expect(ctx.links).toHaveLength(0);
+    });
+
+    it('un adulto firma por sí mismo: los datos de tutor se ignoran y el texto no lleva cláusula', async () => {
+      const ctx = setup();
+      await send(ctx, DENTIST, {
+        guardianName: 'Claudia Navarro',
+        guardianDocument: 'V-1',
+        guardianRelationship: 'MOTHER',
+      });
+      expect(ctx.repo.rows[0]).toMatchObject({
+        body: rendered,
+        signerType: 'PATIENT',
+        signerName: 'Ana Pérez',
+      });
+    });
+
+    it('las opciones del modal traen el documento y la relación del responsable para precargarlos', async () => {
+      const ctx = setup();
+      ctx.repo.recipients.p1 = minorWithResponsible();
+      expect((await ctx.options.execute('p1', RECEPTION)).recipient).toEqual({
+        allowed: true,
+        reason: null,
+        destinationMasked: 'cl***@example.com',
+        signerType: 'GUARDIAN',
+        signerName: 'Claudia Navarro',
+        signerDocument: 'Documento nacional V-20111222',
+        signerRelationship: 'MOTHER',
+        minor: true,
+      });
+      const adult = setup();
+      expect(
+        (await adult.options.execute('p1', DENTIST)).recipient,
+      ).toMatchObject({
+        signerType: 'PATIENT',
+        signerDocument: null,
+        signerRelationship: null,
+      });
+    });
+
+    it('la página del enlace: el texto con la cláusula y por quién firma; la copia firmada también', async () => {
+      const ctx = setup();
+      ctx.repo.recipients.p1 = minorWithResponsible();
+      const { token, session } = await verified(ctx);
+      const doc = await ctx.inTenant(() =>
+        ctx.document.execute(token, session),
+      );
+      expect(
+        doc.body.startsWith(
+          clause('Claudia Navarro', 'Documento nacional V-20111222', 'madre'),
+        ),
+      ).toBe(true);
+      expect(doc).toMatchObject({
+        signerType: 'GUARDIAN',
+        signerDocumentRequired: false,
+        representedPatientName: 'Ana Pérez',
+      });
+      const copy = await ctx.inTenant(() =>
+        ctx.sign.execute(
+          token,
+          session,
+          { signature: PNG, accepted: true },
+          EVIDENCE,
+        ),
+      );
+      expect(copy).toMatchObject({
+        representedPatientName: 'Ana Pérez',
+        signerDocument: 'Documento nacional V-20111222',
+      });
+      expect(ctx.repo.consents[0]).toMatchObject({
+        body: doc.body,
+        signerName: 'Claudia Navarro',
+        signerDocument: 'Documento nacional V-20111222',
+      });
+    });
+
+    it('si firma el paciente, la página no dice «en representación de»', async () => {
+      const ctx = setup();
+      const { token, session } = await verified(ctx);
+      const doc = await ctx.inTenant(() =>
+        ctx.document.execute(token, session),
+      );
+      expect(doc.representedPatientName).toBeNull();
     });
   });
 
@@ -772,22 +970,16 @@ describe('enlace público, código y firma (DX-243)', () => {
 
   it('sin confirmar la lectura, con una firma en blanco o sin el documento del responsable: 400 y nada se guarda', async () => {
     const ctx = setup();
-    ctx.repo.recipients.p1 = recipient(
-      { birthDate: new Date('2015-02-11T00:00:00.000Z') },
-      [
-        {
-          id: 'r1',
-          name: 'Claudia Navarro',
-          email: 'claudia@example.com',
-          isPayer: false,
-          receivesNotices: true,
-          optedOut: false,
-          createdAt: new Date('2026-10-01T12:00:00.000Z'),
-          document: { docType: null, docTypeLabel: null, docNumber: null },
-        },
-      ],
+    ctx.repo.recipients.p1 = minorWithResponsible();
+    await send(ctx);
+    // Un enlace anterior a DX-060-bis, enviado sin el documento del
+    // responsable: lo escribe al firmar.
+    ctx.repo.rows[0].signerDocument = null;
+    const token = tokenOf(ctx);
+    await ctx.inTenant(() => ctx.code.execute(token, EVIDENCE));
+    const { sessionToken: session } = await ctx.inTenant(() =>
+      ctx.verify.execute(token, ctx.codes.at(-1)!.vars.code, EVIDENCE),
     );
-    const { token, session } = await verified(ctx);
     const doc = await ctx.inTenant(() => ctx.document.execute(token, session));
     expect(doc.signerDocumentRequired).toBe(true);
     for (const input of [

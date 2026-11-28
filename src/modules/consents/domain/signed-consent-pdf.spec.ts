@@ -172,6 +172,24 @@ describe('buildSignedConsentPdfModel (DX-422)', () => {
     expect(value('Navegador de quien firmó')).toBe('No registrado');
   });
 
+  it('DX-060-bis: si firmó el responsable, bajo su firma va «En representación de {paciente}» (fuera de las evidencias)', () => {
+    const guardian = build(
+      source({
+        signerType: 'GUARDIAN',
+        signerName: 'Claudia Navarro',
+        signerDocument: 'V-20111222',
+        patientName: 'Ana Pérez',
+      }),
+    );
+    expect(guardian.signerOnBehalfOf).toBe('En representación de Ana Pérez');
+    expect(
+      guardian.evidence.find((row) => row.label === 'Firmado por')?.value,
+    ).toBe('Claudia Navarro (responsable) · V-20111222');
+    expect(
+      build(source({ patientName: 'Laura Castro' })).signerOnBehalfOf,
+    ).toBeNull();
+  });
+
   it('se niega si el hash guardado no coincide con lo firmado (no archiva un documento alterado)', () => {
     expect(() => build(tampered({ body: 'Otro texto' }))).toThrow(
       SignedConsentPdfSourceError,

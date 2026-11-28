@@ -2,12 +2,20 @@ import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   ClinicRole,
   ConsentSignerType,
+  ResponsibleRelationship,
   SignatureRequestChannel,
   SignatureRequestType,
   SignedConsentPdfStatus,
   TreatmentPlanStatus,
 } from '@prisma/client';
-import { IsEnum, IsOptional, IsUUID, Matches } from 'class-validator';
+import {
+  IsEnum,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Matches,
+  MaxLength,
+} from 'class-validator';
 import { SECOND_CURRENCY_FORMAT_MESSAGE } from '../../application/budget-presentation';
 import { SIGNATURE_REQUEST_STATUSES } from '../../domain/signature-request-status';
 
@@ -69,6 +77,36 @@ export class CreateSignatureRequestDto {
   @IsOptional()
   @Matches(/^[A-Z]{3}$/, { message: SECOND_CURRENCY_FORMAT_MESSAGE })
   secondCurrency?: string;
+
+  @ApiPropertyOptional({
+    maxLength: 200,
+    description:
+      'DX-060-bis (CONSENT a un menor, firma su responsable): nombre del tutor que firma. Sin él, el del responsable en la ficha.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  guardianName?: string;
+
+  @ApiPropertyOptional({
+    maxLength: 60,
+    description:
+      'DX-060-bis: documento del tutor. Sin él, el del responsable en la ficha; si tampoco consta, 400 «Si firma un tutor, su nombre y su documento son obligatorios».',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  guardianDocument?: string;
+
+  @ApiPropertyOptional({
+    enum: ResponsibleRelationship,
+    enumName: 'ResponsibleRelationship',
+    description:
+      'DX-060-bis: relación del tutor con el paciente. Sin ella, la del responsable en la ficha. El texto congelado abre con la cláusula de representación (la misma que en la clínica).',
+  })
+  @IsOptional()
+  @IsEnum(ResponsibleRelationship)
+  guardianRelationship?: ResponsibleRelationship;
 }
 
 export class SignatureRequestDto {
@@ -243,6 +281,21 @@ class SignatureRecipientOptionDto {
   @ApiProperty({ ...SIGNER_PROPERTY, nullable: true })
   signerType!: ConsentSignerType | null;
   @ApiProperty({ type: String, nullable: true }) signerName!: string | null;
+  @ApiProperty({
+    type: String,
+    nullable: true,
+    description:
+      'DX-060-bis: documento del responsable que firma (GUARDIAN), tal como lo pinta el texto; null si firma el paciente o no consta',
+  })
+  signerDocument!: string | null;
+  @ApiProperty({
+    enum: ResponsibleRelationship,
+    enumName: 'ResponsibleRelationship',
+    nullable: true,
+    description:
+      'DX-060-bis: relación del responsable que firma con el paciente (GUARDIAN); null si firma el paciente',
+  })
+  signerRelationship!: ResponsibleRelationship | null;
   @ApiProperty({
     description:
       'Menor según la mayoría de edad de la clínica: firma su responsable',

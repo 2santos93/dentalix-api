@@ -6,6 +6,7 @@ import type {
   ContactChannel,
   DocumentType,
   Prisma,
+  ResponsibleRelationship,
   SignatureRequestChannel,
   SignatureRequestType,
   TreatmentPlanStatus,
@@ -39,6 +40,11 @@ export interface SignatureRecipientContext {
       docTypeLabel: string | null;
       docNumber: string | null;
     };
+    /**
+     * DX-060-bis: relación con el paciente (precarga la del tutor que firma a
+     * distancia). `null` en un responsable sin ella.
+     */
+    relationship?: ResponsibleRelationship | null;
   })[];
   /** DX-342: última revisión del paso a la mayoría de edad. */
   majorityReview: MajorityReviewRecord | null;
